@@ -3,7 +3,7 @@ Texture2D<float2> cursorTex : register(t1);
 
 SamplerState pointSampler : register(s0);
 
-float4 main(float2 coord : TEXCOORD) : SV_TARGET {
+float4 main(noperspective float2 coord : TEXCOORD) : SV_TARGET {
 	float2 mask = cursorTex.Sample(pointSampler, coord);
 	
 	if (mask.x > 0.5f) {

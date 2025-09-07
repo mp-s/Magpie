@@ -1,9 +1,9 @@
 void main(
-	float4 pos : SV_POSITION,
+	float2 pos : POSITION,
 	float2 coord : TEXCOORD,
-	out float2 outCoord : TEXCOORD,
-	out float4 outPos : SV_POSITION
+	out noperspective float2 outCoord : TEXCOORD,
+	out noperspective float4 outPos : SV_POSITION
 ) {
-	outPos = pos;
+	outPos = float4(pos, 0, 1);
 	outCoord = coord;
 }

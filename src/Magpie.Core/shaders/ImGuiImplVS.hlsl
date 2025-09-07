@@ -3,14 +3,14 @@ cbuffer vertexBuffer : register(b0) {
 };
 
 void main(
-	float4 pos : SV_POSITION,
+	float2 pos : POSITION,
 	float2 coord : TEXCOORD,
 	float4 color : COLOR,
-	out float2 outCoord : TEXCOORD,
-	out float4 outColor : COLOR,
-	out float4 outPos : SV_POSITION
+	out noperspective float2 outCoord : TEXCOORD,
+	out noperspective float4 outColor : COLOR,
+	out noperspective float4 outPos : SV_POSITION
 ) {
-	outPos = mul(projectionMatrix, float4(pos.xy, 0.f, 1.f));
+	outPos = mul(projectionMatrix, float4(pos, 0, 1));
 	outCoord = coord;
 	outColor = color;
 }
