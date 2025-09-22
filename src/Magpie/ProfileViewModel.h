@@ -142,6 +142,9 @@ struct ProfileViewModel : ProfileViewModelT<ProfileViewModel>,
 	hstring LaunchParameters() const noexcept;
 	void LaunchParameters(const hstring& value);
 
+	int DestAlignment() const noexcept;
+	void DestAlignment(int value);
+
 	bool IsDirectFlipDisabled() const noexcept;
 	void IsDirectFlipDisabled(bool value);
 
