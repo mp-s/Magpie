@@ -87,11 +87,14 @@ struct HomeViewModel : HomeViewModelT<HomeViewModel>, wil::notify_property_chang
 	void LocateTouchHelperLogs() noexcept;
 	void LocateUpdaterLogs() noexcept;
 
+	bool IsDebugMode() const noexcept;
+	void IsDebugMode(bool value);
+
 	bool IsBenchmarkMode() const noexcept;
 	void IsBenchmarkMode(bool value);
 
-	bool IsDebugMode() const noexcept;
-	void IsDebugMode(bool value);
+	bool IsTopmostDisabled() const noexcept;
+	void IsTopmostDisabled(bool value);
 
 	bool IsEffectCacheDisabled() const noexcept;
 	void IsEffectCacheDisabled(bool value);

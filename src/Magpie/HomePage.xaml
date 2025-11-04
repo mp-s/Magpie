@@ -297,6 +297,10 @@
 							          IsChecked="{x:Bind ViewModel.IsBenchmarkMode, Mode=TwoWay}" />
 						</local:SettingsCard>
 						<local:SettingsCard ContentAlignment="Left">
+							<CheckBox x:Uid="Home_Advanced_DeveloperOptions_DisableTopmost"
+							          IsChecked="{x:Bind ViewModel.IsTopmostDisabled, Mode=TwoWay}" />
+						</local:SettingsCard>
+						<local:SettingsCard ContentAlignment="Left">
 							<CheckBox x:Uid="Home_Advanced_DeveloperOptions_DisableEffectCache"
 							          IsChecked="{x:Bind ViewModel.IsEffectCacheDisabled, Mode=TwoWay}" />
 						</local:SettingsCard>

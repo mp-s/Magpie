@@ -163,9 +163,10 @@ struct ScalingFlags {
 	// 只影响缩放行为，Magpie.Core 不负责启动 TouchHelper.exe
 	static constexpr uint32_t TouchSupportEnabled = 1 << 17;
 	static constexpr uint32_t InlineParams = 1 << 18;
-	static constexpr uint32_t FP16Disabled = 1 << 19;
+	static constexpr uint32_t DisableFP16 = 1 << 19;
 	static constexpr uint32_t BenchmarkMode = 1 << 20;
 	static constexpr uint32_t DeveloperMode = 1 << 21;
+	static constexpr uint32_t DisableTopmost = 1 << 22;
 };
 
 struct ScalingOptions {
@@ -173,7 +174,8 @@ struct ScalingOptions {
 	DEFINE_FLAG_ACCESSOR(IsDeveloperMode, ScalingFlags::DeveloperMode, flags)
 	DEFINE_FLAG_ACCESSOR(IsDebugMode, ScalingFlags::DebugMode, flags)
 	DEFINE_FLAG_ACCESSOR(IsBenchmarkMode, ScalingFlags::BenchmarkMode, flags)
-	DEFINE_FLAG_ACCESSOR(IsFP16Disabled, ScalingFlags::FP16Disabled, flags)
+	DEFINE_FLAG_ACCESSOR(IsTopmostDisabled, ScalingFlags::DisableTopmost, flags)
+	DEFINE_FLAG_ACCESSOR(IsFP16Disabled, ScalingFlags::DisableFP16, flags)
 	DEFINE_FLAG_ACCESSOR(IsEffectCacheDisabled, ScalingFlags::DisableEffectCache, flags)
 	DEFINE_FLAG_ACCESSOR(IsFontCacheDisabled, ScalingFlags::DisableFontCache, flags)
 	DEFINE_FLAG_ACCESSOR(IsSaveEffectSources, ScalingFlags::SaveEffectSources, flags)

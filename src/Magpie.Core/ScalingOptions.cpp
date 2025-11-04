@@ -41,6 +41,7 @@ void ScalingOptions::Log() const noexcept {
 	IsWindowedMode: {}
 	IsDebugMode: {}
 	IsBenchmarkMode: {}
+	IsTopmostDisabled: {}
 	IsFP16Disabled: {}
 	IsEffectCacheDisabled: {}
 	IsFontCacheDisabled: {}
@@ -74,6 +75,7 @@ void ScalingOptions::Log() const noexcept {
 		IsWindowedMode(),
 		IsDebugMode(),
 		IsBenchmarkMode(),
+		IsTopmostDisabled(),
 		IsFP16Disabled(),
 		IsEffectCacheDisabled(),
 		IsFontCacheDisabled(),

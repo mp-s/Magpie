@@ -712,7 +712,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		// 阻止 OS 修改置顶状态。当源窗口中途置顶/取消置顶时，OS 会试图修改缩放窗口的置顶
 		// 状态，这不是我们想要的。
 		if (!(windowPos.flags & SWP_NOZORDER) && !_options.IsDebugMode()) {
-			if (_srcTracker.IsFocused() || IsTopmostWindow(_srcTracker.Handle())) {
+			if (_CalcTopmostState()) {
 				if (windowPos.hwndInsertAfter != HWND_TOP) {
 					windowPos.hwndInsertAfter = HWND_TOPMOST;
 				}
@@ -1863,22 +1863,6 @@ void ScalingWindow::_UpdateFrameMargins() const noexcept {
 	DwmExtendFrameIntoClientArea(Handle(), &margins);
 }
 
-static void SetTopmostState(HWND hWnd, bool topmost) noexcept {
-	if (IsTopmostWindow(hWnd) == topmost) {
-		return;
-	}
-
-	// 由于同步问题可能需要尝试多次
-	for (int i = 0; i < 10; ++i) {
-		SetWindowPos(hWnd, topmost ? HWND_TOPMOST : HWND_NOTOPMOST,
-			0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
-
-		if (IsTopmostWindow(hWnd) == topmost) {
-			return;
-		}
-	}
-}
-
 void ScalingWindow::_UpdateFocusState() const noexcept {
 	if (_options.IsWindowedMode()) {
 		// 根据源窗口状态绘制非客户区，我们必须自己控制非客户区是绘制成焦点状态还是非焦点
@@ -1893,21 +1877,21 @@ void ScalingWindow::_UpdateFocusState() const noexcept {
 			return;
 		}
 
-		// 源窗口位于前台时应将缩放窗口置顶，这是为了防止有些窗口突破 OS 维护的所有者关系顺
-		// 序，如 GH#1232；如果源窗口不在前台则取消置顶（除非源窗口是置顶的），并确保缩放窗
-		// 口刚好在源窗口前以防遮挡其他窗口。
-		//
-		// 这里确实搞得很复杂，是我反复实验得到的，可以确保可靠性。切换前台窗口并非原子操作，
-		// 成为前台窗口和被放到 Z 轴顶部有一点间隔，这就导致了同步问题。
-		if (_srcTracker.IsFocused()) {
-			// 将缩放窗口置顶
-			SetTopmostState(Handle(), true);
+		const bool topmost = _CalcTopmostState();
+		if (IsTopmostWindow(Handle()) != topmost) {
+			// 由于同步问题可能需要尝试多次
+			for (int i = 0; i < 10; ++i) {
+				SetWindowPos(Handle(), topmost ? HWND_TOPMOST : HWND_NOTOPMOST,
+					0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
 
-			if (_options.IsWindowedMode()) {
-				// 确保源窗口在最前。这一步是有必要的，OS 有几率失败
-				SetWindowPos(_srcTracker.Handle(), HWND_TOP, 0, 0, 0, 0,
-					SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
-			} else {
+				if (IsTopmostWindow(Handle()) == topmost) {
+					break;
+				}
+			}
+		}
+
+		if (_srcTracker.IsFocused()) {
+			if (!_options.IsWindowedMode()) {
 				// 全屏模式缩放时确保缩放窗口在所有置顶窗口之上，这使不支持 MPO 的显卡更容易激
 				// 活 DirectFlip。
 				HDWP hDwp = BeginDeferWindowPos(2);
@@ -1920,9 +1904,6 @@ void ScalingWindow::_UpdateFocusState() const noexcept {
 				}
 			}
 		} else {
-			// 缩放窗口的置顶状态应与源窗口相同
-			SetTopmostState(Handle(), IsTopmostWindow(_srcTracker.Handle()));
-
 			if (const HWND hwndFore = GetForegroundWindow()) {
 				if (!SetWindowPos(hwndFore, HWND_TOP, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)) {
 					// 如果前台窗口权限更高，SetWindowPos 会失败。这时用其他方法将缩放窗口放到
@@ -1946,6 +1927,13 @@ void ScalingWindow::_UpdateFocusState() const noexcept {
 		// lParam 传 1 表示转到后台而非结束缩放
 		PostMessage(HWND_BROADCAST, WM_MAGPIE_SCALINGCHANGED, 0, 1);
 	}
+}
+
+bool ScalingWindow::_CalcTopmostState() const noexcept {
+	// 源窗口位于前台时应将缩放窗口置顶，这是为了防止有些窗口突破 OS 维护的所有者关系顺
+	// 序，如 GH#1232；如果源窗口不在前台则取消置顶（除非源窗口是置顶的）。
+	return (_srcTracker.IsFocused() && !_options.IsTopmostDisabled()) ||
+		IsTopmostWindow(_srcTracker.Handle());
 }
 
 bool ScalingWindow::_IsBorderless() const noexcept {

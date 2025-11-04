@@ -62,6 +62,7 @@ struct _AppSettingsData {
 	bool _isDeveloperMode = false;
 	bool _isDebugMode = false;
 	bool _isBenchmarkMode = false;
+	bool _isTopmostDisabled = false;
 	bool _isEffectCacheDisabled = false;
 	bool _isFontCacheDisabled = false;
 	bool _isSaveEffectSources = false;
@@ -158,6 +159,15 @@ public:
 
 	void IsBenchmarkMode(bool value) noexcept {
 		_isBenchmarkMode = value;
+		SaveAsync();
+	}
+
+	bool IsTopmostDisabled() const noexcept {
+		return _isTopmostDisabled;
+	}
+
+	void IsTopmostDisabled(bool value) noexcept {
+		_isTopmostDisabled = value;
 		SaveAsync();
 	}
 

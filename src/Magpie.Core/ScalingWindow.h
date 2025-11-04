@@ -153,6 +153,8 @@ private:
 
 	void _UpdateFocusState() const noexcept;
 
+	bool _CalcTopmostState() const noexcept;
+
 	bool _IsBorderless() const noexcept;
 
 	void _UpdateRendererRect() noexcept;

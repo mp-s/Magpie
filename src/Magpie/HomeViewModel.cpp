@@ -454,6 +454,21 @@ void HomeViewModel::LocateUpdaterLogs() noexcept {
 	LocateTempLogs(CommonSharedConstants::UPDATER_LOG_NAME);
 }
 
+bool HomeViewModel::IsDebugMode() const noexcept {
+	return AppSettings::Get().IsDebugMode();
+}
+
+void HomeViewModel::IsDebugMode(bool value) {
+	AppSettings& settings = AppSettings::Get();
+
+	if (settings.IsDebugMode() == value) {
+		return;
+	}
+
+	settings.IsDebugMode(value);
+	RaisePropertyChanged(L"IsDebugMode");
+}
+
 bool HomeViewModel::IsBenchmarkMode() const noexcept {
 	return AppSettings::Get().IsBenchmarkMode();
 }
@@ -469,19 +484,19 @@ void HomeViewModel::IsBenchmarkMode(bool value) {
 	RaisePropertyChanged(L"IsBenchmarkMode");
 }
 
-bool HomeViewModel::IsDebugMode() const noexcept {
-	return AppSettings::Get().IsDebugMode();
+bool HomeViewModel::IsTopmostDisabled() const noexcept {
+	return AppSettings::Get().IsTopmostDisabled();
 }
 
-void HomeViewModel::IsDebugMode(bool value) {
+void HomeViewModel::IsTopmostDisabled(bool value) {
 	AppSettings& settings = AppSettings::Get();
 
-	if (settings.IsDebugMode() == value) {
+	if (settings.IsTopmostDisabled() == value) {
 		return;
 	}
 
-	settings.IsDebugMode(value);
-	RaisePropertyChanged(L"IsDebugMode");
+	settings.IsTopmostDisabled(value);
+	RaisePropertyChanged(L"IsTopmostDisabled");
 }
 
 bool HomeViewModel::IsEffectCacheDisabled() const noexcept {
