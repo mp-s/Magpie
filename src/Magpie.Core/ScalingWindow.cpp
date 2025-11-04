@@ -1863,6 +1863,22 @@ void ScalingWindow::_UpdateFrameMargins() const noexcept {
 	DwmExtendFrameIntoClientArea(Handle(), &margins);
 }
 
+static void SetTopmostState(HWND hWnd, bool topmost) noexcept {
+	if (IsTopmostWindow(hWnd) == topmost) {
+		return;
+	}
+
+	// 由于同步问题可能需要尝试多次
+	for (int i = 0; i < 10; ++i) {
+		SetWindowPos(hWnd, topmost ? HWND_TOPMOST : HWND_NOTOPMOST,
+			0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
+
+		if (IsTopmostWindow(hWnd) == topmost) {
+			return;
+		}
+	}
+}
+
 void ScalingWindow::_UpdateFocusState() const noexcept {
 	if (_options.IsWindowedMode()) {
 		// 根据源窗口状态绘制非客户区，我们必须自己控制非客户区是绘制成焦点状态还是非焦点
@@ -1884,15 +1900,8 @@ void ScalingWindow::_UpdateFocusState() const noexcept {
 		// 这里确实搞得很复杂，是我反复实验得到的，可以确保可靠性。切换前台窗口并非原子操作，
 		// 成为前台窗口和被放到 Z 轴顶部有一点间隔，这就导致了同步问题。
 		if (_srcTracker.IsFocused()) {
-			// 将缩放窗口置顶，由于同步问题可能需要尝试多次
-			for (int i = 0; i < 10; ++i) {
-				SetWindowPos(Handle(), HWND_TOPMOST, 0, 0, 0, 0,
-					SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
-
-				if (IsTopmostWindow(Handle())) {
-					break;
-				}
-			}
+			// 将缩放窗口置顶
+			SetTopmostState(Handle(), true);
 
 			if (_options.IsWindowedMode()) {
 				// 确保源窗口在最前。这一步是有必要的，OS 有几率失败
@@ -1911,48 +1920,21 @@ void ScalingWindow::_UpdateFocusState() const noexcept {
 				}
 			}
 		} else {
-			// 将缩放窗口置于源窗口之前，由于同步问题可能需要尝试多次
-			const bool isSrcTopmost = IsTopmostWindow(_srcTracker.Handle());
-			for (int i = 0; i < 10; ++i) {
-				HDWP hDwp = BeginDeferWindowPos(2);
-				if (hDwp) {
-					// 先修改缩放窗口的置顶状态，下一个操作才符合预期。如果源窗口是置顶的，缩放窗口
-					// 也应置顶。
-					hDwp = DeferWindowPos(hDwp, Handle(), isSrcTopmost ? HWND_TOPMOST : HWND_NOTOPMOST,
-						0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
+			// 缩放窗口的置顶状态应与源窗口相同
+			SetTopmostState(Handle(), IsTopmostWindow(_srcTracker.Handle()));
 
-					// 这里把缩放窗口放到源窗口**之前**，虽然字面上是之后，因为 OS 会自动维护所有者
-					// 关系顺序。
-					// 
-					// 我们希望把缩放窗口刚好放在源窗口之前以避免遮挡其他窗口，但不存在 API 能把一个
-					// 窗口放到另一个窗口之前。hWndInsertAfter 传入
-					// ```
-					// GetWindow(_srcTracker.Handle(), GW_HWNDPREV)
-					// ```
-					// 不可靠，还需要检查可见性和是否置顶。反过来将源窗口放到缩放窗口之后也不是好办法，
-					// 我们应避免改变源窗口的 Z 顺序。最后我想到了这个很巧妙的方法，即 hWndInsertAfter
-					// 传入源窗口句柄，由于存在所有者/被所有者关系，OS 将自动调整顺序。
-					hDwp = DeferWindowPos(hDwp, Handle(), _srcTracker.Handle(),
-						0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
-
-					EndDeferWindowPos(hDwp);
-				}
-
-				// 如果缩放窗口不是刚好位于源窗口之前则重试
-				if (GetWindow(_srcTracker.Handle(), GW_HWNDPREV) == Handle() &&
-					isSrcTopmost == IsTopmostWindow(Handle())) {
-					break;
-				}
-			}
-
-			// 确保前台窗口在最前
 			if (const HWND hwndFore = GetForegroundWindow()) {
-				if (!SetWindowPos(hwndFore, HWND_TOP, 0, 0, 0, 0,
-					SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)) {
-					// 可能由于权限不足而失败，这种情况比较棘手。切换两次前台窗口几乎是完美的解决方案，
-					// 但我想知道有没有更好的。
-					SetForegroundWindow(GetDesktopWindow());
-					SetForegroundWindow(hwndFore);
+				if (!SetWindowPos(hwndFore, HWND_TOP, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)) {
+					// 如果前台窗口权限更高，SetWindowPos 会失败。这时用其他方法将缩放窗口放到
+					// 前台窗口之后，缺点是偶尔会有一瞬间源窗口出现在缩放窗口前。
+					HDWP hDwp = BeginDeferWindowPos(2);
+					if (hDwp) {
+						hDwp = DeferWindowPos(hDwp, Handle(), _srcTracker.Handle(),
+							0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
+						hDwp = DeferWindowPos(hDwp, _srcTracker.Handle(), Handle(),
+							0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
+						EndDeferWindowPos(hDwp);
+					}
 				}
 			}
 		}
