@@ -16,7 +16,7 @@ public:
 		POINT& drawOffset
 	) noexcept = 0;
 
-	virtual void EndFrame(bool waitForRenderComplete = false) noexcept = 0;
+	virtual void EndFrame(bool waitForGpu = false) noexcept = 0;
 
 	virtual bool OnResize() noexcept = 0;
 
@@ -27,7 +27,7 @@ public:
 protected:
 	virtual bool _Initialize(HWND hwndAttach) noexcept = 0;
 
-	void _WaitForRenderComplete() noexcept;
+	void _WaitForGpu() noexcept;
 
 	// 和 DwmFlush 效果相同但更准确
 	static void _WaitForDwmComposition() noexcept;

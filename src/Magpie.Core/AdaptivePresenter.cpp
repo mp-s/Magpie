@@ -130,12 +130,14 @@ bool AdaptivePresenter::BeginFrame(
 	return true;
 }
 
-void AdaptivePresenter::EndFrame(bool waitForRenderComplete) noexcept {
+void AdaptivePresenter::EndFrame(bool waitForGpu) noexcept {
 	if (_isDCompPresenting) {
 		_dcompSurface->EndDraw();
 	}
 
-	if (waitForRenderComplete || _isResized) {
+	if (waitForGpu || _isResized) {
+		_isResized = false;
+
 		// 下面两个调用用于减少调整窗口尺寸时的边缘闪烁。
 		// 
 		// 我们希望 DWM 绘制新的窗口框架时刚好合成新帧，但这不是我们能控制的，尤其是混合架构
@@ -152,7 +154,7 @@ void AdaptivePresenter::EndFrame(bool waitForRenderComplete) noexcept {
 		// 实用价值。
 
 		// 等待渲染完成
-		_WaitForRenderComplete();
+		_WaitForGpu();
 
 		// 等待 DWM 开始合成新一帧
 		_WaitForDwmComposition();
@@ -172,20 +174,13 @@ void AdaptivePresenter::EndFrame(bool waitForRenderComplete) noexcept {
 			_isSwitchingToSwapChain = false;
 
 			// 等待交换链呈现新帧
-			_WaitForRenderComplete();
+			_WaitForGpu();
 			_WaitForDwmComposition();
 
 			// 清除 DirectCompostion 内容
 			_dcompVisual->SetContent(nullptr);
 			_dcompDevice->Commit();
 		}
-	}
-
-	if (_isResized) {
-		_isResized = false;
-	} else {
-		// 确保前一帧渲染完成再渲染下一帧，既降低了 GPU 负载，也能降低延迟
-		_WaitForRenderComplete();
 	}
 }
 

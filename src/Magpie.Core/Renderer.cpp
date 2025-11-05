@@ -199,7 +199,7 @@ winrt::fire_and_forget Renderer::TakeScreenshot(
 	}
 }
 
-void Renderer::_FrontendRender(bool waitForRenderComplete) noexcept {
+void Renderer::_FrontendRender(bool waitForGpu) noexcept {
 	winrt::com_ptr<ID3D11Texture2D> frameTex;
 	winrt::com_ptr<ID3D11RenderTargetView> frameRtv;
 	POINT drawOffset;
@@ -267,10 +267,10 @@ void Renderer::_FrontendRender(bool waitForRenderComplete) noexcept {
 	// 绘制光标
 	_cursorDrawer.Draw(frameTex.get(), drawOffset);
 	
-	_presenter->EndFrame(waitForRenderComplete);
+	_presenter->EndFrame(waitForGpu);
 }
 
-bool Renderer::Render(bool force, bool waitForRenderComplete) noexcept {
+bool Renderer::Render(bool force, bool waitForGpu) noexcept {
 	if (!force && _lastAccessMutexKey == _sharedTextureMutexKey.load(std::memory_order_relaxed)) {
 		if (_lastAccessMutexKey == 0) {
 			// 第一帧尚未完成
@@ -282,7 +282,7 @@ bool Renderer::Render(bool force, bool waitForRenderComplete) noexcept {
 		}
 	}
 
-	_FrontendRender(waitForRenderComplete);
+	_FrontendRender(waitForGpu);
 	return true;
 }
 

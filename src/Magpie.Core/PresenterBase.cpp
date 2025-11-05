@@ -87,7 +87,7 @@ uint32_t PresenterBase::_CalcBufferCount() noexcept {
 	return ScalingWindow::Get().Options().Is3DGameMode() ? 4 : 8;
 }
 
-void PresenterBase::_WaitForRenderComplete() noexcept {
+void PresenterBase::_WaitForGpu() noexcept {
 	ID3D11DeviceContext4* d3dDC = _deviceResources->GetD3DDC();
 
 	// 等待渲染完成

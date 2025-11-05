@@ -18,7 +18,7 @@ public:
 		POINT& drawOffset
 	) noexcept override;
 
-	void EndFrame(bool waitForRenderComplete = false) noexcept override;
+	void EndFrame(bool waitForGpu = false) noexcept override;
 
 	bool OnResize() noexcept override;
 
