@@ -19,6 +19,8 @@ using winrt::operator co_await;
 #define _STRING_HELPER(x) #x
 #define STRING(x) _STRING_HELPER(x)
 
+#define SWP_NO_ACTIVATE_MOVE_SIZE (SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
+
 struct Ignore {
 	constexpr Ignore() noexcept = default;
 

@@ -134,12 +134,10 @@ fire_and_forget ToastPage::ShowMessageOnWindow(std::wstring title, std::wstring 
 	}
 
 	if (isTargetTopMost || !isOwned) {
-		SetWindowPos(_hwndToast, HWND_TOPMOST, 0, 0, 0, 0,
-			SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+		SetWindowPos(_hwndToast, HWND_TOPMOST, 0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
 	}
 	if (!isTargetTopMost) {
-		SetWindowPos(_hwndToast, HWND_NOTOPMOST, 0, 0, 0, 0,
-			SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+		SetWindowPos(_hwndToast, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
 	}
 
 	// 更改所有者后应更新 Z 轴顺序
@@ -268,11 +266,11 @@ fire_and_forget ToastPage::ShowMessageOnWindow(std::wstring title, std::wstring 
 			// 如果 hwndTarget 位于前台，定期将弹窗置顶。SWP_NOOWNERZORDER 可以避免修改 hwndTarget
 			// 的 Z 顺序，理论上不需要这个标志，可能是 OS 的 bug。
 			SetWindowPos(_hwndToast, HWND_TOPMOST, 0, 0, 0, 0,
-				SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
+				SWP_NO_ACTIVATE_MOVE_SIZE | SWP_NOOWNERZORDER);
 		}
 		if (!isTargetTopMost) {
 			SetWindowPos(_hwndToast, HWND_NOTOPMOST, 0, 0, 0, 0,
-				SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
+				SWP_NO_ACTIVATE_MOVE_SIZE | SWP_NOOWNERZORDER);
 		}
 
 		// 窗口没有移动则无需更新
