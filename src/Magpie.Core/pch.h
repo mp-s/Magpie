@@ -2,7 +2,7 @@
 
 // Windows 头文件
 #include <SDKDDKVer.h>
-#include <windows.h>
+#include <Windows.h>
 #include <windowsx.h>
 
 // 避免 C++/WinRT 头文件的警告
@@ -11,6 +11,8 @@
 // DirectX 头文件
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
+#include <d3d12.h>
+#include <d3dx12.h>
 
 // C++ 运行时
 #include <cstdlib>

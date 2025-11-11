@@ -25,6 +25,7 @@
 #endif
 #include <dispatcherqueue.h>
 #include <d3dkmthk.h>
+#include "Renderer2.h"
 
 namespace Magpie {
 

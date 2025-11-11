@@ -392,7 +392,7 @@ void ScalingWindow::Render() noexcept {
 
 	if (srcFocusedChanged) {
 		_UpdateFocusState();
-	} 
+	}
 
 	// 虽然可以在第一帧渲染完成后再隐藏系统光标，但某些设备上显示窗口时光标状态会变成忙，
 	// 提前隐藏光标可以提高观感。缩放窗口显示后再隐藏光标还可能造成光标闪烁两次，第一次是
