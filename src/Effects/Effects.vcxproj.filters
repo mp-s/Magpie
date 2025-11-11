@@ -452,7 +452,6 @@
       <Filter>CuNNy2</Filter>
     </CopyFileToFolders>
     <CopyFileToFolders Include="SGSR.hlsl" />
-    <CopyFileToFolders Include="CatmullRom.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Anime4K">
