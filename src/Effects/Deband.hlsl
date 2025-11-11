@@ -106,6 +106,9 @@ float4 Pass1(float2 pos)
     // Sample the source pixel
     float3 col = INPUT.SampleLevel(sam1, pos, 0).rgb;
 
+#ifdef MP_INLINE_PARAMS
+    [unroll]
+#endif
     for (int i = 1; i <= iterations; i++) {
         // Use the average instead if the difference is below the threshold
         float3 avg = average(pos, i*range, h);
