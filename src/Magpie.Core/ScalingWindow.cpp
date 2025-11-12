@@ -5,6 +5,7 @@
 #include "ExclModeHelper.h"
 #include "Logger.h"
 #include "Renderer.h"
+#include "Renderer2.h"
 #include "Win32Helper.h"
 #include "WindowHelper.h"
 #include <dwmapi.h>
@@ -308,8 +309,15 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		}
 	}
 
+	_renderer2 = std::make_unique<Renderer2>();
+	ScalingError error = _renderer2->Initialize(_hwndRenderer, _options.overlayOptions);
+	if (error != ScalingError::NoError) {
+		Logger::Get().Error("初始化 Renderer 失败");
+		return error;
+	}
+
 	_renderer = std::make_unique<class Renderer>();
-	ScalingError error = _renderer->Initialize(_hwndRenderer, _options.overlayOptions);
+	error = _renderer->Initialize(_hwndRenderer, _options.overlayOptions);
 	if (error != ScalingError::NoError) {
 		Logger::Get().Error("初始化 Renderer 失败");
 		return error;

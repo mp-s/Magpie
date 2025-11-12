@@ -54,8 +54,27 @@ public:
 	) noexcept;
 
 private:
+	HRESULT _CreateDXGIFactory() noexcept;
+
+	bool _CreateAdapterAndDevice(GraphicsCardId graphicsCardId) noexcept;
+
+	bool _TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter) noexcept;
+
+	void _BackendThreadProc() noexcept;
+
 	RECT _destRect{};
+
+	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
+	winrt::com_ptr<IDXGIAdapter4> _dxgiAdapter;
+	winrt::com_ptr<ID3D12Device5> _device;
+
+	std::thread _backendThread;
+
 	std::vector<const EffectDesc*> _activeEffectDescs;
+
+	bool _isTearingSupported = false;
+	bool _isFP16Supported = false;
+	bool _isUsingWarp = false;
 };
 
 }

@@ -179,6 +179,7 @@ private:
 
 	ScalingOptions _options;
 	std::unique_ptr<class Renderer> _renderer;
+	std::unique_ptr<class Renderer2> _renderer2;
 	std::unique_ptr<class CursorManager> _cursorManager;
 
 	class SrcTracker _srcTracker;
