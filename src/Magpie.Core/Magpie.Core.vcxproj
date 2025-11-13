@@ -88,6 +88,7 @@
     <ClInclude Include="SrcTracker.h" />
     <ClInclude Include="StepTimer.h" />
     <ClInclude Include="AdaptivePresenter.h" />
+    <ClInclude Include="SwapChainPresenter.h" />
     <ClInclude Include="TextureHelper.h" />
     <ClInclude Include="YasHelper.h" />
   </ItemGroup>
@@ -127,6 +128,7 @@
     <ClCompile Include="SrcTracker.cpp" />
     <ClCompile Include="StepTimer.cpp" />
     <ClCompile Include="AdaptivePresenter.cpp" />
+    <ClCompile Include="SwapChainPresenter.cpp" />
     <ClCompile Include="TextureHelper.cpp" />
     <ClCompile Include="Win32Helper.cpp" />
     <ClCompile Include="WindowHelper.cpp" />

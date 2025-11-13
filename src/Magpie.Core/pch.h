@@ -46,6 +46,7 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Foundation.Metadata.h>
+#include <winrt/Windows.Graphics.Display.h>
 #include <winrt/Windows.System.h>
 
 namespace winrt {
@@ -54,6 +55,7 @@ using namespace Windows::ApplicationModel::Resources::Core;
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
 using namespace Windows::Foundation::Metadata;
+using namespace Windows::Graphics::Display;
 using namespace Windows::System;
 }
 

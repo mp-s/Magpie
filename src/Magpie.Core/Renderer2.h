@@ -4,6 +4,8 @@
 
 namespace Magpie {
 
+class SwapChainPresenter;
+
 class Renderer2 {
 public:
 	Renderer2() noexcept;
@@ -58,7 +60,7 @@ private:
 
 	bool _CreateAdapterAndDevice(GraphicsCardId graphicsCardId) noexcept;
 
-	bool _TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter) noexcept;
+	bool _TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept;
 
 	void _BackendThreadProc() noexcept;
 
@@ -67,6 +69,10 @@ private:
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<IDXGIAdapter4> _dxgiAdapter;
 	winrt::com_ptr<ID3D12Device5> _device;
+
+	winrt::com_ptr<ID3D12CommandQueue> _consumerCommandQueue;
+
+	std::unique_ptr<SwapChainPresenter> _presenter;
 
 	std::thread _backendThread;
 

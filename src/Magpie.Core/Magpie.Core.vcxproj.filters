@@ -137,6 +137,9 @@
     <ClInclude Include="Renderer2.h">
       <Filter>Render</Filter>
     </ClInclude>
+    <ClInclude Include="SwapChainPresenter.h">
+      <Filter>Presenter</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -230,6 +233,9 @@
     <ClCompile Include="SrcTracker.cpp" />
     <ClCompile Include="Renderer2.cpp">
       <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="SwapChainPresenter.cpp">
+      <Filter>Presenter</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

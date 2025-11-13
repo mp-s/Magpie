@@ -4,9 +4,17 @@
 #include "DirectXHelper.h"
 #include "ScalingWindow.h"
 #include "StrHelper.h"
+#include "SwapChainPresenter.h"
+#include <d3dkmthk.h>
 #include <dxgidebug.h>
 
 namespace Magpie {
+
+// 为生产队列和消费队列设置不同的 GUID 以提高并发度
+// {592345E2-622C-46F1-9A93-A87AF9C04F22}
+static const winrt::guid COSUMER_QUEUE_ID(0x592345e2, 0x622c, 0x46f1, { 0x9a, 0x93, 0xa8, 0x7a, 0xf9, 0xc0, 0x4f, 0x22 });
+// {A4AEA0B1-A73D-4224-BE15-4B82E04B2E2A}
+static const winrt::guid PRODUCER_QUEUE_ID(0xa4aea0b1, 0xa73d, 0x4224, { 0xbe, 0x15, 0x4b, 0x82, 0xe0, 0x4b, 0x2e, 0x2a });
 
 Renderer2::Renderer2() noexcept {}
 
@@ -75,6 +83,33 @@ ScalingError Renderer2::Initialize(HWND /*hwndAttach*/, OverlayOptions& /*overla
 		}
 	}
 
+	{
+		D3D12_COMMAND_QUEUE_DESC queueDesc{
+			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
+			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
+		};
+		if (winrt::com_ptr<ID3D12Device9> device9 = _device.try_as<ID3D12Device9>()) {
+			// 设置 CreatorID 可以提高并发度
+			hr = device9->CreateCommandQueue1(&queueDesc, COSUMER_QUEUE_ID, IID_PPV_ARGS(&_consumerCommandQueue));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommandQueue1 失败", hr);
+				return ScalingError::ScalingFailedGeneral;
+			}
+		} else {
+			hr = _device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_consumerCommandQueue));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommandQueue 失败", hr);
+				return ScalingError::ScalingFailedGeneral;
+			}
+		}
+	}
+
+	_presenter = std::make_unique<SwapChainPresenter>();
+	if (!_presenter->Initialize(hwndAttach, _frontendResources)) {
+		Logger::Get().Error("初始化 AdaptivePresenter 失败");
+		return ScalingError::ScalingFailedGeneral;
+	}
+
 	// _backendThread = std::thread(&Renderer2::_BackendThreadProc, this);
 
 	return ScalingError::NoError;
@@ -107,13 +142,12 @@ bool Renderer2::_CreateAdapterAndDevice(GraphicsCardId graphicsCardId) noexcept 
 			hr = adapter->GetDesc1(&desc);
 			if (SUCCEEDED(hr)) {
 				if (desc.VendorId == graphicsCardId.vendorId && desc.DeviceId == graphicsCardId.deviceId) {
-					if (_TryCreateD3DDevice(adapter)) {
-						_isUsingWarp = DirectXHelper::IsWARP(desc);
+					if (_TryCreateD3DDevice(adapter, desc)) {
 						return true;
 					}
 
 					failedIdx = graphicsCardId.idx;
-					Logger::Get().Warn("用户指定的显示卡不支持 FL 11");
+					Logger::Get().Warn("用户指定的显示卡不支持 D3D12");
 				} else {
 					Logger::Get().Warn("显卡配置已变化");
 				}
@@ -139,20 +173,19 @@ bool Renderer2::_CreateAdapterAndDevice(GraphicsCardId graphicsCardId) noexcept 
 				}
 
 				if (desc.VendorId == graphicsCardId.vendorId && desc.DeviceId == graphicsCardId.deviceId) {
-					if (_TryCreateD3DDevice(adapter)) {
-						_isUsingWarp = DirectXHelper::IsWARP(desc);
+					if (_TryCreateD3DDevice(adapter, desc)) {
 						return true;
 					}
 
 					failedIdx = (int)adapterIdx;
-					Logger::Get().Warn("用户指定的显示卡不支持 FL11");
+					Logger::Get().Warn("用户指定的显示卡不支持 D3D12");
 					break;
 				}
 			}
 		}
 	}
 
-	// 枚举查找第一个支持 FL11 的显卡
+	// 枚举查找第一个支持 D3D12 的显卡
 	for (UINT adapterIdx = 0;
 		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
 		++adapterIdx
@@ -168,8 +201,7 @@ bool Renderer2::_CreateAdapterAndDevice(GraphicsCardId graphicsCardId) noexcept 
 			continue;
 		}
 
-		if (_TryCreateD3DDevice(adapter)) {
-			_isUsingWarp = false;
+		if (_TryCreateD3DDevice(adapter, desc)) {
 			return true;
 		}
 	}
@@ -182,21 +214,29 @@ bool Renderer2::_CreateAdapterAndDevice(GraphicsCardId graphicsCardId) noexcept 
 		return false;
 	}
 
-	if (!_TryCreateD3DDevice(adapter)) {
-		Logger::Get().ComError("创建 WARP 设备失败", hr);
+	DXGI_ADAPTER_DESC1 desc;
+	hr = adapter->GetDesc1(&desc);
+	if (FAILED(hr) || !_TryCreateD3DDevice(adapter, desc)) {
+		Logger::Get().Error("创建 WARP 设备失败");
 		return false;
 	}
 
-	_isUsingWarp = true;
 	return true;
 }
 
-bool Renderer2::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter) noexcept {
-	HRESULT hr = D3D12CreateDevice(
-		adapter.get(),
-		D3D_FEATURE_LEVEL_11_0,
-		IID_PPV_ARGS(&_device)
-	);
+static void SetGpuPriority() noexcept {
+	// 来自 https://github.com/obsproject/obs-studio/blob/16cb051a57bb357fe866252c1360ce2c38e2deec/libobs-d3d11/d3d11-subsystem.cpp#L429
+	// 不使用 REALTIME 优先级，它会造成系统不稳定，而且可能会导致源窗口卡顿。
+	// OBS 还调用了 SetGPUThreadPriority，但这个接口似乎无用。
+	NTSTATUS status = D3DKMTSetProcessSchedulingPriorityClass(
+		GetCurrentProcess(), D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH);
+	if (status != STATUS_SUCCESS) {
+		Logger::Get().NTError("D3DKMTSetProcessSchedulingPriorityClass 失败", status);
+	}
+}
+
+bool Renderer2::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept {
+	HRESULT hr = D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&_device));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("D3D12CreateDevice 失败", hr);
 		return false;
@@ -248,6 +288,14 @@ bool Renderer2::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter
 		Logger::Get().Error("获取 IDXGIAdapter4 失败");
 		return false;
 	}
+
+	_isUsingWarp = DirectXHelper::IsWARP(adapterDesc);
+
+	Logger::Get().Info(fmt::format("当前图形适配器: \n\tVendorId: {:#x}\n\tDeviceId: {:#x}\n\tDescription: {}",
+		adapterDesc.VendorId, adapterDesc.DeviceId, StrHelper::UTF16ToUTF8(adapterDesc.Description)));
+
+	// 每次创建 D3D 设备后尝试提高 GPU 优先级，OBS 也是这么做的
+	SetGpuPriority();
 
 	return true;
 }
