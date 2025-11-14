@@ -90,6 +90,15 @@ FrameSourceState GraphicsCaptureFrameSource::_Update() noexcept {
 		return FrameSourceState::Waiting;
 	}
 
+	// 取最新帧，帧率较低时可以有效降低延迟
+	while (true) {
+		if (winrt::Direct3D11CaptureFrame nextFrame = _captureFramePool.TryGetNextFrame()) {
+			frame = std::move(nextFrame);
+		} else {
+			break;
+		}
+	}
+
 	// 从帧获取 IDXGISurface
 	winrt::IDirect3DSurface d3dSurface = frame.Surface();
 
@@ -314,7 +323,7 @@ bool GraphicsCaptureFrameSource::_StartCapture() noexcept {
 		_captureFramePool = winrt::Direct3D11CaptureFramePool::Create(
 			_wrappedD3DDevice,
 			winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
-			1,	// 帧的缓存数量
+			4,	// 帧的缓存数量，更大的值有利于在低帧率下降低延迟
 			{ (int)_frameBox.right, (int)_frameBox.bottom } // 帧的尺寸为包含源窗口的最小尺寸
 		);
 
