@@ -31,9 +31,7 @@ bool CompSwapchainPresenter::_Initialize(HWND hwndAttach) noexcept {
 		return false;
 	}
 
-	ID3D11Device5* d3dDevice = _deviceResources->GetD3DDevice();
-
-	HRESULT hr = DCompositionCreateDevice3(d3dDevice, IID_PPV_ARGS(&_dcompDevice));
+	HRESULT hr = DCompositionCreateDevice3(nullptr, IID_PPV_ARGS(&_dcompDevice));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("DCompositionCreateDevice3 失败", hr);
 		return false;
@@ -58,7 +56,7 @@ bool CompSwapchainPresenter::_Initialize(HWND hwndAttach) noexcept {
 	}
 
 	winrt::com_ptr<IPresentationFactory> presentationFactory =
-		CreatePresentationFactory(d3dDevice);
+		CreatePresentationFactory(_deviceResources->GetD3DDevice());
 	if (!presentationFactory) {
 		Logger::Get().Error("CreatePresentationFactory 失败");
 		return false;
