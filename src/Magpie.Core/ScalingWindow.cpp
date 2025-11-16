@@ -316,14 +316,14 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		return error;
 	}
 
-	_renderer = std::make_unique<class Renderer>();
+	/*_renderer = std::make_unique<class Renderer>();
 	error = _renderer->Initialize(_hwndRenderer, _options.overlayOptions);
 	if (error != ScalingError::NoError) {
 		Logger::Get().Error("初始化 Renderer 失败");
 		return error;
 	}
 
-	_cursorManager = std::make_unique<class CursorManager>();
+	_cursorManager = std::make_unique<class CursorManager>();*/
 
 	if (_options.IsTouchSupportEnabled()) {
 		// 应在 Renderer 初始化后调用。推迟到缩放窗口显示后再显示
@@ -405,9 +405,15 @@ void ScalingWindow::Render() noexcept {
 	// 虽然可以在第一帧渲染完成后再隐藏系统光标，但某些设备上显示窗口时光标状态会变成忙，
 	// 提前隐藏光标可以提高观感。缩放窗口显示后再隐藏光标还可能造成光标闪烁两次，第一次是
 	// 创建 D3D 设备后（可能是 OS bug），第二次是我们隐藏系统光标。
-	_cursorManager->Update();
+	/*_cursorManager->Update();
 
 	if (_renderer->Render(false, _shouldWaitForRender || _isFirstFrame) && _isFirstFrame) {
+		_isFirstFrame = false;
+		// 第一帧渲染完成后显示缩放窗口
+		_Show();
+	}*/
+
+	if (_renderer2->Render(false, _shouldWaitForRender || _isFirstFrame) && _isFirstFrame) {
 		_isFirstFrame = false;
 		// 第一帧渲染完成后显示缩放窗口
 		_Show();
@@ -1421,11 +1427,12 @@ void ScalingWindow::_UpdateWindowProps() const noexcept {
 	SetProp(hWnd, L"Magpie.SrcRight", (HANDLE)(INT_PTR)srcRect.right);
 	SetProp(hWnd, L"Magpie.SrcBottom", (HANDLE)(INT_PTR)srcRect.bottom);
 
-	const RECT& destRect = _renderer->DestRect();
+	// TODO
+	/*const RECT& destRect = _renderer->DestRect();
 	SetProp(hWnd, L"Magpie.DestLeft", (HANDLE)(INT_PTR)destRect.left);
 	SetProp(hWnd, L"Magpie.DestTop", (HANDLE)(INT_PTR)destRect.top);
 	SetProp(hWnd, L"Magpie.DestRight", (HANDLE)(INT_PTR)destRect.right);
-	SetProp(hWnd, L"Magpie.DestBottom", (HANDLE)(INT_PTR)destRect.bottom);
+	SetProp(hWnd, L"Magpie.DestBottom", (HANDLE)(INT_PTR)destRect.bottom);*/
 }
 
 // 供 TouchHelper.exe 使用

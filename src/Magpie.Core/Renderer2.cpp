@@ -10,6 +10,9 @@
 
 namespace Magpie {
 
+// 自定义 HRESULT 的方法参考自 https://learn.microsoft.com/en-us/windows/win32/com/codes-in-facility-itf
+#define S_RECOVERED MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_ITF, 0x200)
+
 // 为生产队列和消费队列设置不同的 GUID 以提高并发度
 // {592345E2-622C-46F1-9A93-A87AF9C04F22}
 static const winrt::guid COSUMER_QUEUE_ID(0x592345e2, 0x622c, 0x46f1, { 0x9a, 0x93, 0xa8, 0x7a, 0xf9, 0xc0, 0x4f, 0x22 });
@@ -20,7 +23,7 @@ Renderer2::Renderer2() noexcept {}
 
 Renderer2::~Renderer2() noexcept {}
 
-ScalingError Renderer2::Initialize(HWND /*hwndAttach*/, OverlayOptions& /*overlayOptions*/) noexcept {
+ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOptions*/) noexcept {
 	[[maybe_unused]] static Ignore _ = [] {
 #ifdef _DEBUG
 		winrt::com_ptr<IDXGIInfoQueue> dxgiInfoQueue;
@@ -55,17 +58,6 @@ ScalingError Renderer2::Initialize(HWND /*hwndAttach*/, OverlayOptions& /*overla
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	// 检查可变帧率支持
-	BOOL supportTearing = FALSE;
-	HRESULT hr = _dxgiFactory->CheckFeatureSupport(
-		DXGI_FEATURE_PRESENT_ALLOW_TEARING, &supportTearing, sizeof(supportTearing));
-	if (FAILED(hr)) {
-		Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
-	}
-
-	_isTearingSupported = supportTearing;
-	Logger::Get().Info(fmt::format("可变刷新率支持: {}", supportTearing ? "是" : "否"));
-
 	if (!_CreateAdapterAndDevice(ScalingWindow::Get().Options().graphicsCardId)) {
 		Logger::Get().Error("找不到可用的图形适配器");
 		return ScalingError::ScalingFailedGeneral;
@@ -74,7 +66,7 @@ ScalingError Renderer2::Initialize(HWND /*hwndAttach*/, OverlayOptions& /*overla
 	// 检查半精度浮点支持
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS featureData{};
-		hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &featureData, sizeof(featureData));
+		HRESULT hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &featureData, sizeof(featureData));
 		if (SUCCEEDED(hr)) {
 			_isFP16Supported = featureData.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;
 			Logger::Get().Info(StrHelper::Concat("FP16 支持: ", _isFP16Supported ? "是" : "否"));
@@ -90,13 +82,13 @@ ScalingError Renderer2::Initialize(HWND /*hwndAttach*/, OverlayOptions& /*overla
 		};
 		if (winrt::com_ptr<ID3D12Device9> device9 = _device.try_as<ID3D12Device9>()) {
 			// 设置 CreatorID 可以提高并发度
-			hr = device9->CreateCommandQueue1(&queueDesc, COSUMER_QUEUE_ID, IID_PPV_ARGS(&_consumerCommandQueue));
+			HRESULT hr = device9->CreateCommandQueue1(&queueDesc, COSUMER_QUEUE_ID, IID_PPV_ARGS(&_consumerCommandQueue));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateCommandQueue1 失败", hr);
 				return ScalingError::ScalingFailedGeneral;
 			}
 		} else {
-			hr = _device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_consumerCommandQueue));
+			HRESULT hr = _device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_consumerCommandQueue));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateCommandQueue 失败", hr);
 				return ScalingError::ScalingFailedGeneral;
@@ -104,15 +96,63 @@ ScalingError Renderer2::Initialize(HWND /*hwndAttach*/, OverlayOptions& /*overla
 		}
 	}
 
-	_presenter = std::make_unique<SwapChainPresenter>();
-	if (!_presenter->Initialize(hwndAttach, _frontendResources)) {
-		Logger::Get().Error("初始化 AdaptivePresenter 失败");
+	HRESULT hr = _device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_consumerCommandList));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandList1 失败", hr);
 		return ScalingError::ScalingFailedGeneral;
+	}
+
+	_presenter = std::make_unique<SwapChainPresenter>();
+	if (!_presenter->Initialize(_device.get(), _consumerCommandQueue.get(), _dxgiFactory.get(), hwndAttach, false)) {
+		Logger::Get().Error("初始化 SwapChainPresenter 失败");
+		return ScalingError::ScalingFailedGeneral;
+	}
+
+	_consumerCommandAllocators.resize(_presenter->GetBufferCount());
+	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _consumerCommandAllocators) {
+		if (FAILED(_device->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)))) {
+			return ScalingError::ScalingFailedGeneral;
+		}
 	}
 
 	// _backendThread = std::thread(&Renderer2::_BackendThreadProc, this);
 
 	return ScalingError::NoError;
+}
+
+bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDeviceLost) noexcept {
+	ID3D12Resource* frameTex;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
+	uint32_t frameIndex;
+	HRESULT hr = _CheckDeviceLost(_presenter->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
+	}
+
+	hr = _CheckDeviceLost(_consumerCommandAllocators[frameIndex]->Reset(), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
+	}
+
+	hr = _CheckDeviceLost(_consumerCommandList->Reset(
+		_consumerCommandAllocators[frameIndex].get(), nullptr), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
+	}
+
+	hr = _CheckDeviceLost(_consumerCommandList->Close(), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
+	}
+
+	{
+		ID3D12CommandList* t = _consumerCommandList.get();
+		_consumerCommandQueue->ExecuteCommandLists(1, &t);
+	}
+
+	return SUCCEEDED(_CheckDeviceLost(_presenter->EndFrame(), onHandlingDeviceLost));
 }
 
 HRESULT Renderer2::_CreateDXGIFactory() noexcept {
@@ -302,6 +342,22 @@ bool Renderer2::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter
 
 void Renderer2::_BackendThreadProc() noexcept {
 	
+}
+
+// TODO: 处理设备丢失
+HRESULT Renderer2::_CheckDeviceLost(HRESULT hr, bool /*onHandlingDeviceLost*/) noexcept {
+	return hr;
+	/*if (SUCCEEDED(hr)) {
+		return hr;
+	}
+
+	// 处理设备丢失时再次发生设备丢失则不再尝试恢复
+	if ((hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET) || onHandlingDeviceLost) {
+		return hr;
+	}
+
+	// 设备丢失，需要重新初始化
+	return _HandleDeviceLost() ? S_RECOVERED : hr;*/
 }
 
 }

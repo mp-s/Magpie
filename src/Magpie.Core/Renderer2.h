@@ -16,7 +16,7 @@ public:
 
 	ScalingError Initialize(HWND hwndAttach, OverlayOptions& overlayOptions) noexcept;
 
-	bool Render(bool force = false, bool waitForGpu = false) noexcept;
+	bool Render(bool force = false, bool waitForGpu = false, bool onHandlingDeviceLost = false) noexcept;
 
 	bool OnResize() noexcept;
 
@@ -64,6 +64,8 @@ private:
 
 	void _BackendThreadProc() noexcept;
 
+	HRESULT _CheckDeviceLost(HRESULT hr, bool onHandlingDeviceLost = false) noexcept;
+
 	RECT _destRect{};
 
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
@@ -71,6 +73,8 @@ private:
 	winrt::com_ptr<ID3D12Device5> _device;
 
 	winrt::com_ptr<ID3D12CommandQueue> _consumerCommandQueue;
+	winrt::com_ptr<ID3D12GraphicsCommandList> _consumerCommandList;
+	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _consumerCommandAllocators;
 
 	std::unique_ptr<SwapChainPresenter> _presenter;
 
@@ -78,7 +82,6 @@ private:
 
 	std::vector<const EffectDesc*> _activeEffectDescs;
 
-	bool _isTearingSupported = false;
 	bool _isFP16Supported = false;
 	bool _isUsingWarp = false;
 };
