@@ -9,8 +9,6 @@
   <ItemGroup>
     <ClInclude Include="PackageFiles.h" />
     <ClInclude Include="pch.h" />
-    <ClInclude Include="Utils.h" />
-    <ClInclude Include="Version.h" />
     <ClInclude Include="resource.h">
       <Filter>Resources</Filter>
     </ClInclude>
@@ -18,8 +16,6 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="pch.cpp" />
-    <ClCompile Include="Utils.cpp" />
-    <ClCompile Include="Version.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Updater.rc">
