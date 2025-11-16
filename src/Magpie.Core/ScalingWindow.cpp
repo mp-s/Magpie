@@ -593,15 +593,16 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 			break;
 		}
 
+		// TODO
 		// 鼠标在叠加层工具栏上时可以拖动缩放窗口
-		if (_renderer->IsCursorOnOverlayCaptionArea()) {
+		/*if (_renderer->IsCursorOnOverlayCaptionArea()) {
 			return HTCAPTION;
 		}
 
 		const int16_t srcHitTest = _cursorManager->SrcHitTest();
 		if (srcHitTest != HTNOWHERE) {
 			return srcHitTest;
-		}
+		}*/
 
 		break;
 	}
@@ -791,7 +792,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 	{
 		// 如果全屏模式缩放包含 WS_MAXIMIZE 样式，创建窗口时将收到 WM_NCCALCSIZE，
 		// 应该忽略。
-		if (!_renderer || !wParam) {
+		if (!_renderer2 || !wParam) {
 			return 0;
 		}
 

@@ -17,7 +17,7 @@ namespace Magpie {
 // {592345E2-622C-46F1-9A93-A87AF9C04F22}
 static const winrt::guid COSUMER_QUEUE_ID(0x592345e2, 0x622c, 0x46f1, { 0x9a, 0x93, 0xa8, 0x7a, 0xf9, 0xc0, 0x4f, 0x22 });
 // {A4AEA0B1-A73D-4224-BE15-4B82E04B2E2A}
-static const winrt::guid PRODUCER_QUEUE_ID(0xa4aea0b1, 0xa73d, 0x4224, { 0xbe, 0x15, 0x4b, 0x82, 0xe0, 0x4b, 0x2e, 0x2a });
+// static const winrt::guid PRODUCER_QUEUE_ID(0xa4aea0b1, 0xa73d, 0x4224, { 0xbe, 0x15, 0x4b, 0x82, 0xe0, 0x4b, 0x2e, 0x2a });
 
 Renderer2::Renderer2() noexcept {}
 
@@ -140,6 +140,25 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 		_consumerCommandAllocators[frameIndex].get(), nullptr), onHandlingDeviceLost);
 	if (FAILED(hr) || hr == S_RECOVERED) {
 		return hr == S_RECOVERED;
+	}
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		_consumerCommandList->ResourceBarrier(1, &barrier);
+	}
+
+	_consumerCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+	{
+		const float clearColor[] = { 0.8f, 0.8f, 0.6f, 1.0f };
+		_consumerCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	}
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		_consumerCommandList->ResourceBarrier(1, &barrier);
 	}
 
 	hr = _CheckDeviceLost(_consumerCommandList->Close(), onHandlingDeviceLost);
