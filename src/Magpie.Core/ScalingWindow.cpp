@@ -69,7 +69,8 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 
 	_runtimeError = ScalingError::NoError;
 	_isFirstFrame = true;
-	_isResizingOrMoving = false;
+	_isResizing = false;
+	_isMoving = false;
 	_isPreparingForResizing = false;
 	_isMovingDueToSrcMoved = false;
 	_shouldWaitForRender = false;
@@ -512,8 +513,10 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 	}
 	case WM_ENTERSIZEMOVE:
 	{
-		_isResizingOrMoving = true;
-		if (!_isPreparingForResizing) {
+		_isResizing = _isPreparingForResizing;
+		_isMoving = !_isPreparingForResizing;
+
+		if (_isMoving) {
 			_cursorManager->OnStartMove();
 		}
 
@@ -527,9 +530,16 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 	}
 	case WM_EXITSIZEMOVE:
 	{
-		_isResizingOrMoving = false;
-		_renderer->OnEndResize();
-		_cursorManager->OnEndResizeMove();
+		const bool oldIsResizing = _isResizing;
+		_isResizing = false;
+		_isMoving = false;
+
+		if (oldIsResizing) {
+			_renderer2->OnResizeEnded();
+		}
+
+		// TODO
+		// _cursorManager->OnEndResizeMove();
 
 		if (!_srcTracker.MoveOnEndResizeMove()) {
 			Logger::Get().Error("SrcTracker::MoveOnEndResizeMove 失败");
@@ -537,7 +547,8 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 			return 0;
 		}
 
-		_cursorManager->OnSrcRectChanged();
+		// TODO
+		// _cursorManager->OnSrcRectChanged();
 
 		if (_options.IsTouchSupportEnabled()) {
 			_UpdateTouchProps(_srcTracker.SrcRect());
@@ -756,7 +767,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		if (!(windowPos.flags & SWP_NOSIZE)) {
 			if (_options.IsWindowedMode()) {
 				// 用户调整尺寸时 WM_SIZING 已经确保等比例
-				if (!_isResizingOrMoving) {
+				if (!_isResizing) {
 					// cx 不为 0 时使用 cx 计算，否则使用 cy 计算
 					if (windowPos.cx == 0) {
 						if (windowPos.cy == 0) {
@@ -840,7 +851,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		// 里。但它有个问题是要等待源窗口响应消息，因为有的窗口响应速度很慢，我们一直避免同步
 		// 等待。目前我把它禁用了，希望能找到更好的解决方案。因为缩放窗口调整大小或移动的过程
 		// 中不会捕获光标，因此即使触发了也不会造成严重后果。
-		// if (_isResizingOrMoving && Win32Helper::IsWindowHung(_srcTracker.Handle())) {
+		// if ((IsResizingOrMoving() && Win32Helper::IsWindowHung(_srcTracker.Handle())) {
 		//     Logger::Get().Error("源窗口已挂起");
 		//     _DelayedStop(true);
 		// }
@@ -859,7 +870,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		_UpdateWindowProps();
 
 		// 拖拽缩放窗口时不广播
-		if (!_isResizingOrMoving && !_srcTracker.IsMoving()) {
+		if (!IsResizingOrMoving() && !_srcTracker.IsMoving()) {
 			// 广播缩放窗口位置或大小改变
 			PostMessage(HWND_BROADCAST, WM_MAGPIE_SCALINGCHANGED, 2, (LPARAM)Handle());
 		}
@@ -1284,12 +1295,13 @@ void ScalingWindow::_Show() noexcept {
 }
 
 void ScalingWindow::_ResizeRenderer() noexcept {
-	if (!_renderer->OnResize()) {
+	if (!_renderer2->OnSizeChanged()) {
 		Logger::Get().Error("更改 Renderer 尺寸失败");
 		return;
 	}
 
-	_cursorManager->OnScalingPosChanged();
+	// TODO
+	// _cursorManager->OnScalingPosChanged();
 	Render();
 }
 
@@ -1325,7 +1337,7 @@ bool ScalingWindow::_UpdateSrcState(
 	bool srcRectChanged = false;
 	bool srcSizeChanged = false;
 	bool srcMovingChanged = false;
-	if (!_srcTracker.UpdateState(hwndFore, _options.IsWindowedMode(), _isResizingOrMoving,
+	if (!_srcTracker.UpdateState(hwndFore, _options.IsWindowedMode(), IsResizingOrMoving(),
 		isSrcInvisibleOrMinimized, srcFocusedChanged, srcRectChanged, srcSizeChanged, srcMovingChanged)) {
 		return false;
 	}
@@ -1442,7 +1454,7 @@ void ScalingWindow::_UpdateTouchProps(const RECT& srcRect) const noexcept {
 
 	const HWND hWnd = Handle();
 
-	if (_isResizingOrMoving) {
+	if (_isResizing) {
 		// 调整大小时应禁用触控变换
 		SetProp(hWnd, L"Magpie.SrcTouchLeft",
 			(HANDLE)(INT_PTR)std::numeric_limits<LONG>::min());
@@ -1990,13 +2002,13 @@ void ScalingWindow::_UpdateRendererRect() noexcept {
 		const RECT& srcRect = _srcTracker.WindowRect();
 		const int offsetX = (_windowRect.left + _windowRect.right - srcRect.left - srcRect.right) / 2;
 		const int offsetY = (_windowRect.top + _windowRect.bottom - srcRect.top - srcRect.bottom) / 2;
-		if (!_srcTracker.Move(offsetX, offsetY, _isResizingOrMoving)) {
+		if (!_srcTracker.Move(offsetX, offsetY, IsResizingOrMoving())) {
 			Logger::Get().Error("SrcTracker::Move 失败");
 			_DelayedStop();
 			return;
 		}
-
-		_cursorManager->OnSrcRectChanged();
+		// TODO
+		// _cursorManager->OnSrcRectChanged();
 	}
 
 	if (_hwndRenderer == Handle()) {

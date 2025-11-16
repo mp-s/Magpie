@@ -1092,7 +1092,7 @@ void CursorManager::_UpdateCursorPos() noexcept {
 	const bool isSrcMoving = _isUnderCapture && ScalingWindow::Get().SrcTracker().IsMoving();
 	// 拖拽缩放窗口时肯定不处于捕获状态而且光标在工具栏上
 	const bool isScalingMoving = !_isUnderCapture &&
-		ScalingWindow::Get().IsResizingOrMoving() &&
+		ScalingWindow::Get().IsMoving() &&
 		_localCursorPosOnMoving.x != std::numeric_limits<LONG>::max();
 	
 	if (isSrcMoving || isScalingMoving) {

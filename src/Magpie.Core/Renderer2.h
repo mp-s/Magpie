@@ -18,9 +18,9 @@ public:
 
 	bool Render(bool force = false, bool waitForGpu = false, bool onHandlingDeviceLost = false) noexcept;
 
-	bool OnResize() noexcept;
+	bool OnSizeChanged() noexcept;
 
-	void OnEndResize() noexcept;
+	bool OnResizeEnded() noexcept;
 
 	void OnMove() noexcept;
 

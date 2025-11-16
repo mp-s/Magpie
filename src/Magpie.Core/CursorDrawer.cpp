@@ -346,7 +346,7 @@ std::pair<HCURSOR, POINT> CursorDrawer::_GetCursorState(bool& isActive) const no
 		// 变化：箭头->隐藏->箭头，只要位置不变，自动隐藏功能应让光标始终隐藏；反之如果光
 		// 标隐藏时移动了或显示时形状变化了应正常显示。
 		if (cursorManager.IsCursorCaptured() &&
-			!scalingWindow.IsResizingOrMoving() &&
+			!scalingWindow.IsMoving() &&
 			!scalingWindow.SrcTracker().IsMoving() &&
 			_lastCursorPos == cursorPos &&
 			(_lastRawCursorHandle == cursorHandle || !cursorHandle))

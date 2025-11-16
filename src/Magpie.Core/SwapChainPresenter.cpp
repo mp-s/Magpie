@@ -7,6 +7,8 @@
 
 namespace Magpie {
 
+static constexpr uint32_t BUFFER_COUNT_DURING_RESIZE = 2;
+
 SwapChainPresenter::~SwapChainPresenter() {
 	_WaitForGpu();
 }
@@ -240,6 +242,66 @@ HRESULT SwapChainPresenter::EndFrame() noexcept {
 	_bufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 
 	return S_OK;
+}
+
+HRESULT SwapChainPresenter::RecreateBuffers(bool useScRGB) noexcept {
+	HRESULT hr = _WaitForGpu();
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	// 调整大小期间只用两个后缓冲以提高流畅度并减少边缘闪烁
+	const uint32_t bufferCount =
+		ScalingWindow::Get().IsResizing() ? BUFFER_COUNT_DURING_RESIZE : GetBufferCount();
+	OutputDebugString(fmt::format(L"{}", bufferCount).c_str());
+
+	std::fill(_renderTargets.begin(), _renderTargets.end(), nullptr);
+
+	const RECT& rendererRect = ScalingWindow::Get().RendererRect();
+	hr = _dxgiSwapChain->ResizeBuffers(
+		bufferCount,
+		UINT(rendererRect.right - rendererRect.left),
+		UINT(rendererRect.bottom - rendererRect.top),
+		useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
+		UINT((_isTearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0)
+			| DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
+	);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	_isRecreated = true;
+
+	hr = _dxgiSwapChain->SetMaximumFrameLatency(bufferCount - 1);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	hr = _dxgiSwapChain->SetColorSpace1(
+		useScRGB ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	_bufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
+
+	return _LoadBufferResources(bufferCount, useScRGB);
+}
+
+HRESULT SwapChainPresenter::OnResizeEnded() noexcept {
+	// 调整大小结束后立刻重建交换链
+	DXGI_SWAP_CHAIN_DESC1 desc;
+	HRESULT hr = _dxgiSwapChain->GetDesc1(&desc);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	// 后缓冲数量不变则从未调整过尺寸，无需重建交换链
+	if (desc.BufferCount != BUFFER_COUNT_DURING_RESIZE) {
+		return S_OK;
+	} else {
+		return RecreateBuffers(desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+	}
 }
 
 HRESULT SwapChainPresenter::_LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept {

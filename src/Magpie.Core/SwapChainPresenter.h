@@ -29,6 +29,10 @@ public:
 
 	HRESULT EndFrame() noexcept;
 
+	HRESULT RecreateBuffers(bool useScRGB) noexcept;
+
+	HRESULT OnResizeEnded() noexcept;
+
 private:
 	HRESULT _LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept;
 
@@ -52,7 +56,6 @@ private:
 
 	bool _isTearingSupported = false;
 	bool _isRecreated = true;
-	bool _isResizing = false;
 };
 
 }

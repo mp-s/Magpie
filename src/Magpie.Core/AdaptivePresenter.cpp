@@ -187,7 +187,7 @@ void AdaptivePresenter::EndFrame(bool waitForGpu) noexcept {
 bool AdaptivePresenter::OnResize() noexcept {
 	_isResized = true;
 
-	if (ScalingWindow::Get().IsResizingOrMoving() || !_dxgiSwapChain) {
+	if (ScalingWindow::Get().IsResizing() || !_dxgiSwapChain) {
 		// 切换到 DirectComposition 呈现，失败则回落到交换链
 		_isDCompPresenting = _ResizeDCompVisual();
 		if (_isDCompPresenting) {

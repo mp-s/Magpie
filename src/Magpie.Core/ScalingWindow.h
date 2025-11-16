@@ -80,8 +80,16 @@ public:
 
 	void CleanAfterSrcRepositioned() noexcept;
 
+	bool IsResizing() const noexcept {
+		return _isResizing;
+	}
+
+	bool IsMoving() const noexcept {
+		return _isMoving;
+	}
+
 	bool IsResizingOrMoving() const noexcept {
-		return _isResizingOrMoving;
+		return _isResizing || _isMoving;
 	}
 
 	winrt::hstring GetLocalizedString(std::wstring_view resName) const;
@@ -198,9 +206,10 @@ private:
 
 	// 第一帧渲染完成后再显示
 	bool _isFirstFrame = false;
-	bool _isResizingOrMoving = false;
 	// 用于区分调整大小和移动
 	bool _isPreparingForResizing = false;
+	bool _isResizing = false;
+	bool _isMoving = false;
 	bool _isMovingDueToSrcMoved = false;
 	bool _shouldWaitForRender = false;
 	bool _areResizeHelperWindowsVisible = false;

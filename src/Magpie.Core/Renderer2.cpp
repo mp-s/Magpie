@@ -148,8 +148,6 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 		_consumerCommandList->ResourceBarrier(1, &barrier);
 	}
 
-	_consumerCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-
 	{
 		const float clearColor[] = { 0.8f, 0.8f, 0.6f, 1.0f };
 		_consumerCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
@@ -172,6 +170,14 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 	}
 
 	return SUCCEEDED(_CheckDeviceLost(_presenter->EndFrame(), onHandlingDeviceLost));
+}
+
+bool Renderer2::OnSizeChanged() noexcept {
+	return SUCCEEDED(_CheckDeviceLost(_presenter->RecreateBuffers(false)));
+}
+
+bool Renderer2::OnResizeEnded() noexcept {
+	return SUCCEEDED(_CheckDeviceLost(_presenter->OnResizeEnded()));
 }
 
 HRESULT Renderer2::_CreateDXGIFactory() noexcept {
