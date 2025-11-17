@@ -24,6 +24,10 @@ public:
 
 	void OnMove() noexcept;
 
+	bool OnSrcMonitorChanged() noexcept;
+
+	bool OnDisplayChanged() noexcept;
+
 	void SwitchToolbarState() noexcept;
 
 	const RECT& SrcRect() const noexcept;
@@ -62,9 +66,23 @@ private:
 
 	bool _TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept;
 
-	void _BackendThreadProc() noexcept;
+	void _TryInitDisplayInfo() noexcept;
+
+	HRESULT _UpdateAdvancedColorInfo() noexcept;
+
+	HRESULT _UpdateAdvancedColor(bool onInit = false, bool noRender = false) noexcept;
+
+	void _ProducerThreadProc() noexcept;
+
+	bool _InitProducer() noexcept;
 
 	HRESULT _CheckDeviceLost(HRESULT hr, bool onHandlingDeviceLost = false) noexcept;
+
+	std::thread _producerThread;
+	winrt::DispatcherQueue _producerThreadDispatcher{ nullptr };
+
+	winrt::DisplayInformation _displayInfo{ nullptr };
+	winrt::DisplayInformation::AdvancedColorInfoChanged_revoker _acInfoChangedRevoker;
 
 	RECT _destRect{};
 
@@ -72,15 +90,33 @@ private:
 	winrt::com_ptr<IDXGIAdapter4> _dxgiAdapter;
 	winrt::com_ptr<ID3D12Device5> _device;
 
+	std::unique_ptr<SwapChainPresenter> _presenter;
+
 	winrt::com_ptr<ID3D12CommandQueue> _consumerCommandQueue;
 	winrt::com_ptr<ID3D12GraphicsCommandList> _consumerCommandList;
 	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _consumerCommandAllocators;
 
-	std::unique_ptr<SwapChainPresenter> _presenter;
+	winrt::com_ptr<ID3D12CommandQueue> _producerCommandQueue;
+	winrt::com_ptr<ID3D12GraphicsCommandList> _producerCommandList;
+	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _producerCommandAllocators;
 
-	std::thread _backendThread;
+	wil::srwlock _frameBufferLock;
+
+	std::vector<winrt::com_ptr<ID3D12Resource>> _frameBuffers;
+	std::vector<uint64_t> _frameBufferFenceValues;
+	uint32_t _curBufferIndex = 0;
+
+	winrt::com_ptr<ID3D12Fence1> _frameBufferFence;
+	uint64_t _curFrameBufferFenceValue = 0;
+	wil::unique_event_nothrow _fenceEvent;
 
 	std::vector<const EffectDesc*> _activeEffectDescs;
+
+	winrt::AdvancedColorKind _curAcKind = winrt::AdvancedColorKind::StandardDynamicRange;
+	// HDR 模式下最大亮度缩放
+	float _maxLuminance = 1.0f;
+	// HDR 模式下 SDR 内容亮度缩放
+	float _sdrWhiteLevel = 1.0f;
 
 	bool _isFP16Supported = false;
 	bool _isUsingWarp = false;

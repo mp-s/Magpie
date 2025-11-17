@@ -128,7 +128,8 @@ private:
 
 	bool _UpdateSrcState(
 		bool& isSrcRepositioning,
-		bool& srcFocusedChanged
+		bool& srcFocusedChanged,
+		bool& srcMonitorChanged
 	) noexcept;
 
 	bool _CheckForegroundFor3DGameMode(HWND hwndFore) const noexcept;

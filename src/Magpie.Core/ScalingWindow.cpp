@@ -393,7 +393,8 @@ void ScalingWindow::SwitchToolbarState() noexcept {
 void ScalingWindow::Render() noexcept {
 	bool isSrcRepositioning = false;
 	bool srcFocusedChanged = false;
-	if (!_UpdateSrcState(isSrcRepositioning, srcFocusedChanged)) {
+	bool srcMonitorChanged = false;
+	if (!_UpdateSrcState(isSrcRepositioning, srcFocusedChanged, srcMonitorChanged)) {
 		Logger::Get().Info("源窗口状态改变");
 		_DelayedStop(false, isSrcRepositioning);
 		return;
@@ -401,6 +402,10 @@ void ScalingWindow::Render() noexcept {
 
 	if (srcFocusedChanged) {
 		_UpdateFocusState();
+	}
+
+	if (srcMonitorChanged) {
+		_renderer2->OnSrcMonitorChanged();
 	}
 
 	// 虽然可以在第一帧渲染完成后再隐藏系统光标，但某些设备上显示窗口时光标状态会变成忙，
@@ -887,6 +892,13 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		}
 		break;
 	}
+	case WM_DISPLAYCHANGE:
+	{
+		if (_renderer2) {
+			_renderer2->OnDisplayChanged();
+		}
+		return 0;
+	}
 	case WM_DESTROY:
 	{
 		Logger::Get().Info("缩放结束");
@@ -1316,7 +1328,8 @@ void ScalingWindow::_MoveRenderer() noexcept {
 
 bool ScalingWindow::_UpdateSrcState(
 	bool& isSrcRepositioning,
-	bool& srcFocusedChanged
+	bool& srcFocusedChanged,
+	bool& srcMonitorChanged
 ) noexcept {
 	HWND hwndFore = GetForegroundWindow();
 
@@ -1338,7 +1351,7 @@ bool ScalingWindow::_UpdateSrcState(
 	bool srcSizeChanged = false;
 	bool srcMovingChanged = false;
 	if (!_srcTracker.UpdateState(hwndFore, _options.IsWindowedMode(), IsResizingOrMoving(),
-		isSrcInvisibleOrMinimized, srcFocusedChanged, srcRectChanged, srcSizeChanged, srcMovingChanged)) {
+		isSrcInvisibleOrMinimized, srcFocusedChanged, srcRectChanged, srcSizeChanged, srcMovingChanged, srcMonitorChanged)) {
 		return false;
 	}
 

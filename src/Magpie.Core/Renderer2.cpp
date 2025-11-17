@@ -1,17 +1,22 @@
 #include "pch.h"
-#include "Renderer2.h"
-#include "Logger.h"
+#include "CommonSharedConstants.h"
 #include "DirectXHelper.h"
+#include "Logger.h"
+#include "Renderer2.h"
 #include "ScalingWindow.h"
 #include "StrHelper.h"
 #include "SwapChainPresenter.h"
+#include "SrcTracker.h"
 #include <d3dkmthk.h>
+#include <dispatcherqueue.h>
 #include <dxgidebug.h>
+#include <windows.graphics.display.interop.h>
 
 namespace Magpie {
 
-// 自定义 HRESULT 的方法参考自 https://learn.microsoft.com/en-us/windows/win32/com/codes-in-facility-itf
-#define S_RECOVERED MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_ITF, 0x200)
+static constexpr HRESULT S_RECOVERED = CommonSharedConstants::S_RECOVERED;
+
+static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = (float)CommonSharedConstants::SCENE_REFERRED_SDR_WHITE_LEVEL;
 
 // 为生产队列和消费队列设置不同的 GUID 以提高并发度
 // {592345E2-622C-46F1-9A93-A87AF9C04F22}
@@ -21,7 +26,24 @@ static const winrt::guid COSUMER_QUEUE_ID(0x592345e2, 0x622c, 0x46f1, { 0x9a, 0x
 
 Renderer2::Renderer2() noexcept {}
 
-Renderer2::~Renderer2() noexcept {}
+Renderer2::~Renderer2() noexcept {
+	if (_producerThread.joinable()) {
+		const HANDLE hThread = _producerThread.native_handle();
+
+		if (!wil::handle_wait(hThread, 0)) {
+			const DWORD threadId = GetThreadId(_producerThread.native_handle());
+
+			// 持续尝试直到 _producerThread 创建了消息队列
+			while (!PostThreadMessage(threadId, WM_QUIT, 0, 0)) {
+				if (wil::handle_wait(hThread, 1)) {
+					break;
+				}
+			}
+		}
+
+		_producerThread.join();
+	}
+}
 
 ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOptions*/) noexcept {
 	[[maybe_unused]] static Ignore _ = [] {
@@ -75,6 +97,15 @@ ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOpt
 		}
 	}
 
+	_TryInitDisplayInfo();
+
+	if (FAILED(_UpdateAdvancedColor(true))) {
+		return ScalingError::ScalingFailedGeneral;
+	}
+
+	// 创建 D3D 设备后开始初始化生产者线程
+	_producerThread = std::thread(&Renderer2::_ProducerThreadProc, this);
+
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc{
 			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -104,7 +135,8 @@ ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOpt
 	}
 
 	_presenter = std::make_unique<SwapChainPresenter>();
-	if (!_presenter->Initialize(_device.get(), _consumerCommandQueue.get(), _dxgiFactory.get(), hwndAttach, false)) {
+	if (!_presenter->Initialize(_device.get(), _consumerCommandQueue.get(), _dxgiFactory.get(),
+		hwndAttach, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange)) {
 		Logger::Get().Error("初始化 SwapChainPresenter 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -116,8 +148,6 @@ ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOpt
 			return ScalingError::ScalingFailedGeneral;
 		}
 	}
-
-	// _backendThread = std::thread(&Renderer2::_BackendThreadProc, this);
 
 	return ScalingError::NoError;
 }
@@ -173,11 +203,26 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 }
 
 bool Renderer2::OnSizeChanged() noexcept {
-	return SUCCEEDED(_CheckDeviceLost(_presenter->RecreateBuffers(false)));
+	return SUCCEEDED(_CheckDeviceLost(_presenter->RecreateBuffers(
+		_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange)));
 }
 
 bool Renderer2::OnResizeEnded() noexcept {
 	return SUCCEEDED(_CheckDeviceLost(_presenter->OnResizeEnded()));
+}
+
+bool Renderer2::OnSrcMonitorChanged() noexcept {
+	_acInfoChangedRevoker.revoke();
+	_displayInfo = nullptr;
+
+	_TryInitDisplayInfo();
+	_UpdateAdvancedColor(false, true);
+
+	return true;
+}
+
+bool Renderer2::OnDisplayChanged() noexcept {
+	return _displayInfo || SUCCEEDED(_CheckDeviceLost(_UpdateAdvancedColor()));
 }
 
 HRESULT Renderer2::_CreateDXGIFactory() noexcept {
@@ -365,8 +410,202 @@ bool Renderer2::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter
 	return true;
 }
 
-void Renderer2::_BackendThreadProc() noexcept {
+void Renderer2::_TryInitDisplayInfo() noexcept {
+	winrt::com_ptr<IDisplayInformationStaticsInterop> interop =
+		winrt::try_get_activation_factory<winrt::DisplayInformation, IDisplayInformationStaticsInterop>();
+	if (!interop) {
+		return;
+	}
 	
+	HRESULT hr = (interop->GetForMonitor(
+		ScalingWindow::Get().SrcTracker().Monitor(),
+		winrt::guid_of<winrt::DisplayInformation>(),
+		winrt::put_abi(_displayInfo))
+	);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("IDisplayInformationStaticsInterop::GetForMonitor 失败", hr);
+		return;
+	}
+
+	_acInfoChangedRevoker = _displayInfo.AdvancedColorInfoChanged(
+		winrt::auto_revoke,
+		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
+			_UpdateAdvancedColor();
+		}
+	);
+}
+
+static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
+	UINT32 pathCount = 0, modeCount = 0;
+	if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) {
+		return 1.0f;
+	}
+
+	std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+	std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+	if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr) != ERROR_SUCCESS) {
+		return 1.0f;
+	}
+
+	for (const DISPLAYCONFIG_PATH_INFO& path : paths) {
+		DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName = {
+			.header = {
+				.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+				.size = sizeof(sourceName),
+				.adapterId = path.sourceInfo.adapterId,
+				.id = path.sourceInfo.id
+			}
+		};
+		if (DisplayConfigGetDeviceInfo(&sourceName.header) != ERROR_SUCCESS) {
+			continue;
+		}
+
+		if (monitorName == sourceName.viewGdiDeviceName) {
+			DISPLAYCONFIG_SDR_WHITE_LEVEL sdr = {
+				.header = {
+					.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
+					.size = sizeof(sdr),
+					.adapterId = path.targetInfo.adapterId,
+					.id = path.targetInfo.id
+				}
+			};
+			if (DisplayConfigGetDeviceInfo(&sdr.header) == ERROR_SUCCESS) {
+				return sdr.SDRWhiteLevel / 1000.0f;
+			} else {
+				return 1.0f;
+			}
+		}
+	}
+
+	return 1.0f;
+}
+
+HRESULT Renderer2::_UpdateAdvancedColorInfo() noexcept {
+	if (_displayInfo) {
+		winrt::AdvancedColorInfo acInfo = _displayInfo.GetAdvancedColorInfo();
+
+		_curAcKind = acInfo.CurrentAdvancedColorKind();
+		if (_curAcKind == winrt::AdvancedColorKind::HighDynamicRange) {
+			_maxLuminance = acInfo.MaxLuminanceInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
+			_sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
+		} else {
+			_maxLuminance = 1.0f;
+			_sdrWhiteLevel = 1.0f;
+		}
+
+		return S_OK;
+	}
+
+	// 未找到视为 SDR
+	_curAcKind = winrt::AdvancedColorKind::StandardDynamicRange;
+	_maxLuminance = 1.0f;
+	_sdrWhiteLevel = 1.0f;
+
+	if (!_dxgiFactory->IsCurrent()) {
+		HRESULT hr = _CreateDXGIFactory();
+		if (FAILED(hr)) {
+			return hr;
+		}
+	}
+
+	const HMONITOR hCurMonitor = ScalingWindow::Get().SrcTracker().Monitor();
+	winrt::com_ptr<IDXGIAdapter1> adapter;
+	winrt::com_ptr<IDXGIOutput> output;
+	for (UINT adapterIdx = 0;
+		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
+		++adapterIdx
+	) {
+		for (UINT outputIdx = 0;
+			SUCCEEDED(adapter->EnumOutputs(outputIdx, output.put()));
+			++outputIdx
+		) {
+			DXGI_OUTPUT_DESC1 desc;
+			if (SUCCEEDED(output.try_as<IDXGIOutput6>()->GetDesc1(&desc))) {
+				if (desc.Monitor == hCurMonitor) {
+					// DXGI 将 WCG 视为 SDR
+					if (desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
+						_curAcKind = winrt::AdvancedColorKind::HighDynamicRange;
+						_maxLuminance = desc.MaxLuminance / SCENE_REFERRED_SDR_WHITE_LEVEL;
+						_sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
+					}
+
+					return S_OK;
+				}
+			}
+		}
+	}
+
+	return S_OK;
+}
+
+HRESULT Renderer2::_UpdateAdvancedColor(bool onInit, bool noRender) noexcept {
+	winrt::AdvancedColorKind oldAcKind = _curAcKind;
+
+	HRESULT hr = _UpdateAdvancedColorInfo();
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	if (!onInit && oldAcKind == _curAcKind) {
+		return S_OK;
+	}
+
+	const bool shouldUpdateFrameBuffers =
+		(oldAcKind == winrt::AdvancedColorKind::StandardDynamicRange) != (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange);
+
+	if (!onInit && shouldUpdateFrameBuffers) {
+		// 等待 GPU 完成然后改变交换链格式
+		hr = _presenter->RecreateBuffers(
+			_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange);
+		if (FAILED(hr)) {
+			return hr;
+		}
+	}
+
+	return (onInit || noRender || Render()) ? S_OK : E_FAIL;
+}
+
+void Renderer2::_ProducerThreadProc() noexcept {
+#ifdef _DEBUG
+	SetThreadDescription(GetCurrentThread(), L"Magpie-缩放生产者线程");
+#endif
+
+	winrt::init_apartment(winrt::apartment_type::single_threaded);
+
+	if (!_InitProducer()) {
+		return;
+	}
+
+	MSG msg;
+	while (GetMessage(&msg, NULL, 0, 0)) {
+		if (msg.message == WM_QUIT) {
+			return;
+		}
+
+		DispatchMessage(&msg);
+	}
+}
+
+bool Renderer2::_InitProducer() noexcept {
+	// 创建 DispatcherQueue
+	{
+		winrt::Windows::System::DispatcherQueueController dqc{ nullptr };
+		HRESULT hr = CreateDispatcherQueueController(
+			DispatcherQueueOptions{
+				.dwSize = sizeof(DispatcherQueueOptions),
+				.threadType = DQTYPE_THREAD_CURRENT
+			},
+			(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(dqc)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateDispatcherQueueController 失败", hr);
+			return NULL;
+		}
+
+		_producerThreadDispatcher = dqc.DispatcherQueue();
+	}
+
+	return true;
 }
 
 // TODO: 处理设备丢失

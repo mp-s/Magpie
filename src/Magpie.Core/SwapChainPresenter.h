@@ -43,15 +43,15 @@ private:
 
 	winrt::com_ptr<IDXGISwapChain4> _dxgiSwapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
-	std::vector<winrt::com_ptr<ID3D12Resource>> _renderTargets;
-	std::vector<UINT64> _bufferFenceValues;
-	UINT _bufferIndex = 0;
+	std::vector<winrt::com_ptr<ID3D12Resource>> _frameBuffers;
+	std::vector<uint64_t> _frameBufferFenceValues;
+	uint32_t _curBufferIndex = 0;
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
-	UINT _rtvDescriptorSize = 0;
+	uint32_t _rtvDescriptorSize = 0;
 
 	winrt::com_ptr<ID3D12Fence1> _fence;
-	UINT64 _curFenceValue = 0;
+	uint64_t _curFenceValue = 0;
 	wil::unique_event_nothrow _fenceEvent;
 
 	bool _isTearingSupported = false;

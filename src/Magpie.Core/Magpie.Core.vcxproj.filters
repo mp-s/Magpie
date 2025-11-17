@@ -140,6 +140,9 @@
     <ClInclude Include="SwapChainPresenter.h">
       <Filter>Presenter</Filter>
     </ClInclude>
+    <ClInclude Include="GraphicsCaptureFrameSource2.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -236,6 +239,9 @@
     </ClCompile>
     <ClCompile Include="SwapChainPresenter.cpp">
       <Filter>Presenter</Filter>
+    </ClCompile>
+    <ClCompile Include="GraphicsCaptureFrameSource2.cpp">
+      <Filter>Capture</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

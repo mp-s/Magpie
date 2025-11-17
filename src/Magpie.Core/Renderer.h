@@ -144,7 +144,7 @@ private:
 	// INVALID_HANDLE_VALUE 表示后端初始化失败
 	std::atomic<HANDLE> _sharedTextureHandle{ NULL };
 	// 下面四个成员由 _sharedTextureHandle 同步
-	winrt::Windows::System::DispatcherQueue _backendThreadDispatcher{ nullptr };
+	winrt::DispatcherQueue _backendThreadDispatcher{ nullptr };
 	ScalingError _backendInitError = ScalingError::NoError;
 	std::vector<EffectDesc> _effectDescs;
 	// 包含追加的 Bicubic
