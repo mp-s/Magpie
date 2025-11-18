@@ -5,12 +5,15 @@ namespace Magpie {
 
 bool GraphicsCaptureFrameSource2::Initialize(
 	ID3D12Device5* /*device*/,
-	ID3D12CommandQueue* /*commandQueue*/,
-	uint32_t /*bufferCount*/,
+	ID3D12CommandList* /*commandList*/,
 	HMONITOR /*hMonSrc*/,
 	bool /*useScRGB*/
 ) noexcept {
-	return false;
+	return true;
+}
+
+FrameSourceState GraphicsCaptureFrameSource2::Update() noexcept {
+	return FrameSourceState::NewFrame;
 }
 
 }

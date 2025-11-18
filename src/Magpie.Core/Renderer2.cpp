@@ -1,12 +1,13 @@
 #include "pch.h"
 #include "CommonSharedConstants.h"
 #include "DirectXHelper.h"
+#include "GraphicsCaptureFrameSource2.h"
 #include "Logger.h"
 #include "Renderer2.h"
 #include "ScalingWindow.h"
+#include "SrcTracker.h"
 #include "StrHelper.h"
 #include "SwapChainPresenter.h"
-#include "SrcTracker.h"
 #include <d3dkmthk.h>
 #include <dispatcherqueue.h>
 #include <dxgidebug.h>
@@ -22,7 +23,7 @@ static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = (float)CommonSharedConst
 // {592345E2-622C-46F1-9A93-A87AF9C04F22}
 static const winrt::guid COSUMER_QUEUE_ID(0x592345e2, 0x622c, 0x46f1, { 0x9a, 0x93, 0xa8, 0x7a, 0xf9, 0xc0, 0x4f, 0x22 });
 // {A4AEA0B1-A73D-4224-BE15-4B82E04B2E2A}
-// static const winrt::guid PRODUCER_QUEUE_ID(0xa4aea0b1, 0xa73d, 0x4224, { 0xbe, 0x15, 0x4b, 0x82, 0xe0, 0x4b, 0x2e, 0x2a });
+static const winrt::guid PRODUCER_QUEUE_ID(0xa4aea0b1, 0xa73d, 0x4224, { 0xbe, 0x15, 0x4b, 0x82, 0xe0, 0x4b, 0x2e, 0x2a });
 
 Renderer2::Renderer2() noexcept {}
 
@@ -183,9 +184,68 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 		_consumerCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	}
 
+	ID3D12Resource* curBuffer;
+	D3D12_RESOURCE_STATES bufferState;
+	UINT64 frameBufferFenceValue;
+	{
+		auto lk = _frameBufferLock.lock_exclusive();
+
+		if (_curConsumeIndex != _curProduceIndex) {
+			uint64_t completedFenceValue = _producerFrameBufferFence->GetCompletedValue();
+			uint32_t nextConsumeIndex = (_curConsumeIndex + 1) % _frameBuffers.size();
+			if (completedFenceValue >= _frameBuffers[nextConsumeIndex].producerFenceValue) {
+				_curConsumeIndex = nextConsumeIndex;
+
+				// 寻找最新帧
+				while (true) {
+					nextConsumeIndex = (_curConsumeIndex + 1) % _frameBuffers.size();
+					if (completedFenceValue < _frameBuffers[nextConsumeIndex].producerFenceValue) {
+						break;
+					}
+
+					_curConsumeIndex = nextConsumeIndex;
+
+					if (_curConsumeIndex == _curProduceIndex) {
+						break;
+					}
+				}
+			}
+		}
+
+		_FrameBuffer& curFrameBuffer = _frameBuffers[_curConsumeIndex];
+		frameBufferFenceValue = ++_curConsumerFrameBufferFenceValue;
+		curFrameBuffer.consumerFenceValue = frameBufferFenceValue;
+
+		curBuffer = curFrameBuffer.resource.get();
+		bufferState = curFrameBuffer.state;
+		curFrameBuffer.state = D3D12_RESOURCE_STATE_COPY_SOURCE;
+	}
+
+	{
+		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
+			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST);
+			_consumerCommandList->ResourceBarrier(1, &barrier);
+		} else {
+			CD3DX12_RESOURCE_BARRIER barriers[] = {
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST),
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE)
+			};
+			_consumerCommandList->ResourceBarrier((UINT)std::size(barriers), barriers);
+		}
+	}
+
+	{
+		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
+		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
+		_consumerCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, nullptr);
+	}
+
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
 		_consumerCommandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -197,6 +257,11 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 	{
 		ID3D12CommandList* t = _consumerCommandList.get();
 		_consumerCommandQueue->ExecuteCommandLists(1, &t);
+	}
+
+	hr = _consumerCommandQueue->Signal(_consumerFrameBufferFence.get(), frameBufferFenceValue);
+	if (FAILED(hr)) {
+		return false;
 	}
 
 	return SUCCEEDED(_CheckDeviceLost(_presenter->EndFrame(), onHandlingDeviceLost));
@@ -577,12 +642,16 @@ void Renderer2::_ProducerThreadProc() noexcept {
 	}
 
 	MSG msg;
-	while (GetMessage(&msg, NULL, 0, 0)) {
-		if (msg.message == WM_QUIT) {
-			return;
+	while (true) {
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				return;
+			}
+
+			DispatchMessage(&msg);
 		}
 
-		DispatchMessage(&msg);
+		_ProducerRender();
 	}
 }
 
@@ -603,6 +672,147 @@ bool Renderer2::_InitProducer() noexcept {
 		}
 
 		_producerThreadDispatcher = dqc.DispatcherQueue();
+	}
+
+	{
+		D3D12_COMMAND_QUEUE_DESC queueDesc{
+			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
+			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
+		};
+		if (winrt::com_ptr<ID3D12Device9> device9 = _device.try_as<ID3D12Device9>()) {
+			// 设置 CreatorID 可以提高并发度
+			HRESULT hr = device9->CreateCommandQueue1(&queueDesc, PRODUCER_QUEUE_ID, IID_PPV_ARGS(&_producerCommandQueue));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommandQueue1 失败", hr);
+				return false;
+			}
+		} else {
+			HRESULT hr = _device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_producerCommandQueue));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommandQueue 失败", hr);
+				return false;
+			}
+		}
+	}
+
+	HRESULT hr = _device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
+		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_producerCommandList));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandList1 失败", hr);
+		return false;
+	}
+
+	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
+	if (!_frameSource->Initialize(_device.get(), _producerCommandList.get(), NULL, false)) {
+		return false;
+	}
+
+	const RECT& srcRect = ScalingWindow::Get().SrcTracker().SrcRect();
+	const uint32_t outputWidth = uint32_t(srcRect.right - srcRect.left);
+	const uint32_t outputHeight = uint32_t(srcRect.bottom - srcRect.top);
+
+	const uint32_t maxFramesInFlight = ScalingWindow::Get().Options().maxProducerFramesInFlight;
+	_producerCommandAllocators.resize(maxFramesInFlight);
+	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _producerCommandAllocators) {
+		if (FAILED(_device->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)))) {
+			return false;
+		}
+	}
+
+	{
+		auto lk = _frameBufferLock.lock_exclusive();
+
+		const size_t frameCount = size_t(maxFramesInFlight + 1);
+		_frameBuffers.resize(frameCount);
+
+		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM,
+			outputWidth, outputHeight, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+		for (_FrameBuffer& frameBuffer : _frameBuffers) {
+			hr = _device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+				&texDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&frameBuffer.resource));
+			if (FAILED(hr)) {
+				return false;
+			}
+		}
+
+		hr = _device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_consumerFrameBufferFence));
+		if (FAILED(hr)) {
+			return false;
+		}
+
+		hr = _device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_producerFrameBufferFence));
+		if (FAILED(hr)) {
+			return false;
+		}
+
+		hr = _fenceEvent.create();
+		if (FAILED(hr)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool Renderer2::_ProducerRender() noexcept {
+	ID3D12Resource* curBuffer;
+	D3D12_RESOURCE_STATES bufferState;
+	{
+		auto lk = _frameBufferLock.lock_exclusive();
+
+		// 等待消费者命令队列不再使用 _curProduceIndex
+		const _FrameBuffer& curFrameBuffer = _frameBuffers[_curProduceIndex];
+		if (_consumerFrameBufferFence->GetCompletedValue() < curFrameBuffer.consumerFenceValue) {
+			_producerCommandQueue->Wait(
+				_consumerFrameBufferFence.get(), curFrameBuffer.consumerFenceValue);
+		}
+
+		curBuffer = curFrameBuffer.resource.get();
+		bufferState = curFrameBuffer.state;
+	}
+
+	// 写入 curBuffer 是安全的
+
+
+	{
+		auto lk = _frameBufferLock.lock_exclusive();
+
+		HRESULT hr = _producerCommandQueue->Signal(
+			_producerFrameBufferFence.get(), _frameBuffers[_curProduceIndex].producerFenceValue);
+		if (FAILED(hr)) {
+			return false;
+		}
+
+		uint32_t nextProduceIndex = (_curProduceIndex + 1) % _frameBuffers.size();
+		if (nextProduceIndex == _curConsumeIndex) {
+			uint32_t nextConsumeIndex = (_curConsumeIndex + 1) % _frameBuffers.size();
+
+			uint64_t fenceValueToWait = _frameBuffers[nextConsumeIndex].producerFenceValue;
+			if (_producerFrameBufferFence->GetCompletedValue() < fenceValueToWait) {
+				// 等待新缓冲区可用
+				hr = _producerFrameBufferFence->SetEventOnCompletion(fenceValueToWait, _fenceEvent.get());
+				if (FAILED(hr)) {
+					return false;
+				}
+
+				lk.reset();
+				_fenceEvent.wait();
+				lk = _frameBufferLock.lock_exclusive();
+
+				if (_curConsumeIndex == nextProduceIndex) {
+					_curConsumeIndex = nextConsumeIndex;
+				}
+			} else {
+				_curConsumeIndex = nextConsumeIndex;
+			}
+		}
+
+		uint64_t nextFenceValue = _frameBuffers[_curProduceIndex].producerFenceValue + 1;
+		_curProduceIndex = nextProduceIndex;
+		_frameBuffers[nextProduceIndex].producerFenceValue = nextFenceValue;
 	}
 
 	return true;

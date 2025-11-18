@@ -76,6 +76,8 @@ private:
 
 	bool _InitProducer() noexcept;
 
+	bool _ProducerRender() noexcept;
+
 	HRESULT _CheckDeviceLost(HRESULT hr, bool onHandlingDeviceLost = false) noexcept;
 
 	std::thread _producerThread;
@@ -102,13 +104,24 @@ private:
 
 	wil::srwlock _frameBufferLock;
 
-	std::vector<winrt::com_ptr<ID3D12Resource>> _frameBuffers;
-	std::vector<uint64_t> _frameBufferFenceValues;
-	uint32_t _curBufferIndex = 0;
+	struct _FrameBuffer {
+		winrt::com_ptr<ID3D12Resource> resource;
+		uint64_t consumerFenceValue = 0;
+		uint64_t producerFenceValue = 0;
+		D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+	};
 
-	winrt::com_ptr<ID3D12Fence1> _frameBufferFence;
-	uint64_t _curFrameBufferFenceValue = 0;
+	std::vector<_FrameBuffer> _frameBuffers;
+	uint32_t _curConsumeIndex = 0;
+	uint32_t _curProduceIndex = 0;
+	uint32_t _curProducerAllocatorIndex = 0;
+
+	winrt::com_ptr<ID3D12Fence1> _consumerFrameBufferFence;
+	uint64_t _curConsumerFrameBufferFenceValue = 0;
+	winrt::com_ptr<ID3D12Fence1> _producerFrameBufferFence;
 	wil::unique_event_nothrow _fenceEvent;
+
+	std::unique_ptr<class GraphicsCaptureFrameSource2> _frameSource;
 
 	std::vector<const EffectDesc*> _activeEffectDescs;
 
