@@ -101,6 +101,7 @@ private:
 	winrt::com_ptr<ID3D12CommandQueue> _producerCommandQueue;
 	winrt::com_ptr<ID3D12GraphicsCommandList> _producerCommandList;
 	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _producerCommandAllocators;
+	uint32_t _curProducerCommandAllocatorIndex = 0;
 
 	wil::srwlock _frameBufferLock;
 
@@ -121,10 +122,13 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _producerFrameBufferFence;
 	wil::unique_event_nothrow _fenceEvent;
 
+	winrt::com_ptr<ID3D12DescriptorHeap> _producerDescHeap;
+	uint32_t _srvUavDescriptorSize = 0;
 	std::unique_ptr<class GraphicsCaptureFrameSource2> _frameSource;
 
 	std::vector<const EffectDesc*> _activeEffectDescs;
 
+	wil::srwlock _acInfoLock;
 	winrt::AdvancedColorKind _curAcKind = winrt::AdvancedColorKind::StandardDynamicRange;
 	// HDR 模式下最大亮度缩放
 	float _maxLuminance = 1.0f;

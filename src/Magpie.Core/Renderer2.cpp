@@ -173,17 +173,6 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 		return hr == S_RECOVERED;
 	}
 
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		_consumerCommandList->ResourceBarrier(1, &barrier);
-	}
-
-	{
-		const float clearColor[] = { 0.8f, 0.8f, 0.6f, 1.0f };
-		_consumerCommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-	}
-
 	ID3D12Resource* curBuffer;
 	D3D12_RESOURCE_STATES bufferState;
 	UINT64 frameBufferFenceValue;
@@ -221,7 +210,35 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 		curFrameBuffer.state = D3D12_RESOURCE_STATE_COPY_SOURCE;
 	}
 
-	{
+	const RECT& rendererRect = ScalingWindow::Get().RendererRect();
+	if (_destRect == rendererRect) {
+		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
+			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+			_consumerCommandList->ResourceBarrier(1, &barrier);
+		} else {
+			CD3DX12_RESOURCE_BARRIER barriers[] = {
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST),
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE)
+			};
+			_consumerCommandList->ResourceBarrier((UINT)std::size(barriers), barriers);
+		}
+
+		_consumerCommandList->CopyResource(frameTex, curBuffer);
+	} else {
+		{
+			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			_consumerCommandList->ResourceBarrier(1, &barrier);
+		}
+
+		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
+		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
+		static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
+		_consumerCommandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
+
 		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -235,12 +252,11 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 			};
 			_consumerCommandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 		}
-	}
 
-	{
 		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
 		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
-		_consumerCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, nullptr);
+		_consumerCommandList->CopyTextureRegion(
+			&dest, _destRect.left - rendererRect.left, _destRect.top - rendererRect.top, 0, &src, nullptr);
 	}
 
 	{
@@ -676,7 +692,7 @@ bool Renderer2::_InitProducer() noexcept {
 
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc{
-			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
+			.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
 			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
 		};
 		if (winrt::com_ptr<ID3D12Device9> device9 = _device.try_as<ID3D12Device9>()) {
@@ -702,20 +718,35 @@ bool Renderer2::_InitProducer() noexcept {
 		return false;
 	}
 
+	const uint32_t maxFramesInFlight = ScalingWindow::Get().Options().maxProducerFramesInFlight;
+	const uint32_t frameCount = maxFramesInFlight + 1;
+
+	{
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {
+			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+			.NumDescriptors = frameCount,
+			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
+		};
+		hr = _device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_producerDescHeap));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
+			return false;
+		}
+
+		_srvUavDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
+
 	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
 	if (!_frameSource->Initialize(_device.get(), _producerCommandList.get(), NULL, false)) {
 		return false;
 	}
 
-	const RECT& srcRect = ScalingWindow::Get().SrcTracker().SrcRect();
-	const uint32_t outputWidth = uint32_t(srcRect.right - srcRect.left);
-	const uint32_t outputHeight = uint32_t(srcRect.bottom - srcRect.top);
+	_destRect = ScalingWindow::Get().RendererRect();
 
-	const uint32_t maxFramesInFlight = ScalingWindow::Get().Options().maxProducerFramesInFlight;
 	_producerCommandAllocators.resize(maxFramesInFlight);
 	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _producerCommandAllocators) {
 		if (FAILED(_device->CreateCommandAllocator(
-			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)))) {
+			D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&commandAllocator)))) {
 			return false;
 		}
 	}
@@ -723,19 +754,41 @@ bool Renderer2::_InitProducer() noexcept {
 	{
 		auto lk = _frameBufferLock.lock_exclusive();
 
-		const size_t frameCount = size_t(maxFramesInFlight + 1);
 		_frameBuffers.resize(frameCount);
 
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM,
-			outputWidth, outputHeight, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		DXGI_FORMAT format;
+		{
+			auto lk1 = _acInfoLock.lock_shared();
+			format = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+				DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
+		}
+		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+			format,
+			UINT64(_destRect.right - _destRect.left),
+			UINT(_destRect.bottom - _destRect.top),
+			1, 1, 1, 0,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+		);
 
-		for (_FrameBuffer& frameBuffer : _frameBuffers) {
+		CD3DX12_CPU_DESCRIPTOR_HANDLE uavHandle(_producerDescHeap->GetCPUDescriptorHandleForHeapStart());
+
+		for (uint32_t i = 0; i < frameCount; ++i) {
+			_FrameBuffer& curFrameBuffer = _frameBuffers[i];
+			curFrameBuffer.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
 			hr = _device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
-				&texDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&frameBuffer.resource));
+				&texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&curFrameBuffer.resource));
 			if (FAILED(hr)) {
 				return false;
 			}
+
+			D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
+				.Format = format,
+				.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D
+			};
+			_device->CreateUnorderedAccessView(curFrameBuffer.resource.get(), nullptr, &uavDesc, uavHandle);
+			uavHandle.Offset(1, _srvUavDescriptorSize);
 		}
 
 		hr = _device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_consumerFrameBufferFence));
@@ -764,7 +817,7 @@ bool Renderer2::_ProducerRender() noexcept {
 		auto lk = _frameBufferLock.lock_exclusive();
 
 		// 等待消费者命令队列不再使用 _curProduceIndex
-		const _FrameBuffer& curFrameBuffer = _frameBuffers[_curProduceIndex];
+		_FrameBuffer& curFrameBuffer = _frameBuffers[_curProduceIndex];
 		if (_consumerFrameBufferFence->GetCompletedValue() < curFrameBuffer.consumerFenceValue) {
 			_producerCommandQueue->Wait(
 				_consumerFrameBufferFence.get(), curFrameBuffer.consumerFenceValue);
@@ -772,15 +825,44 @@ bool Renderer2::_ProducerRender() noexcept {
 
 		curBuffer = curFrameBuffer.resource.get();
 		bufferState = curFrameBuffer.state;
+		curFrameBuffer.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 	}
 
-	// 写入 curBuffer 是安全的
+	HRESULT hr = _producerCommandAllocators[_curProducerCommandAllocatorIndex]->Reset();
+	if (FAILED(hr)) {
+		return false;
+	}
 
+	hr = _producerCommandList->Reset(_producerCommandAllocators[_curProducerCommandAllocatorIndex].get(), nullptr);
+	if (FAILED(hr)) {
+		return false;
+	}
+
+	if (bufferState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			curBuffer, bufferState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		_producerCommandList->ResourceBarrier(1, &barrier);
+	}
+
+	// 渲染
+
+	hr = _producerCommandList->Close();
+	if (FAILED(hr)) {
+		return false;
+	}
+
+	{
+		ID3D12CommandList* t = _producerCommandList.get();
+		_producerCommandQueue->ExecuteCommandLists(1, &t);
+	}
+
+	_curProducerCommandAllocatorIndex =
+		(_curProducerCommandAllocatorIndex + 1) % (uint32_t)_producerCommandAllocators.size();
 
 	{
 		auto lk = _frameBufferLock.lock_exclusive();
 
-		HRESULT hr = _producerCommandQueue->Signal(
+		hr = _producerCommandQueue->Signal(
 			_producerFrameBufferFence.get(), _frameBuffers[_curProduceIndex].producerFenceValue);
 		if (FAILED(hr)) {
 			return false;
