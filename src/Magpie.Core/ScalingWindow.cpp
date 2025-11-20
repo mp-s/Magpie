@@ -923,6 +923,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		Logger::Get().Info("CursorManager 已析构");
 
 		_renderer.reset();
+		_renderer2.reset();
 		Logger::Get().Info("Renderer 已析构");
 
 		if (!_isSrcRepositioning) {

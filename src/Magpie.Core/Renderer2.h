@@ -101,7 +101,7 @@ private:
 	winrt::com_ptr<ID3D12CommandQueue> _producerCommandQueue;
 	winrt::com_ptr<ID3D12GraphicsCommandList> _producerCommandList;
 	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _producerCommandAllocators;
-	uint32_t _curProducerCommandAllocatorIndex = 0;
+	uint32_t _curProducerFrameIndex = 0;
 
 	wil::srwlock _frameBufferLock;
 
@@ -137,6 +137,7 @@ private:
 
 	bool _isFP16Supported = false;
 	bool _isUsingWarp = false;
+	std::atomic<bool> _isProducerInitialized = false;
 };
 
 }

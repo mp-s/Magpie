@@ -10,7 +10,9 @@
 #include "SwapChainPresenter.h"
 #include <d3dkmthk.h>
 #include <dispatcherqueue.h>
+#ifdef _DEBUG
 #include <dxgidebug.h>
+#endif
 #include <windows.graphics.display.interop.h>
 
 namespace Magpie {
@@ -150,6 +152,8 @@ ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOpt
 		}
 	}
 
+	_isProducerInitialized.wait(false, std::memory_order_acquire);
+
 	return ScalingError::NoError;
 }
 
@@ -236,7 +240,7 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 
 		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
 		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
-		static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
+		static constexpr FLOAT BLACK[4] = { 1.0f,0.0f,0.0f,1.0f };
 		_consumerCommandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
 
 		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
@@ -468,7 +472,7 @@ bool Renderer2::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter
 				flStr = "未知";
 				break;
 			}
-			Logger::Get().Info(fmt::format("已创建 D3D 设备\n\t功能级别: {}", flStr));
+			Logger::Get().Info(fmt::format("已创建 D3D12 设备\n\t功能级别: {}", flStr));
 		} else {
 			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
 		}
@@ -661,6 +665,7 @@ void Renderer2::_ProducerThreadProc() noexcept {
 	while (true) {
 		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) {
+				_frameSource.reset();
 				return;
 			}
 
@@ -737,11 +742,12 @@ bool Renderer2::_InitProducer() noexcept {
 	}
 
 	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
-	if (!_frameSource->Initialize(_device.get(), _producerCommandList.get(), NULL, false)) {
+	if (!_frameSource->Initialize(_device.get(), _producerCommandList.get(),
+		_dxgiFactory.get(), _dxgiAdapter.get(), ScalingWindow::Get().SrcTracker().Monitor(), false)) {
 		return false;
 	}
 
-	_destRect = ScalingWindow::Get().RendererRect();
+	_destRect = ScalingWindow::Get().SrcTracker().SrcRect();
 
 	_producerCommandAllocators.resize(maxFramesInFlight);
 	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _producerCommandAllocators) {
@@ -807,6 +813,15 @@ bool Renderer2::_InitProducer() noexcept {
 		}
 	}
 
+	// 最后启动捕获以尽可能推迟显示黄色边框 (Win10) 或禁用圆角 (Win11)
+	if (!_frameSource->Start()) {
+		Logger::Get().Error("启动捕获失败");
+		return NULL;
+	}
+
+	_isProducerInitialized.store(true, std::memory_order_release);
+	_isProducerInitialized.notify_one();
+
 	return true;
 }
 
@@ -828,12 +843,12 @@ bool Renderer2::_ProducerRender() noexcept {
 		curFrameBuffer.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 	}
 
-	HRESULT hr = _producerCommandAllocators[_curProducerCommandAllocatorIndex]->Reset();
+	HRESULT hr = _producerCommandAllocators[_curProducerFrameIndex]->Reset();
 	if (FAILED(hr)) {
 		return false;
 	}
 
-	hr = _producerCommandList->Reset(_producerCommandAllocators[_curProducerCommandAllocatorIndex].get(), nullptr);
+	hr = _producerCommandList->Reset(_producerCommandAllocators[_curProducerFrameIndex].get(), nullptr);
 	if (FAILED(hr)) {
 		return false;
 	}
@@ -856,9 +871,6 @@ bool Renderer2::_ProducerRender() noexcept {
 		_producerCommandQueue->ExecuteCommandLists(1, &t);
 	}
 
-	_curProducerCommandAllocatorIndex =
-		(_curProducerCommandAllocatorIndex + 1) % (uint32_t)_producerCommandAllocators.size();
-
 	{
 		auto lk = _frameBufferLock.lock_exclusive();
 
@@ -868,9 +880,10 @@ bool Renderer2::_ProducerRender() noexcept {
 			return false;
 		}
 
-		uint32_t nextProduceIndex = (_curProduceIndex + 1) % _frameBuffers.size();
+		const uint32_t frameBufferCount = (uint32_t)_frameBuffers.size();
+		const uint32_t nextProduceIndex = (_curProduceIndex + 1) % frameBufferCount;
 		if (nextProduceIndex == _curConsumeIndex) {
-			uint32_t nextConsumeIndex = (_curConsumeIndex + 1) % _frameBuffers.size();
+			uint32_t nextConsumeIndex = (_curConsumeIndex + 1) % frameBufferCount;
 
 			uint64_t fenceValueToWait = _frameBuffers[nextConsumeIndex].producerFenceValue;
 			if (_producerFrameBufferFence->GetCompletedValue() < fenceValueToWait) {
@@ -895,6 +908,9 @@ bool Renderer2::_ProducerRender() noexcept {
 		uint64_t nextFenceValue = _frameBuffers[_curProduceIndex].producerFenceValue + 1;
 		_curProduceIndex = nextProduceIndex;
 		_frameBuffers[nextProduceIndex].producerFenceValue = nextFenceValue;
+
+		_curProducerFrameIndex =
+			(_curProducerFrameIndex + 1) % (uint32_t)_producerCommandAllocators.size();
 	}
 
 	return true;
