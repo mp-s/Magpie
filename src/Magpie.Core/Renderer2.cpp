@@ -110,10 +110,7 @@ ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOpt
 	_producerThread = std::thread(&Renderer2::_ProducerThreadProc, this);
 
 	{
-		D3D12_COMMAND_QUEUE_DESC queueDesc{
-			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
-		};
+		D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_DIRECT };
 		if (winrt::com_ptr<ID3D12Device9> device9 = _device.try_as<ID3D12Device9>()) {
 			// 设置 CreatorID 可以提高并发度
 			HRESULT hr = device9->CreateCommandQueue1(&queueDesc, COSUMER_QUEUE_ID, IID_PPV_ARGS(&_consumerCommandQueue));
@@ -164,13 +161,13 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 	{
 		auto lk = _frameBufferLock.lock_exclusive();
 
-		const uint64_t completedFenceValue = _producerFrameBufferFence->GetCompletedValue();
-		if (completedFenceValue == 0) {
-			// 第一帧尚未完成
-			return false;
-		}
-
 		if (_curConsumeIndex != _curProduceIndex) {
+			const uint64_t completedFenceValue = _producerFrameBufferFence->GetCompletedValue();
+			if (completedFenceValue == 0) {
+				// 第一帧尚未完成
+				return false;
+			}
+
 			const uint32_t frameBufferCount = (uint32_t)_frameBuffers.size();
 			uint32_t nextConsumeIndex = (_curConsumeIndex + 1) % frameBufferCount;
 			if (completedFenceValue >= _frameBuffers[nextConsumeIndex].producerFenceValue) {
@@ -185,6 +182,7 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 
 					_curConsumeIndex = nextConsumeIndex;
 
+					// 窗口很小，但有发生的可能
 					if (_curConsumeIndex == _curProduceIndex) {
 						break;
 					}
@@ -728,10 +726,7 @@ bool Renderer2::_InitProducer() noexcept {
 	}
 
 	{
-		D3D12_COMMAND_QUEUE_DESC queueDesc{
-			.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
-			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
-		};
+		D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COMPUTE };
 		if (winrt::com_ptr<ID3D12Device9> device9 = _device.try_as<ID3D12Device9>()) {
 			// 设置 CreatorID 可以提高并发度
 			HRESULT hr = device9->CreateCommandQueue1(&queueDesc, PRODUCER_QUEUE_ID, IID_PPV_ARGS(&_producerCommandQueue));
@@ -893,6 +888,8 @@ bool Renderer2::_InitProducer() noexcept {
 }
 
 bool Renderer2::_ProducerRender() noexcept {
+	_stepTimer.PrepareForRender();
+
 	ID3D12Resource* curBuffer;
 	D3D12_RESOURCE_STATES bufferState;
 	{
@@ -909,8 +906,6 @@ bool Renderer2::_ProducerRender() noexcept {
 		bufferState = curFrameBuffer.state;
 		curFrameBuffer.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 	}
-
-	_stepTimer.PrepareForRender();
 
 	HRESULT hr = _producerCommandAllocators[_curProducerFrameIndex]->Reset();
 	if (FAILED(hr)) {

@@ -101,7 +101,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 ) noexcept {
 	assert(hMonSrc);
 
-	_device = device;
+	_renderingDevice = device;
 	_isUsingScRGB = useScRGB;
 
 	if (!winrt::GraphicsCaptureSession::IsSupported()) {
@@ -109,10 +109,37 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
+	{
+		const SrcTracker& srcTracker = ScalingWindow::Get().SrcTracker();
+		const HWND hwndSrc = srcTracker.Handle();
+		const RECT& srcRect = srcTracker.SrcRect();
+
+		RECT frameBounds;
+		if (!CalcWindowCapturedFrameBounds(hwndSrc, frameBounds)) {
+			Logger::Get().Error("CalcWindowCapturedFrameBounds 失败");
+			return false;
+		}
+
+		if (srcRect.left < frameBounds.left || srcRect.top < frameBounds.top) {
+			Logger::Get().Error("裁剪边框错误");
+			return false;
+		}
+
+		// 在源窗口存在 DPI 缩放时有时会有一像素的偏移（取决于窗口在屏幕上的位置）
+		// 可能是 DwmGetWindowAttribute 的 bug
+		_frameBox = {
+			UINT(srcRect.left - frameBounds.left),
+			UINT(srcRect.top - frameBounds.top),
+			0,
+			UINT(srcRect.right - frameBounds.left),
+			UINT(srcRect.bottom - frameBounds.top),
+			1
+		};
+	}
+
 	// 查找源窗口所在屏幕连接的适配器
 	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter = FindAdapterOfMonitor(dxgiFactory, hMonSrc);
 
-	bool isSameAdapter = false;
 	if (srcMonAdapter) {
 		DXGI_ADAPTER_DESC desc;
 		HRESULT hr = srcMonAdapter->GetDesc(&desc);
@@ -123,12 +150,19 @@ bool GraphicsCaptureFrameSource2::Initialize(
 
 		const LUID renderAdapterLUID = device->GetAdapterLuid();
 
-		isSameAdapter = desc.AdapterLuid.HighPart == renderAdapterLUID.HighPart &&
-			desc.AdapterLuid.LowPart == renderAdapterLUID.LowPart;
+		if (desc.AdapterLuid.HighPart != renderAdapterLUID.HighPart ||
+			desc.AdapterLuid.LowPart != renderAdapterLUID.LowPart)
+		{
+			// 通过 D3D12 跨适配器共享机制共享捕获图像
+			if (!_CreateBridgeDeviceResources(dxgiAdapter)) {
+				// 失败则使用渲染设备捕获，WGC 内部使用内存中转
+				srcMonAdapter.copy_from(dxgiAdapter);
+			}
+		}
+		
 	} else {
 		// 找不到源窗口所在屏幕的适配器则使用渲染设备
 		srcMonAdapter.copy_from(dxgiAdapter);
-		isSameAdapter = true;
 	}
 
 	if (!_CreateD3D11Device(dxgiAdapter)) {
@@ -158,32 +192,6 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
-	const SrcTracker& srcTracker = ScalingWindow::Get().SrcTracker();
-	const HWND hwndSrc = srcTracker.Handle();
-	const RECT& srcRect = srcTracker.SrcRect();
-
-	RECT frameBounds;
-	if (!CalcWindowCapturedFrameBounds(hwndSrc, frameBounds)) {
-		Logger::Get().Error("CalcWindowCapturedFrameBounds 失败");
-		return false;
-	}
-
-	if (srcRect.left < frameBounds.left || srcRect.top < frameBounds.top) {
-		Logger::Get().Error("裁剪边框错误");
-		return false;
-	}
-
-	// 在源窗口存在 DPI 缩放时有时会有一像素的偏移（取决于窗口在屏幕上的位置）
-	// 可能是 DwmGetWindowAttribute 的 bug
-	_frameBox = {
-		UINT(srcRect.left - frameBounds.left),
-		UINT(srcRect.top - frameBounds.top),
-		0,
-		UINT(srcRect.right - frameBounds.left),
-		UINT(srcRect.bottom - frameBounds.top),
-		1
-	};
-
 	hr = interop->CreateForWindow(
 		ScalingWindow::Get().SrcTracker().Handle(),
 		winrt::guid_of<winrt::GraphicsCaptureItem>(),
@@ -210,7 +218,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		1, 1, 1, 0,
 		D3D12_RESOURCE_FLAG_NONE
 	);
-	hr = _device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+	hr = _renderingDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
 		&texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&_output));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateCommittedResource 失败", hr);
@@ -283,12 +291,12 @@ bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList,
 		auto lk = _newFrameLock.lock_exclusive();
 		if (currentFrame.frame != _lastestFrame) {
 			currentFrame.frame = _lastestFrame;
-			currentFrame.d3d12Resource = nullptr;
+			currentFrame.sharedResource = nullptr;
 			_isNewFrameAvailable = false;
 		}
 	}
 
-	if (!currentFrame.d3d12Resource) {
+	if (!currentFrame.sharedResource) {
 		winrt::IDirect3DSurface d3dSurface = currentFrame.frame.Surface();
 
 		auto dxgiInterfaceAccess =
@@ -309,13 +317,22 @@ bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList,
 			return false;
 		}
 
-		hr = _device->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.d3d12Resource));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("OpenSharedHandle 失败", hr);
-			return false;
+		if (_bridgeDevice) {
+			hr = _bridgeDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.sharedResource));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("OpenSharedHandle 失败", hr);
+				return false;
+			}
+		} else {
+			hr = _renderingDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.sharedResource));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("OpenSharedHandle 失败", hr);
+				return false;
+			}
 		}
 	}
 
+	// 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
 	D3D12_RESOURCE_BARRIER barrier = {
 		.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
 		.Transition = {
@@ -326,7 +343,7 @@ bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList,
 	};
 	commandList->ResourceBarrier(1, &barrier);
 
-	CD3DX12_TEXTURE_COPY_LOCATION src(currentFrame.d3d12Resource.get(), 0);
+	CD3DX12_TEXTURE_COPY_LOCATION src(currentFrame.sharedResource.get(), 0);
 	CD3DX12_TEXTURE_COPY_LOCATION dest(_output.get(), 0);
 	commandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
 
@@ -415,6 +432,63 @@ bool GraphicsCaptureFrameSource2::_CreateD3D11Device(IDXGIAdapter1* dxgiAdapter)
 	if (!_d3d11DC) {
 		Logger::Get().Error("获取 ID3D11DeviceContext4 失败");
 		return false;
+	}
+
+	return true;
+}
+
+bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept {
+	HRESULT hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&_bridgeDevice));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("D3D12CreateDevice 失败", hr);
+		return false;
+	}
+
+	Logger::Get().Info("已创建 D3D12 设备");
+
+	{
+		// 只需要复制
+		D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
+		hr = _bridgeDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_bridgeCommandQueue));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandQueue 失败", hr);
+			return false;
+		}
+	}
+	
+	hr = _bridgeDevice->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COPY,
+		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_bridgeCommandList));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandList1 失败", hr);
+		return false;
+	}
+
+	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerFramesInFlight;
+	_bridgeCommandAllocators.resize(frameCount);
+	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _bridgeCommandAllocators) {
+		if (FAILED(_bridgeDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&commandAllocator)))) {
+			return false;
+		}
+	}
+
+	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+		_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM,
+		UINT64(_frameBox.right - _frameBox.left),
+		_frameBox.bottom - _frameBox.top,
+		1, 1, 1, 0,
+		D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER,
+		D3D12_TEXTURE_LAYOUT_ROW_MAJOR
+	);
+
+	_bridgeResources.resize(frameCount);
+	for (winrt::com_ptr<ID3D12Resource>& resouce : _bridgeResources) {
+		hr = _renderingDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER,
+			&texDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&resouce));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return false;
+		}
 	}
 
 	return true;

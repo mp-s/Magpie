@@ -108,10 +108,6 @@ bool SwapChainPresenter::Initialize(
 		return false;
 	}
 
-	if (FAILED(_fenceEvent.create())) {
-		return false;
-	}
-
 	_frameBuffers.resize(bufferCount);
 	_frameBufferFenceValues.resize(bufferCount);
 
@@ -131,12 +127,10 @@ HRESULT SwapChainPresenter::BeginFrame(
 	_frameLatencyWaitableObject.wait(1000);
 
 	if (_fence->GetCompletedValue() < _frameBufferFenceValues[_curBufferIndex]) {
-		HRESULT hr = _fence->SetEventOnCompletion(_frameBufferFenceValues[_curBufferIndex], _fenceEvent.get());
+		HRESULT hr = _fence->SetEventOnCompletion(_frameBufferFenceValues[_curBufferIndex], nullptr);
 		if (FAILED(hr)) {
 			return hr;
 		}
-
-		_fenceEvent.wait();
 	}
 
 	*frameTex = _frameBuffers[_curBufferIndex].get();
@@ -332,13 +326,7 @@ HRESULT SwapChainPresenter::_WaitForGpu() noexcept {
 		return hr;
 	}
 
-	hr = _fence->SetEventOnCompletion(_curFenceValue, _fenceEvent.get());
-	if (FAILED(hr)) {
-		return hr;
-	}
-
-	_fenceEvent.wait();
-	return S_OK;
+	return _fence->SetEventOnCompletion(_curFenceValue, nullptr);
 }
 
 }
