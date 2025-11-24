@@ -4,10 +4,10 @@
 
 namespace Magpie {
 
-enum class FrameSourceState {
-	NewFrame,
-	Waiting,
-	Error
+enum class FrameSourceWaitType {
+	NoWait,
+	WaitForMessage,
+	WaitForFrame
 };
 
 class GraphicsCaptureFrameSource2 {
@@ -21,7 +21,6 @@ public:
 
 	bool Initialize(
 		ID3D12Device5* device,
-		ID3D12CommandList* commandList,
 		IDXGIFactory7* dxgiFactory,
 		IDXGIAdapter4* dxgiAdapter,
 		HMONITOR hMonSrc,
@@ -30,7 +29,13 @@ public:
 
 	bool Start() noexcept;
 
-	FrameSourceState Update(uint32_t frameIndex) noexcept;
+	FrameSourceWaitType WaitType() const noexcept {
+		return FrameSourceWaitType::WaitForMessage;
+	}
+
+	bool IsNewFrameAvailable() noexcept;
+
+	bool Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept;
 
 	ID3D12Resource* GetOutput() noexcept {
 		return _output.get();
@@ -39,7 +44,14 @@ public:
 private:
 	bool _CreateD3D11Device(IDXGIAdapter1* dxgiAdapter) noexcept;
 
+	void _Direct3D11CaptureFramePool_FrameArrived(
+		const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& pool,
+		const winrt::IInspectable&
+	);
+
 	void _StopCapture() noexcept;
+
+	ID3D12Device5* _device = nullptr;
 
 	winrt::com_ptr<ID3D11Device5> _d3d11Device;
 	winrt::com_ptr<ID3D11DeviceContext4> _d3d11DC;
@@ -49,14 +61,22 @@ private:
 	winrt::Windows::Graphics::Capture::GraphicsCaptureSession _captureSession{ nullptr };
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool _captureFramePool{ nullptr };
 
-	wil::srwlock _lastestFrameLock;
+	wil::srwlock _newFrameLock;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _lastestFrame{ nullptr };
+	bool _isNewFrameAvailable = false;
 
-	std::vector<winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame> _framesInUse;
+	std::atomic<DWORD> _producerThreadId;
+
+	struct _CapturedFrame {
+		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame frame{ nullptr };
+		winrt::com_ptr<ID3D12Resource> d3d12Resource;
+	};
+	std::vector<_CapturedFrame> _framesInUse;
 
 	winrt::com_ptr<ID3D12Resource> _output;
 	
-	D3D11_BOX _frameBox{};
+	D3D12_BOX _frameBox{};
+	bool _isUsingScRGB = false;
 };
 
 }

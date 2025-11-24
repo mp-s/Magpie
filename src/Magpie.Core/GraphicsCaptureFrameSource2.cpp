@@ -94,13 +94,15 @@ static bool CalcWindowCapturedFrameBounds(HWND hWnd, RECT& rect) noexcept {
 
 bool GraphicsCaptureFrameSource2::Initialize(
 	ID3D12Device5* device,
-	ID3D12CommandList* /*commandList*/,
 	IDXGIFactory7* dxgiFactory,
 	IDXGIAdapter4* dxgiAdapter,
 	HMONITOR hMonSrc,
-	bool /*useScRGB*/
+	bool useScRGB
 ) noexcept {
 	assert(hMonSrc);
+
+	_device = device;
+	_isUsingScRGB = useScRGB;
 
 	if (!winrt::GraphicsCaptureSession::IsSupported()) {
 		Logger::Get().Error("当前无法使用 Graphics Capture");
@@ -198,6 +200,23 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		_framesInUse.emplace_back(nullptr);
 	}
 
+	_producerThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
+
+	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+		useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
+		UINT64(_frameBox.right - _frameBox.left),
+		_frameBox.bottom - _frameBox.top,
+		1, 1, 1, 0,
+		D3D12_RESOURCE_FLAG_NONE
+	);
+	hr = _device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+		&texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&_output));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommittedResource 失败", hr);
+		return false;
+	}
+
 	return true;
 }
 
@@ -210,29 +229,13 @@ bool GraphicsCaptureFrameSource2::Start() noexcept {
 		// 创建帧缓冲池。帧的尺寸和 _captureItem.Size() 不同
 		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
 			_wrappedD3DDevice,
-			winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+			_isUsingScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
 			ScalingWindow::Get().Options().maxProducerFramesInFlight + 3,
 			{ (int)_frameBox.right, (int)_frameBox.bottom } // 帧的尺寸为包含源窗口的最小尺寸
 		);
 
-		_captureFramePool.FrameArrived([&](const winrt::Direct3D11CaptureFramePool& pool, const winrt::IInspectable&) {
-			winrt::Direct3D11CaptureFrame frame = pool.TryGetNextFrame();
-			if (!frame) {
-				return;
-			}
-
-			// 取最新帧
-			while (true) {
-				if (winrt::Direct3D11CaptureFrame nextFrame = pool.TryGetNextFrame()) {
-					frame = std::move(nextFrame);
-				} else {
-					break;
-				}
-			}
-
-			auto lk = _lastestFrameLock.lock_exclusive();
-			_lastestFrame = std::move(frame);
-		});
+		_captureFramePool.FrameArrived(
+			{ this, &GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived });
 
 		_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
 
@@ -269,16 +272,69 @@ bool GraphicsCaptureFrameSource2::Start() noexcept {
 	return true;
 }
 
-FrameSourceState GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
-	auto lk = _lastestFrameLock.lock_exclusive();
-	if (!_lastestFrame) {
-		return FrameSourceState::Waiting;
-	}
-	
-	_framesInUse[frameIndex] = std::move(_lastestFrame);
-	_lastestFrame = nullptr;
+bool GraphicsCaptureFrameSource2::IsNewFrameAvailable() noexcept {
+	auto lk = _newFrameLock.lock_shared();
+	return _isNewFrameAvailable;
+}
 
-	return FrameSourceState::NewFrame;
+bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept {
+	_CapturedFrame& currentFrame = _framesInUse[frameIndex];
+	{
+		auto lk = _newFrameLock.lock_exclusive();
+		if (currentFrame.frame != _lastestFrame) {
+			currentFrame.frame = _lastestFrame;
+			currentFrame.d3d12Resource = nullptr;
+			_isNewFrameAvailable = false;
+		}
+	}
+
+	if (!currentFrame.d3d12Resource) {
+		winrt::IDirect3DSurface d3dSurface = currentFrame.frame.Surface();
+
+		auto dxgiInterfaceAccess =
+			d3dSurface.try_as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+
+		winrt::com_ptr<ID3D11Texture2D> capturedFrame;
+		HRESULT hr = dxgiInterfaceAccess->GetInterface(IID_PPV_ARGS(&capturedFrame));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("IDirect3DDxgiInterfaceAccess::GetInterface 失败", hr);
+			return false;
+		}
+
+		auto dxgiResource = capturedFrame.try_as<IDXGIResource1>();
+		wil::unique_handle hSharedResource;
+		hr = dxgiResource->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, hSharedResource.put());
+		if (FAILED(hr)) {
+			Logger::Get().ComError("IDXGIResource1::CreateSharedHandle 失败", hr);
+			return false;
+		}
+
+		hr = _device->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.d3d12Resource));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("OpenSharedHandle 失败", hr);
+			return false;
+		}
+	}
+
+	D3D12_RESOURCE_BARRIER barrier = {
+		.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+		.Transition = {
+			.pResource = _output.get(),
+			.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+			.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST
+		}
+	};
+	commandList->ResourceBarrier(1, &barrier);
+
+	CD3DX12_TEXTURE_COPY_LOCATION src(currentFrame.d3d12Resource.get(), 0);
+	CD3DX12_TEXTURE_COPY_LOCATION dest(_output.get(), 0);
+	commandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+	commandList->ResourceBarrier(1, &barrier);
+
+	return true;
 }
 
 static bool IsDebugLayersAvailable() noexcept {
@@ -362,6 +418,34 @@ bool GraphicsCaptureFrameSource2::_CreateD3D11Device(IDXGIAdapter1* dxgiAdapter)
 	}
 
 	return true;
+}
+
+void GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived(
+	const winrt::Direct3D11CaptureFramePool& pool,
+	const winrt::IInspectable&
+) {
+	winrt::Direct3D11CaptureFrame frame = pool.TryGetNextFrame();
+	if (!frame) {
+		return;
+	}
+
+	// 取最新帧
+	while (true) {
+		if (winrt::Direct3D11CaptureFrame nextFrame = pool.TryGetNextFrame()) {
+			frame = std::move(nextFrame);
+		} else {
+			break;
+		}
+	}
+
+	{
+		auto lk = _newFrameLock.lock_exclusive();
+		_lastestFrame = std::move(frame);
+		_isNewFrameAvailable = true;
+	}
+
+	// 唤起生产者线程
+	PostThreadMessage(_producerThreadId.load(std::memory_order_relaxed), WM_NULL, 0, 0);
 }
 
 void GraphicsCaptureFrameSource2::_StopCapture() noexcept {

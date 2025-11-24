@@ -158,40 +158,27 @@ ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOpt
 }
 
 bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDeviceLost) noexcept {
-	ID3D12Resource* frameTex;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	uint32_t frameIndex;
-	HRESULT hr = _CheckDeviceLost(_presenter->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
-	}
-
-	hr = _CheckDeviceLost(_consumerCommandAllocators[frameIndex]->Reset(), onHandlingDeviceLost);
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
-	}
-
-	hr = _CheckDeviceLost(_consumerCommandList->Reset(
-		_consumerCommandAllocators[frameIndex].get(), nullptr), onHandlingDeviceLost);
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
-	}
-
 	ID3D12Resource* curBuffer;
 	D3D12_RESOURCE_STATES bufferState;
 	UINT64 frameBufferFenceValue;
 	{
 		auto lk = _frameBufferLock.lock_exclusive();
 
+		const uint64_t completedFenceValue = _producerFrameBufferFence->GetCompletedValue();
+		if (completedFenceValue == 0) {
+			// 第一帧尚未完成
+			return false;
+		}
+
 		if (_curConsumeIndex != _curProduceIndex) {
-			uint64_t completedFenceValue = _producerFrameBufferFence->GetCompletedValue();
-			uint32_t nextConsumeIndex = (_curConsumeIndex + 1) % _frameBuffers.size();
+			const uint32_t frameBufferCount = (uint32_t)_frameBuffers.size();
+			uint32_t nextConsumeIndex = (_curConsumeIndex + 1) % frameBufferCount;
 			if (completedFenceValue >= _frameBuffers[nextConsumeIndex].producerFenceValue) {
 				_curConsumeIndex = nextConsumeIndex;
 
 				// 寻找最新帧
 				while (true) {
-					nextConsumeIndex = (_curConsumeIndex + 1) % _frameBuffers.size();
+					nextConsumeIndex = (_curConsumeIndex + 1) % frameBufferCount;
 					if (completedFenceValue < _frameBuffers[nextConsumeIndex].producerFenceValue) {
 						break;
 					}
@@ -214,29 +201,52 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 		curFrameBuffer.state = D3D12_RESOURCE_STATE_COPY_SOURCE;
 	}
 
+	ID3D12Resource* frameTex;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
+	uint32_t frameIndex;
+	HRESULT hr = _CheckDeviceLost(_presenter->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
+	}
+
+	hr = _CheckDeviceLost(_consumerCommandAllocators[frameIndex]->Reset(), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
+	}
+
+	hr = _CheckDeviceLost(_consumerCommandList->Reset(
+		_consumerCommandAllocators[frameIndex].get(), nullptr), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
+	}
+
 	const RECT& rendererRect = ScalingWindow::Get().RendererRect();
 	if (_destRect == rendererRect) {
 		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
 			_consumerCommandList->ResourceBarrier(1, &barrier);
 		} else {
 			CD3DX12_RESOURCE_BARRIER barriers[] = {
 				CD3DX12_RESOURCE_BARRIER::Transition(
-					frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST),
+					frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0),
 				CD3DX12_RESOURCE_BARRIER::Transition(
-					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE)
+					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
 			};
 			_consumerCommandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 		}
 
 		_consumerCommandList->CopyResource(frameTex, curBuffer);
 	} else {
-		{
-			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			_consumerCommandList->ResourceBarrier(1, &barrier);
-		}
+		D3D12_RESOURCE_BARRIER barrier = {
+			.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+			.Transition = {
+				.pResource = frameTex,
+				.StateBefore = D3D12_RESOURCE_STATE_PRESENT,
+				.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET
+			}
+		};
+		_consumerCommandList->ResourceBarrier(1, &barrier);
 
 		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
 		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
@@ -244,15 +254,15 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 		_consumerCommandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
 
 		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
-			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST);
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
 			_consumerCommandList->ResourceBarrier(1, &barrier);
 		} else {
 			CD3DX12_RESOURCE_BARRIER barriers[] = {
 				CD3DX12_RESOURCE_BARRIER::Transition(
-					frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST),
+					frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0),
 				CD3DX12_RESOURCE_BARRIER::Transition(
-					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE)
+					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
 			};
 			_consumerCommandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 		}
@@ -265,7 +275,7 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
 		_consumerCommandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -661,10 +671,28 @@ void Renderer2::_ProducerThreadProc() noexcept {
 		return;
 	}
 
+	StepTimerStatus stepTimerStatus = StepTimerStatus::WaitForNewFrame;
+	const bool waitMsgForNewFrame =
+		_frameSource->WaitType() == FrameSourceWaitType::WaitForMessage;
+
 	MSG msg;
 	while (true) {
+		bool fpsUpdated = false;
+		// WaitForFPSLimiter 状态下新帧消息可能已被处理，不要等待消息，直到状态变化
+		stepTimerStatus = _stepTimer.WaitForNextFrame(
+			waitMsgForNewFrame && stepTimerStatus != StepTimerStatus::WaitForFPSLimiter,
+			fpsUpdated
+		);
+
+		if (fpsUpdated) {
+			// FPS 变化时要求前端重新渲染以更新叠加层
+			PostMessage(ScalingWindow::Get().Handle(),
+				CommonSharedConstants::WM_FRONTEND_RENDER, 0, 0);
+		}
+
 		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) {
+				// 不能在前端线程释放
 				_frameSource.reset();
 				return;
 			}
@@ -672,7 +700,11 @@ void Renderer2::_ProducerThreadProc() noexcept {
 			DispatchMessage(&msg);
 		}
 
-		_ProducerRender();
+		if (stepTimerStatus != StepTimerStatus::WaitForFPSLimiter) {
+			if (stepTimerStatus == StepTimerStatus::ForceNewFrame || _frameSource->IsNewFrameAvailable()) {
+				_ProducerRender();
+			}
+		}
 	}
 }
 
@@ -742,9 +774,41 @@ bool Renderer2::_InitProducer() noexcept {
 	}
 
 	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
-	if (!_frameSource->Initialize(_device.get(), _producerCommandList.get(),
-		_dxgiFactory.get(), _dxgiAdapter.get(), ScalingWindow::Get().SrcTracker().Monitor(), false)) {
+	if (!_frameSource->Initialize(_device.get(), _dxgiFactory.get(), _dxgiAdapter.get(),
+		ScalingWindow::Get().SrcTracker().Monitor(), _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange)) {
 		return false;
+	}
+
+	{
+		std::optional<float> maxFrameRate;
+		if (_frameSource->WaitType() == FrameSourceWaitType::NoWait) {
+			// 某些捕获方式不会限制捕获帧率，因此将捕获帧率限制为屏幕刷新率
+			const HMONITOR hMon = ScalingWindow::Get().SrcTracker().Monitor();
+
+			MONITORINFOEX mi{ { sizeof(MONITORINFOEX) } };
+			GetMonitorInfo(hMon, &mi);
+
+			DEVMODE dm{ .dmSize = sizeof(DEVMODE) };
+			EnumDisplaySettings(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm);
+
+			if (dm.dmDisplayFrequency > 0) {
+				Logger::Get().Info(fmt::format("屏幕刷新率: {}", dm.dmDisplayFrequency));
+				maxFrameRate = float(dm.dmDisplayFrequency);
+			}
+		}
+
+		const ScalingOptions& options = ScalingWindow::Get().Options();
+		if (options.maxFrameRate) {
+			if (!maxFrameRate || *options.maxFrameRate < *maxFrameRate) {
+				maxFrameRate = options.maxFrameRate;
+			}
+		}
+
+		// 测试着色器性能时最小帧率应设为无限大，但由于 /fp:fast 下无限大不可靠，因此改为使用 max()，
+		// 和无限大效果相同。
+		const float minFrameRate = options.IsBenchmarkMode()
+			? std::numeric_limits<float>::max() : options.minFrameRate;
+		_stepTimer.Initialize(minFrameRate, maxFrameRate);
 	}
 
 	_destRect = ScalingWindow::Get().SrcTracker().SrcRect();
@@ -761,6 +825,9 @@ bool Renderer2::_InitProducer() noexcept {
 		auto lk = _frameBufferLock.lock_exclusive();
 
 		_frameBuffers.resize(frameCount);
+
+		// 消费者应落后于生产者
+		_curConsumeIndex = frameCount - 1;
 
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 		DXGI_FORMAT format;
@@ -843,6 +910,8 @@ bool Renderer2::_ProducerRender() noexcept {
 		curFrameBuffer.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 	}
 
+	_stepTimer.PrepareForRender();
+
 	HRESULT hr = _producerCommandAllocators[_curProducerFrameIndex]->Reset();
 	if (FAILED(hr)) {
 		return false;
@@ -855,11 +924,45 @@ bool Renderer2::_ProducerRender() noexcept {
 
 	if (bufferState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			curBuffer, bufferState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			curBuffer, bufferState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0);
 		_producerCommandList->ResourceBarrier(1, &barrier);
 	}
 
-	// 渲染
+	if (!_frameSource->Update(_producerCommandList.get(), _curProducerFrameIndex)) {
+		return false;
+	}
+
+	ID3D12Resource* input = _frameSource->GetOutput();
+
+	{
+		D3D12_RESOURCE_BARRIER barriers[] = {
+			{
+				.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+				.Transition = {
+					.pResource = input,
+					.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+					.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE
+				}
+			},
+			{
+				.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+				.Transition = {
+					.pResource = curBuffer,
+					.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+					.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST
+				}
+			}
+		};
+		_producerCommandList->ResourceBarrier(2, barriers);
+
+		_producerCommandList->CopyResource(curBuffer, input);
+
+		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+		barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+		_producerCommandList->ResourceBarrier(2, barriers);
+	}
 
 	hr = _producerCommandList->Close();
 	if (FAILED(hr)) {

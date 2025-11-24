@@ -1,6 +1,7 @@
 #pragma once
 #include "EffectDesc.h"
 #include "ScalingOptions.h"
+#include "StepTimer.h"
 
 namespace Magpie {
 
@@ -108,7 +109,7 @@ private:
 	struct _FrameBuffer {
 		winrt::com_ptr<ID3D12Resource> resource;
 		uint64_t consumerFenceValue = 0;
-		uint64_t producerFenceValue = 0;
+		uint64_t producerFenceValue = 1;
 		D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
 	};
 
@@ -126,6 +127,7 @@ private:
 	uint32_t _srvUavDescriptorSize = 0;
 	std::unique_ptr<class GraphicsCaptureFrameSource2> _frameSource;
 
+	StepTimer _stepTimer;
 	std::vector<const EffectDesc*> _activeEffectDescs;
 
 	wil::srwlock _acInfoLock;
