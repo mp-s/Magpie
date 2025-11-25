@@ -43,6 +43,9 @@ Renderer2::~Renderer2() noexcept {
 
 		_producerThread.join();
 	}
+
+	// 等待 GPU 完成
+	_presenter.reset();
 }
 
 ScalingError Renderer2::Initialize(HWND hwndAttach, OverlayOptions& /*overlayOptions*/) noexcept {
@@ -204,14 +207,8 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 
 		_consumerCommandList->CopyResource(frameTex, curBuffer);
 	} else {
-		D3D12_RESOURCE_BARRIER barrier = {
-			.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-			.Transition = {
-				.pResource = frameTex,
-				.StateBefore = D3D12_RESOURCE_STATE_PRESENT,
-				.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET
-			}
-		};
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
 		_consumerCommandList->ResourceBarrier(1, &barrier);
 
 		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
@@ -658,6 +655,12 @@ void Renderer2::_ProducerThreadProc() noexcept {
 
 		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) {
+				// 等待 GPU 完成
+				uint64_t fenceValueToWait = _frameBuffers[_curProduceIndex].producerFenceValue - 1;
+				if (_producerFrameBufferFence->GetCompletedValue() < fenceValueToWait) {
+					_producerFrameBufferFence->SetEventOnCompletion(fenceValueToWait, nullptr);
+				}
+
 				// 不能在前端线程释放
 				_frameSource.reset();
 				return;
@@ -894,24 +897,12 @@ bool Renderer2::_ProducerRender() noexcept {
 
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
-			{
-				.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-				.Transition = {
-					.pResource = input,
-					.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-					.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE
-				}
-			},
-			{
-				.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-				.Transition = {
-					.pResource = curBuffer,
-					.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-					.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST
-				}
-			}
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				input, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE, 0),
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				curBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST, 0)
 		};
-		_producerCommandList->ResourceBarrier(2, barriers);
+		_producerCommandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 
 		_producerCommandList->CopyResource(curBuffer, input);
 
@@ -919,7 +910,7 @@ bool Renderer2::_ProducerRender() noexcept {
 		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 		barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
 		barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-		_producerCommandList->ResourceBarrier(2, barriers);
+		_producerCommandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
 	hr = _producerCommandList->Close();
