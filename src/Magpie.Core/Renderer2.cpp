@@ -868,11 +868,6 @@ bool Renderer2::_InitProducer() noexcept {
 		if (FAILED(hr)) {
 			return false;
 		}
-
-		hr = _fenceEvent.create();
-		if (FAILED(hr)) {
-			return false;
-		}
 	}
 
 	// 最后启动捕获以尽可能推迟显示黄色边框 (Win10) 或禁用圆角 (Win11)
@@ -985,14 +980,12 @@ bool Renderer2::_ProducerRender() noexcept {
 
 			uint64_t fenceValueToWait = _frameBuffers[nextConsumeIndex].producerFenceValue;
 			if (_producerFrameBufferFence->GetCompletedValue() < fenceValueToWait) {
+				lk.reset();
 				// 等待新缓冲区可用
-				hr = _producerFrameBufferFence->SetEventOnCompletion(fenceValueToWait, _fenceEvent.get());
+				hr = _producerFrameBufferFence->SetEventOnCompletion(fenceValueToWait, nullptr);
 				if (FAILED(hr)) {
 					return false;
 				}
-
-				lk.reset();
-				_fenceEvent.wait();
 				lk = _frameBufferLock.lock_exclusive();
 
 				if (_curConsumeIndex == nextProduceIndex) {

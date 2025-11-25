@@ -287,12 +287,21 @@ bool GraphicsCaptureFrameSource2::IsNewFrameAvailable() noexcept {
 
 bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept {
 	_CapturedFrame& currentFrame = _framesInUse[frameIndex];
+
 	{
-		auto lk = _newFrameLock.lock_exclusive();
-		if (currentFrame.frame != _lastestFrame) {
-			currentFrame.frame = _lastestFrame;
+		// 不要在持有 _newFrameLock 时释放 Direct3D11CaptureFrame。WGC 内部使用 Critical Section
+		// 同步，如果此时 _Direct3D11CaptureFramePool_FrameArrived 正在执行会死锁。
+		winrt::Direct3D11CaptureFrame lastestFrame{ nullptr };
+		{
+			auto lk = _newFrameLock.lock_exclusive();
+			if (currentFrame.frame != _lastestFrame) {
+				lastestFrame = _lastestFrame;
+				_isNewFrameAvailable = false;
+			}
+		}
+		if (lastestFrame) {
 			currentFrame.sharedResource = nullptr;
-			_isNewFrameAvailable = false;
+			currentFrame.frame = std::move(lastestFrame);
 		}
 	}
 

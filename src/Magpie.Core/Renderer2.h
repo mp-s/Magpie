@@ -121,7 +121,6 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _consumerFrameBufferFence;
 	uint64_t _curConsumerFrameBufferFenceValue = 0;
 	winrt::com_ptr<ID3D12Fence1> _producerFrameBufferFence;
-	wil::unique_event_nothrow _fenceEvent;
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _producerDescHeap;
 	uint32_t _srvUavDescriptorSize = 0;
