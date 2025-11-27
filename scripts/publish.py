@@ -94,7 +94,7 @@ if args.version_major != 0 or args.version_minor != 0 or args.version_patch != 0
 versionTagProp = "" if args.version_tag == "" else f";VersionTag={args.version_tag}"
 
 p = subprocess.run(
-    f'"{msbuildPath}" Magpie.sln -m -t:Rebuild -restore -p:RestorePackagesConfig=true;Configuration=Release;Platform={args.platform};UseClangCL={args.compiler == "ClangCL"};UseNativeMicroArch={args.use_native_march};OutDir={os.getcwd()}\\publish\\{args.platform}\\;CommitId={commitId}{versionNumProps}{versionTagProp}'
+    f'"{msbuildPath}" Magpie.slnx -m -t:Rebuild -restore -p:RestorePackagesConfig=true;Configuration=Release;Platform={args.platform};DisablePDB=true;UseClangCL={args.compiler == "ClangCL"};UseNativeMicroArch={args.use_native_march};OutDir={os.getcwd()}\\publish\\{args.platform}\\;CommitId={commitId}{versionNumProps}{versionTagProp}'
 )
 if p.returncode != 0:
     raise Exception("编译失败")
@@ -116,9 +116,8 @@ def remove_file(file):
         pass
 
 
-for pattern in ["*.pdb", "*.lib", "*.exp"]:
-    for file in glob.glob(pattern):
-        remove_file(file)
+for file in glob.glob("*.lib"):
+    remove_file(file)
 
 print("清理完毕", flush=True)
 
