@@ -10,11 +10,11 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Upload documentations to wiki
         run: python scripts/wiki.py ${{ secrets.CONTENTS_ACCESS_TOKEN }}
