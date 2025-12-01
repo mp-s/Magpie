@@ -213,7 +213,7 @@ bool Renderer2::Render(bool /*force*/, bool /*waitForGpu*/, bool onHandlingDevic
 
 		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
 		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
-		static constexpr FLOAT BLACK[4] = { 1.0f,0.0f,0.0f,1.0f };
+		static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
 		_consumerCommandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
 
 		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
