@@ -20,7 +20,7 @@
   <Project Path="src/Magpie.Core/Magpie.Core.vcxproj" Id="0e5205ae-dfa9-4cb8-b662-e43cd6512e2a">
     <BuildDependency Project="src/_ConanDeps/_ConanDeps.vcxproj" />
   </Project>
-  <Project Path="src/Magpie/Magpie.vcxproj" Id="1239537c-e5b8-427a-9e7f-ea443d1f3529">
+  <Project Path="src/Magpie/Magpie.vcxproj" Id="1239537c-e5b8-427a-9e7f-ea443d1f3529" DefaultStartup="true">
     <BuildDependency Project="src/Effects/Effects.vcxproj" />
     <BuildDependency Project="src/TouchHelper/TouchHelper.vcxproj" />
     <BuildDependency Project="src/Updater/Updater.vcxproj" />
