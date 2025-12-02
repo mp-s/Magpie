@@ -2,7 +2,6 @@ import sys
 import os
 import subprocess
 import glob
-import re
 import argparse
 
 try:
@@ -21,7 +20,7 @@ argParser.add_argument("--use-native-march", action="store_true")
 argParser.add_argument("--version-major", type=int, default=0)
 argParser.add_argument("--version-minor", type=int, default=0)
 argParser.add_argument("--version-patch", type=int, default=0)
-argParser.add_argument("--version-tag", default="")
+argParser.add_argument("--version-string", default="")
 argParser.add_argument("--pfx-path", default="")
 argParser.add_argument("--pfx-password", default="")
 args = argParser.parse_args()
@@ -57,44 +56,11 @@ os.chdir(os.path.dirname(__file__) + "\\..")
 p = subprocess.run("git rev-parse --short HEAD", capture_output=True)
 commitId = str(p.stdout, encoding="utf-8")[0:-1]
 
-versionNumProps = ""
-if args.version_major != 0 or args.version_minor != 0 or args.version_patch != 0:
-    versionNumProps = f";MajorVersion={args.version_major};MinorVersion={args.version_minor};PatchVersion={args.version_patch}"
-
-    # 更新 RC 文件中的版本号
-    version = f"{args.version_major}.{args.version_minor}.{args.version_patch}.0"
-    version_comma = version.replace(".", ",")
-    for project in os.listdir("src"):
-        rcPath = f"src\\{project}\\{project}.rc"
-        if not os.access(rcPath, os.R_OK | os.W_OK):
-            continue
-
-        with open(rcPath, mode="r+", encoding="utf-8") as f:
-            src = f.read()
-
-            src = re.sub(
-                r"FILEVERSION .*?\n", "FILEVERSION " + version_comma + "\n", src
-            )
-            src = re.sub(
-                r"PRODUCTVERSION .*?\n", "PRODUCTVERSION " + version_comma + "\n", src
-            )
-            src = re.sub(
-                r'"FileVersion", *?".*?"\n', '"FileVersion", "' + version + '"\n', src
-            )
-            src = re.sub(
-                r'"ProductVersion", *?".*?"\n',
-                '"ProductVersion", "' + version + '"\n',
-                src,
-            )
-
-            f.seek(0)
-            f.truncate()
-            f.write(src)
-
-versionTagProp = "" if args.version_tag == "" else f";VersionTag={args.version_tag}"
+versionNumProps = f";MajorVersion={args.version_major};MinorVersion={args.version_minor};PatchVersion={args.version_patch}"
+versionStrProp = "" if args.version_string == "" else f";VersionString={args.version_string}"
 
 p = subprocess.run(
-    f'"{msbuildPath}" Magpie.slnx -m -t:Rebuild -restore -p:RestorePackagesConfig=true;Configuration=Release;Platform={args.platform};DisablePDB=true;UseClangCL={args.compiler == "ClangCL"};UseNativeMicroArch={args.use_native_march};OutDir={os.getcwd()}\\publish\\{args.platform}\\;CommitId={commitId}{versionNumProps}{versionTagProp}'
+    f'"{msbuildPath}" Magpie.slnx -m -t:Rebuild -restore -p:RestorePackagesConfig=true;Configuration=Release;Platform={args.platform};DisablePDB=true;UseClangCL={args.compiler == "ClangCL"};UseNativeMicroArch={args.use_native_march};OutDir={os.getcwd()}\\publish\\{args.platform}\\;CommitId={commitId}{versionNumProps}{versionStrProp}'
 )
 if p.returncode != 0:
     raise Exception("编译失败")
