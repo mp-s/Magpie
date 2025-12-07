@@ -143,6 +143,18 @@
     <ClInclude Include="GraphicsCaptureFrameSource2.h">
       <Filter>Capture</Filter>
     </ClInclude>
+    <ClInclude Include="GraphicsContext.h">
+      <Filter>Render</Filter>
+    </ClInclude>
+    <ClInclude Include="ColorInfo.h">
+      <Filter>Render</Filter>
+    </ClInclude>
+    <ClInclude Include="FrameProducer.h">
+      <Filter>Render</Filter>
+    </ClInclude>
+    <ClInclude Include="SharedRingBuffer.h">
+      <Filter>Render</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -242,6 +254,15 @@
     </ClCompile>
     <ClCompile Include="GraphicsCaptureFrameSource2.cpp">
       <Filter>Capture</Filter>
+    </ClCompile>
+    <ClCompile Include="GraphicsContext.cpp">
+      <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="FrameProducer.cpp">
+      <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="SharedRingBuffer.cpp">
+      <Filter>Render</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -4,6 +4,8 @@
 
 namespace Magpie {
 
+struct ColorInfo;
+
 enum class FrameSourceWaitType {
 	NoWait,
 	WaitForMessage,
@@ -23,8 +25,9 @@ public:
 		ID3D12Device5* device,
 		IDXGIFactory7* dxgiFactory,
 		IDXGIAdapter4* dxgiAdapter,
+		const RECT& srcRect,
 		HMONITOR hMonSrc,
-		bool useScRGB
+		const ColorInfo& colorInfo
 	) noexcept;
 
 	bool Start() noexcept;

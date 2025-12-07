@@ -3,6 +3,7 @@
 #include "Logger.h"
 #include "Win32Helper.h"
 #include "ScalingWindow.h"
+#include "ColorInfo.h"
 #include <dwmapi.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
@@ -47,10 +48,13 @@ static bool CalcWindowCapturedFrameBounds(HWND hWnd, RECT& rect) noexcept {
 	// Win10 和 Win11 24H2 开始捕获区域为 extended frame bounds；Win11 24H2 前
 	// DwmGetWindowAttribute 对最大化的窗口返回值和 Win10 不同，可能是 OS 的 bug，
 	// 应进一步处理。
-	const auto& srcTracker = ScalingWindow::Get().SrcTracker();
-	rect = srcTracker.WindowFrameRect();
+	HRESULT hr = DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(rect));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("DwmGetWindowAttribute 失败", hr);
+		return false;
+	}
 
-	if (!srcTracker.IsZoomed() ||
+	if (Win32Helper::GetWindowShowCmd(hWnd) != SW_SHOWMAXIMIZED ||
 		Win32Helper::GetOSVersion().IsWin10() ||
 		Win32Helper::GetOSVersion().Is24H2OrNewer()) {
 		return true;
@@ -96,13 +100,14 @@ bool GraphicsCaptureFrameSource2::Initialize(
 	ID3D12Device5* device,
 	IDXGIFactory7* dxgiFactory,
 	IDXGIAdapter4* dxgiAdapter,
+	const RECT& srcRect,
 	HMONITOR hMonSrc,
-	bool useScRGB
+	const ColorInfo& colorInfo
 ) noexcept {
 	assert(hMonSrc);
 
 	_renderingDevice = device;
-	_isUsingScRGB = useScRGB;
+	_isUsingScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	if (!winrt::GraphicsCaptureSession::IsSupported()) {
 		Logger::Get().Error("当前无法使用 Graphics Capture");
@@ -110,12 +115,8 @@ bool GraphicsCaptureFrameSource2::Initialize(
 	}
 
 	{
-		const SrcTracker& srcTracker = ScalingWindow::Get().SrcTracker();
-		const HWND hwndSrc = srcTracker.Handle();
-		const RECT& srcRect = srcTracker.SrcRect();
-
 		RECT frameBounds;
-		if (!CalcWindowCapturedFrameBounds(hwndSrc, frameBounds)) {
+		if (!CalcWindowCapturedFrameBounds(ScalingWindow::Get().SrcHandle(), frameBounds)) {
 			Logger::Get().Error("CalcWindowCapturedFrameBounds 失败");
 			return false;
 		}
@@ -193,7 +194,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 	}
 
 	hr = interop->CreateForWindow(
-		ScalingWindow::Get().SrcTracker().Handle(),
+		ScalingWindow::Get().SrcHandle(),
 		winrt::guid_of<winrt::GraphicsCaptureItem>(),
 		winrt::put_abi(_captureItem)
 	);
@@ -202,7 +203,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
-	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerFramesInFlight;
+	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
 	_framesInUse.reserve(frameCount);
 	for (uint32_t i = 0; i < frameCount; ++i) {
 		_framesInUse.emplace_back(nullptr);
@@ -212,7 +213,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 
 	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
+		_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
 		UINT64(_frameBox.right - _frameBox.left),
 		_frameBox.bottom - _frameBox.top,
 		1, 1, 1, 0,
@@ -238,7 +239,7 @@ bool GraphicsCaptureFrameSource2::Start() noexcept {
 		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
 			_wrappedD3DDevice,
 			_isUsingScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
-			ScalingWindow::Get().Options().maxProducerFramesInFlight + 3,
+			ScalingWindow::Get().Options().maxProducerInFlightFrames + 3,
 			{ (int)_frameBox.right, (int)_frameBox.bottom } // 帧的尺寸为包含源窗口的最小尺寸
 		);
 
@@ -285,7 +286,7 @@ bool GraphicsCaptureFrameSource2::IsNewFrameAvailable() noexcept {
 	return _isNewFrameAvailable;
 }
 
-bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept {
+HRESULT GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept {
 	_CapturedFrame& currentFrame = _framesInUse[frameIndex];
 
 	{
@@ -315,7 +316,7 @@ bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList,
 		HRESULT hr = dxgiInterfaceAccess->GetInterface(IID_PPV_ARGS(&capturedFrame));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("IDirect3DDxgiInterfaceAccess::GetInterface 失败", hr);
-			return false;
+			return hr;
 		}
 
 		auto dxgiResource = capturedFrame.try_as<IDXGIResource1>();
@@ -323,20 +324,20 @@ bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList,
 		hr = dxgiResource->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, hSharedResource.put());
 		if (FAILED(hr)) {
 			Logger::Get().ComError("IDXGIResource1::CreateSharedHandle 失败", hr);
-			return false;
+			return hr;
 		}
 
 		if (_bridgeDevice) {
 			hr = _bridgeDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.sharedResource));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("OpenSharedHandle 失败", hr);
-				return false;
+				return hr;
 			}
 		} else {
 			hr = _renderingDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.sharedResource));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("OpenSharedHandle 失败", hr);
-				return false;
+				return hr;
 			}
 		}
 	}
@@ -360,7 +361,7 @@ bool GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList,
 	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 	commandList->ResourceBarrier(1, &barrier);
 
-	return true;
+	return S_OK;
 }
 
 static bool IsDebugLayersAvailable() noexcept {
@@ -472,7 +473,7 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 		return false;
 	}
 
-	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerFramesInFlight;
+	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
 	_bridgeCommandAllocators.resize(frameCount);
 	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _bridgeCommandAllocators) {
 		if (FAILED(_bridgeDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&commandAllocator)))) {

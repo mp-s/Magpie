@@ -1,7 +1,9 @@
 #pragma once
-#include "PresenterBase.h"
 
 namespace Magpie {
+
+class GraphicsContext;
+struct ColorInfo;
 
 class SwapChainPresenter {
 public:
@@ -9,52 +11,48 @@ public:
 	SwapChainPresenter(const SwapChainPresenter&) = delete;
 	SwapChainPresenter(SwapChainPresenter&&) = delete;
 
-	~SwapChainPresenter();
-
 	bool Initialize(
-		ID3D12Device5* device,
-		ID3D12CommandQueue* commandQueue,
-		IDXGIFactory7* dxgiFactory,
+		GraphicsContext& graphicContext,
 		HWND hwndAttach,
-		bool useScRGB
+		Size size,
+		const ColorInfo& colorInfo
 	) noexcept;
 
-	uint32_t GetBufferCount() const noexcept;
-
-	HRESULT BeginFrame(
-		ID3D12Resource** frameTex,
-		CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
-		uint32_t& bufferIndex
-	) noexcept;
+	void BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept;
 
 	HRESULT EndFrame() noexcept;
 
-	HRESULT RecreateBuffers(bool useScRGB) noexcept;
+	Size Size() const noexcept { return _size; }
+
+	HRESULT OnSizeChanged(struct Size size) noexcept;
+
+	void OnResizeStarted() noexcept;
 
 	HRESULT OnResizeEnded() noexcept;
 
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+
 private:
-	HRESULT _LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept;
+	HRESULT _RecreateBuffers() noexcept;
 
-	HRESULT _WaitForGpu() noexcept;
+	HRESULT _LoadBufferResources() noexcept;
 
-	ID3D12Device* _device = nullptr;
-	ID3D12CommandQueue* _commandQueue = nullptr;
+	GraphicsContext* _graphicContext = nullptr;
 
 	winrt::com_ptr<IDXGISwapChain4> _dxgiSwapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
 	std::vector<winrt::com_ptr<ID3D12Resource>> _frameBuffers;
-	std::vector<uint64_t> _frameBufferFenceValues;
-	uint32_t _curBufferIndex = 0;
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
 	uint32_t _rtvDescriptorSize = 0;
 
-	winrt::com_ptr<ID3D12Fence1> _fence;
-	uint64_t _curFenceValue = 0;
+	struct Size _size;
+	uint32_t _bufferCount = 0;
+	bool _isScRGB = false;
 
 	bool _isTearingSupported = false;
 	bool _isRecreated = true;
+	bool _isResizing = false;
 };
 
 }

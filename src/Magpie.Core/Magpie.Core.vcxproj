@@ -48,6 +48,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BackendDescriptorStore.h" />
+    <ClInclude Include="ColorInfo.h" />
     <ClInclude Include="CompSwapchainPresenter.h" />
     <ClInclude Include="CursorManager.h" />
     <ClInclude Include="CursorDrawer.h" />
@@ -61,10 +62,12 @@
     <ClInclude Include="EffectHelper.h" />
     <ClInclude Include="EffectsProfiler.h" />
     <ClInclude Include="ExclModeHelper.h" />
+    <ClInclude Include="FrameProducer.h" />
     <ClInclude Include="FrameSourceBase.h" />
     <ClInclude Include="GDIFrameSource.h" />
     <ClInclude Include="GraphicsCaptureFrameSource.h" />
     <ClInclude Include="GraphicsCaptureFrameSource2.h" />
+    <ClInclude Include="GraphicsContext.h" />
     <ClInclude Include="ImGuiBackend.h" />
     <ClInclude Include="ImGuiFontsCacheManager.h" />
     <ClInclude Include="OverlayHelper.h" />
@@ -85,6 +88,7 @@
     <ClInclude Include="Renderer2.h" />
     <ClInclude Include="ScalingWindow.h" />
     <ClInclude Include="ScreenshotHelper.h" />
+    <ClInclude Include="SharedRingBuffer.h" />
     <ClInclude Include="SrcTracker.h" />
     <ClInclude Include="StepTimer.h" />
     <ClInclude Include="AdaptivePresenter.h" />
@@ -107,10 +111,12 @@
     <ClCompile Include="EffectDrawer.cpp" />
     <ClCompile Include="EffectsProfiler.cpp" />
     <ClCompile Include="ExclModeHelper.cpp" />
+    <ClCompile Include="FrameProducer.cpp" />
     <ClCompile Include="FrameSourceBase.cpp" />
     <ClCompile Include="GDIFrameSource.cpp" />
     <ClCompile Include="GraphicsCaptureFrameSource.cpp" />
     <ClCompile Include="GraphicsCaptureFrameSource2.cpp" />
+    <ClCompile Include="GraphicsContext.cpp" />
     <ClCompile Include="ImGuiBackend.cpp" />
     <ClCompile Include="ImGuiFontsCacheManager.cpp" />
     <ClCompile Include="OverlayHelper.cpp" />
@@ -126,6 +132,7 @@
     <ClCompile Include="ScalingRuntime.cpp" />
     <ClCompile Include="ScalingWindow.cpp" />
     <ClCompile Include="ScreenshotHelper.cpp" />
+    <ClCompile Include="SharedRingBuffer.cpp" />
     <ClCompile Include="SrcTracker.cpp" />
     <ClCompile Include="StepTimer.cpp" />
     <ClCompile Include="AdaptivePresenter.cpp" />

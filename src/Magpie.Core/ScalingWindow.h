@@ -48,6 +48,10 @@ public:
 		return _options;
 	}
 
+	HWND SrcHandle() const noexcept {
+		return _srcTracker.Handle();
+	}
+
 	class SrcTracker& SrcTracker() noexcept {
 		return _srcTracker;
 	}

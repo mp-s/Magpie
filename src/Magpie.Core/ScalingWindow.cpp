@@ -349,7 +349,7 @@ void ScalingWindow::Start(HWND hwndSrc, ScalingOptions&& options) noexcept {
 	assert(options.initialWindowedScaleFactor >= 0);
 	assert(!options.screenshotsDir.empty());
 	assert(options.showToast && options.showError && options.save);
-	assert(options.maxProducerFramesInFlight >= 1);
+	assert(options.maxProducerInFlightFrames >= 1);
 
 	options.Log();
 	// 缩放结束后失效
