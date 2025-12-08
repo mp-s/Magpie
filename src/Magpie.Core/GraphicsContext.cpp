@@ -44,7 +44,7 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 
-	if (_CreateAdapterFromDevice()) {
+	if (!_CreateAdapterFromDevice()) {
 		Logger::Get().ComError("_CreateDXGIFactory 失败", hr);
 		return false;
 	}
@@ -368,8 +368,7 @@ bool GraphicsContext::_CreateAdapterFromDevice() noexcept {
 			continue;
 		}
 
-		// TODO: 先检查哪一个？
-		if (desc.AdapterLuid.LowPart != adapterLuid.LowPart || desc.AdapterLuid.HighPart != adapterLuid.HighPart) {
+		if (desc.AdapterLuid != adapterLuid) {
 			continue;
 		}
 

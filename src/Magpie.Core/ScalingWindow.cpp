@@ -75,7 +75,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	_isMoving = false;
 	_isPreparingForResizing = false;
 	_isMovingDueToSrcMoved = false;
-	_shouldWaitForRender = false;
+	_shouldWaitForGpu = false;
 	_areResizeHelperWindowsVisible = false;
 	_isSrcRepositioning = false;
 
@@ -313,7 +313,13 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	}
 
 	_renderer2 = std::make_unique<Renderer2>();
-	ScalingError error = _renderer2->Initialize(_hwndRenderer, _options.overlayOptions);
+	ScalingError error = _renderer2->Initialize(
+		_hwndRenderer,
+		_srcTracker.Monitor(),
+		Size{ uint32_t(_rendererRect.right - _rendererRect.left),uint32_t(_rendererRect.bottom - _rendererRect.top) },
+		_srcTracker.SrcRect(),
+		_options.overlayOptions
+	);
 	if (error != ScalingError::NoError) {
 		Logger::Get().Error("初始化 Renderer 失败");
 		return error;
@@ -408,24 +414,49 @@ void ScalingWindow::Render() noexcept {
 	}
 
 	if (srcMonitorChanged) {
-		_renderer2->OnSrcMonitorChanged();
+		_renderer2->OnMonitorChanged(_srcTracker.Monitor());
 	}
 
 	// 虽然可以在第一帧渲染完成后再隐藏系统光标，但某些设备上显示窗口时光标状态会变成忙，
 	// 提前隐藏光标可以提高观感。缩放窗口显示后再隐藏光标还可能造成光标闪烁两次，第一次是
 	// 创建 D3D 设备后（可能是 OS bug），第二次是我们隐藏系统光标。
-	/*_cursorManager->Update();
+	// _cursorManager->Update();
 
-	if (_renderer->Render(false, _shouldWaitForRender || _isFirstFrame) && _isFirstFrame) {
-		_isFirstFrame = false;
+	ComponentState state = _renderer2->Render(false, _shouldWaitForGpu || _isFirstFrame);
+	if (state == ComponentState::NoError) {
 		// 第一帧渲染完成后显示缩放窗口
-		_Show();
-	}*/
+		if (_isFirstFrame) {
+			_isFirstFrame = false;
+			_Show();
+		}
+	} else {
+		if (state == ComponentState::DeviceLost) {
+			// 设备丢失重新创建 Renderer
+			_renderer2.reset();
+			_renderer2 = std::make_unique<Renderer2>();
 
-	if (_renderer2->Render(false, _shouldWaitForRender || _isFirstFrame) && _isFirstFrame) {
-		_isFirstFrame = false;
-		// 第一帧渲染完成后显示缩放窗口
-		_Show();
+			ScalingError error = _renderer2->Initialize(
+				_hwndRenderer,
+				_srcTracker.Monitor(),
+				Size{ uint32_t(_rendererRect.right - _rendererRect.left),uint32_t(_rendererRect.bottom - _rendererRect.top) },
+				_srcTracker.SrcRect(),
+				_options.overlayOptions
+			);
+			if (error != ScalingError::NoError) {
+				Logger::Get().Error("初始化 Renderer 失败");
+				_DelayedStop();
+				return;
+			}
+
+			// 如果设备再次丢失不再尝试恢复
+			if (_renderer2->Render() != ComponentState::NoError) {
+				_DelayedStop();
+				return;
+			}
+		} else {
+			_DelayedStop();
+			return;
+		}
 	}
 }
 
@@ -527,7 +558,9 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		_isResizing = _isPreparingForResizing;
 		_isMoving = !_isPreparingForResizing;
 
-		if (_isMoving) {
+		if (_isResizing) {
+			_renderer2->OnResizeStarted();
+		} else {
 			_cursorManager->OnStartMove();
 		}
 
@@ -901,7 +934,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 	case WM_DISPLAYCHANGE:
 	{
 		if (_renderer2) {
-			_renderer2->OnDisplayChanged();
+			_renderer2->OnMsgDisplayChanged();
 		}
 		return 0;
 	}
@@ -1314,10 +1347,8 @@ void ScalingWindow::_Show() noexcept {
 }
 
 void ScalingWindow::_ResizeRenderer() noexcept {
-	if (!_renderer2->OnSizeChanged()) {
-		Logger::Get().Error("更改 Renderer 尺寸失败");
-		return;
-	}
+	_renderer2->OnSizeChanged(
+		Size{ uint32_t(_rendererRect.right - _rendererRect.left), uint32_t(_rendererRect.bottom - _rendererRect.top) });
 
 	// TODO
 	// _cursorManager->OnScalingPosChanged();
@@ -2093,14 +2124,14 @@ bool ScalingWindow::_EnsureCaptionVisibleOnScreen() noexcept {
 	}
 
 	// 为了避免光标位置跳跃应等待渲染而且不要使用 SWP_NOSENDCHANGING
-	_shouldWaitForRender = true;
+	_shouldWaitForGpu = true;
 	bool result = SetWindowPos(
 		Handle(),
 		NULL,
 		_windowRect.left, mi.rcWork.top, 0, 0,
 		SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW | SWP_NOSIZE
 	);
-	_shouldWaitForRender = false;
+	_shouldWaitForGpu = false;
 	return result;
 }
 

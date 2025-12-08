@@ -216,7 +216,7 @@ private:
 	bool _isResizing = false;
 	bool _isMoving = false;
 	bool _isMovingDueToSrcMoved = false;
-	bool _shouldWaitForRender = false;
+	bool _shouldWaitForGpu = false;
 	bool _areResizeHelperWindowsVisible = false;
 	bool _isSrcRepositioning = false;
 };

@@ -6,6 +6,7 @@
 namespace Magpie {
 
 class SharedRingBuffer;
+class GraphicsCaptureFrameSource2;
 
 class FrameProducer {
 public:
@@ -13,7 +14,7 @@ public:
 	FrameProducer(const FrameProducer&) = delete;
 	FrameProducer(FrameProducer&&) = delete;
 
-	~FrameProducer();
+	~FrameProducer() noexcept;
 
 	void InitializeAsync(
 		ID3D12Device5* device,
@@ -23,7 +24,7 @@ public:
 		const ColorInfo& colorInfo
 	) noexcept;
 
-	bool WaitForInitialize(uint32_t& outputWidth, uint32_t& outputHeight) noexcept;
+	bool WaitForInitialize(Size& outputSize) noexcept;
 
 private:
 	void _ThreadProc(
@@ -53,10 +54,9 @@ private:
 	StepTimer _stepTimer;
 	winrt::com_ptr<ID3D12DescriptorHeap> _descHeap;
 	uint32_t _srvUavDescriptorSize = 0;
-	std::unique_ptr<class GraphicsCaptureFrameSource2> _frameSource;
+	std::unique_ptr<GraphicsCaptureFrameSource2> _frameSource;
 
-	uint32_t _outputWidth = 0;
-	uint32_t _outputHeight = 0;
+	Size _outputSize{};
 
 	bool _isFP16Supported = false;
 };

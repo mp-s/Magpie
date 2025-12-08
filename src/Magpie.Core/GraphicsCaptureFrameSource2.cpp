@@ -1,10 +1,13 @@
 #include "pch.h"
 #include "GraphicsCaptureFrameSource2.h"
+#include "GraphicsContext.h"
 #include "Logger.h"
 #include "Win32Helper.h"
 #include "ScalingWindow.h"
 #include "ColorInfo.h"
+#include "DirectXHelper.h"
 #include <dwmapi.h>
+#include <Windows.Graphics.Capture.Interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
 namespace winrt {
@@ -16,7 +19,7 @@ using namespace Windows::Graphics::DirectX::Direct3D11;
 
 namespace Magpie {
 
-GraphicsCaptureFrameSource2::~GraphicsCaptureFrameSource2() {
+GraphicsCaptureFrameSource2::~GraphicsCaptureFrameSource2() noexcept {
 	_StopCapture();
 }
 
@@ -62,7 +65,7 @@ static bool CalcWindowCapturedFrameBounds(HWND hWnd, RECT& rect) noexcept {
 
 	// 如果窗口禁用了非客户区域绘制则捕获区域为 extended frame bounds
 	BOOL hasBorder = TRUE;
-	HRESULT hr = DwmGetWindowAttribute(hWnd, DWMWA_NCRENDERING_ENABLED, &hasBorder, sizeof(hasBorder));
+	hr = DwmGetWindowAttribute(hWnd, DWMWA_NCRENDERING_ENABLED, &hasBorder, sizeof(hasBorder));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("DwmGetWindowAttribute 失败", hr);
 		return false;
@@ -97,16 +100,14 @@ static bool CalcWindowCapturedFrameBounds(HWND hWnd, RECT& rect) noexcept {
 }
 
 bool GraphicsCaptureFrameSource2::Initialize(
-	ID3D12Device5* device,
-	IDXGIFactory7* dxgiFactory,
-	IDXGIAdapter4* dxgiAdapter,
+	GraphicsContext& graphicsContext,
 	const RECT& srcRect,
 	HMONITOR hMonSrc,
 	const ColorInfo& colorInfo
 ) noexcept {
 	assert(hMonSrc);
 
-	_renderingDevice = device;
+	_renderingDevice = graphicsContext.GetDevice();
 	_isUsingScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	if (!winrt::GraphicsCaptureSession::IsSupported()) {
@@ -138,8 +139,10 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		};
 	}
 
+	IDXGIAdapter1* dxgiAdapter = graphicsContext.GetDXGIAdapter();
 	// 查找源窗口所在屏幕连接的适配器
-	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter = FindAdapterOfMonitor(dxgiFactory, hMonSrc);
+	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
+		FindAdapterOfMonitor(graphicsContext.GetDXGIFactoryForEnumingAdapters(), hMonSrc);
 
 	if (srcMonAdapter) {
 		DXGI_ADAPTER_DESC desc;
@@ -149,11 +152,9 @@ bool GraphicsCaptureFrameSource2::Initialize(
 			return false;
 		}
 
-		const LUID renderAdapterLUID = device->GetAdapterLuid();
+		const LUID renderAdapterLUID = _renderingDevice->GetAdapterLuid();
 
-		if (desc.AdapterLuid.HighPart != renderAdapterLUID.HighPart ||
-			desc.AdapterLuid.LowPart != renderAdapterLUID.LowPart)
-		{
+		if (desc.AdapterLuid != renderAdapterLUID) {
 			// 通过 D3D12 跨适配器共享机制共享捕获图像
 			if (!_CreateBridgeDeviceResources(dxgiAdapter)) {
 				// 失败则使用渲染设备捕获，WGC 内部使用内存中转

@@ -214,7 +214,7 @@ HRESULT SwapChainPresenter::EndFrame() noexcept {
 		WaitForDwmComposition();
 	}
 
-	return _dxgiSwapChain->Present(isRecreated ? 0 : 1, 0);
+	return _dxgiSwapChain->Present(0, 0);
 }
 
 HRESULT SwapChainPresenter::OnSizeChanged(struct Size size) noexcept {

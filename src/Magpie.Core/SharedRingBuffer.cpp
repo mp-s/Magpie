@@ -6,7 +6,7 @@
 
 namespace Magpie {
 
-bool SharedRingBuffer::Initialize(ID3D12Device5* device, Size size, const ColorInfo& colorInfo ) noexcept {
+bool SharedRingBuffer::Initialize(ID3D12Device5* device, Size size, const ColorInfo& colorInfo) noexcept {
 	const uint32_t slotCount = ScalingWindow::Get().Options().maxProducerInFlightFrames + 1;
 	_slots.resize(slotCount);
 
@@ -103,7 +103,7 @@ HRESULT SharedRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noe
 		}
 	}
 
-	uint64_t nextFenceValue = _slots[_curConsumerSlot].producerFenceValue + 1;
+	uint64_t nextFenceValue = _slots[_curProducerSlot].producerFenceValue + 1;
 	_curProducerSlot = nextProducerSlot;
 	_slots[nextProducerSlot].producerFenceValue = nextFenceValue;
 

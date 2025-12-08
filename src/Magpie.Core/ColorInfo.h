@@ -4,8 +4,8 @@
 namespace Magpie {
 
 struct Size {
-	uint32_t width = 0;
-	uint32_t height = 0;
+	uint32_t width;
+	uint32_t height;
 };
 
 enum class ComponentState {

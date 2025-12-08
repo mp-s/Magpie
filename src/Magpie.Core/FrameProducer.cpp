@@ -10,7 +10,7 @@
 
 namespace Magpie {
 
-FrameProducer::~FrameProducer() {
+FrameProducer::~FrameProducer() noexcept {
 	if (_thread.joinable()) {
 		const HANDLE hThread = _thread.native_handle();
 
@@ -50,11 +50,10 @@ void FrameProducer::InitializeAsync(
 	);
 }
 
-bool FrameProducer::WaitForInitialize(uint32_t& outputWidth, uint32_t& outputHeight) noexcept {
+bool FrameProducer::WaitForInitialize(Size& outputSize) noexcept {
 	_state.wait(ComponentState::Initializing, std::memory_order_relaxed);
 	if (_state.load(std::memory_order_acquire) == ComponentState::NoError) {
-		outputWidth = _outputWidth;
-		outputHeight = _outputHeight;
+		outputSize = _outputSize;
 		return true;
 	} else {
 		return false;
@@ -151,7 +150,7 @@ bool FrameProducer::_Initialize(
 		);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateDispatcherQueueController 失败", hr);
-			return;
+			return false;
 		}
 
 		_dispatcher = dqc.DispatcherQueue();
@@ -176,10 +175,10 @@ bool FrameProducer::_Initialize(
 	}
 
 	// 初始化效果
-	_outputWidth = uint32_t(srcRect.right - srcRect.left);
-	_outputHeight = uint32_t(srcRect.right - srcRect.left);
+	_outputSize.width = uint32_t(srcRect.right - srcRect.left);
+	_outputSize.height = uint32_t(srcRect.bottom - srcRect.top);
 
-	if (!_sharedRingBuffer->Initialize(device, _outputWidth, _outputHeight, colorInfo)) {
+	if (!_sharedRingBuffer->Initialize(device, _outputSize, colorInfo)) {
 		Logger::Get().Error("初始化 SharedRingBuffer 失败");
 		return false;
 	}
@@ -202,8 +201,7 @@ bool FrameProducer::_Initialize(
 	}
 
 	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
-	if (!_frameSource->Initialize(device, _graphicsContext.GetDXGIFactoryForEnumingAdapters(),
-		_graphicsContext.GetDXGIAdapter(), srcRect, hMonSrc, colorInfo)) {
+	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
 		Logger::Get().Error("初始化 GraphicsCaptureFrameSource2 失败");
 		return false;
 	}
@@ -246,7 +244,7 @@ bool FrameProducer::_Initialize(
 		return false;
 	}
 
-	return false;
+	return true;
 }
 
 HRESULT FrameProducer::_Render() noexcept {
@@ -254,7 +252,7 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	uint32_t frameIndex;
 	HRESULT hr = _graphicsContext.BeginFrame(frameIndex, nullptr);
-	if (!FAILED(hr)) {
+	if (FAILED(hr)) {
 		Logger::Get().ComError("GraphicsContext::BeginFrame 失败", hr);
 		return hr;
 	}
@@ -304,7 +302,7 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
-	HRESULT hr = commandList->Close();
+	hr = commandList->Close();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
 		return hr;
@@ -312,12 +310,14 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
 
-	if (FAILED(_sharedRingBuffer->ProducerEndFrame(commandQueue))) {
+	hr = _sharedRingBuffer->ProducerEndFrame(commandQueue);
+	if (FAILED(hr)) {
 		Logger::Get().ComError("SharedRingBuffer::ProducerEndFrame 失败", hr);
 		return hr;
 	}
 
-	if (FAILED(_graphicsContext.EndFrame())) {
+	hr = _graphicsContext.EndFrame();
+	if (FAILED(hr)) {
 		Logger::Get().ComError("GraphicsContext::EndFrame 失败", hr);
 		return hr;
 	}

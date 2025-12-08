@@ -1,9 +1,9 @@
 #pragma once
+#include "ColorInfo.h"
 
 namespace Magpie {
 
 class GraphicsContext;
-struct ColorInfo;
 
 class SwapChainPresenter {
 public:
@@ -46,7 +46,7 @@ private:
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
 	uint32_t _rtvDescriptorSize = 0;
 
-	struct Size _size;
+	struct Size _size{};
 	uint32_t _bufferCount = 0;
 	bool _isScRGB = false;
 

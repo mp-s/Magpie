@@ -35,4 +35,9 @@ struct DirectXHelper {
 	) noexcept;
 };
 
+static inline bool operator==(LUID l, LUID r) noexcept {
+	// LowPart 不同的概率更高，因此先检查
+	return l.LowPart == r.LowPart && l.HighPart == r.HighPart;
+}
+
 }

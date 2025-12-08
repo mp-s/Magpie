@@ -4,8 +4,8 @@
 #include "FrameProducer.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
-#include "SrcTracker.h"
 #include "SwapChainPresenter.h"
+#include "GraphicsCaptureFrameSource2.h"
 #include <windows.graphics.display.interop.h>
 
 namespace Magpie {
@@ -54,15 +54,14 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	uint32_t frameWidth;
-	uint32_t frameHeight;
-	if (!_frameProducer->WaitForInitialize(frameWidth, frameHeight)) {
+	Size frameSize;
+	if (!_frameProducer->WaitForInitialize(frameSize)) {
 		Logger::Get().Error("FrameProducer::WaitForInitialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	_outputRect.right = frameWidth;
-	_outputRect.bottom = frameHeight;
+	_outputRect.right = frameSize.width;
+	_outputRect.bottom = frameSize.height;
 
 	return ScalingError::NoError;
 }

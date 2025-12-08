@@ -1,10 +1,10 @@
 #pragma once
-#include <Windows.Graphics.Capture.Interop.h>
+#include "ColorInfo.h"
 #include <winrt/Windows.Graphics.Capture.h>
 
 namespace Magpie {
 
-struct ColorInfo;
+class GraphicsContext;
 
 enum class FrameSourceWaitType {
 	NoWait,
@@ -15,16 +15,13 @@ enum class FrameSourceWaitType {
 class GraphicsCaptureFrameSource2 {
 public:
 	GraphicsCaptureFrameSource2() = default;
-	~GraphicsCaptureFrameSource2();
-
-	// 不可复制，不可移动
 	GraphicsCaptureFrameSource2(const GraphicsCaptureFrameSource2&) = delete;
 	GraphicsCaptureFrameSource2(GraphicsCaptureFrameSource2&&) = delete;
 
+	~GraphicsCaptureFrameSource2() noexcept;
+
 	bool Initialize(
-		ID3D12Device5* device,
-		IDXGIFactory7* dxgiFactory,
-		IDXGIAdapter4* dxgiAdapter,
+		GraphicsContext& graphicsContext,
 		const RECT& srcRect,
 		HMONITOR hMonSrc,
 		const ColorInfo& colorInfo
@@ -38,7 +35,7 @@ public:
 
 	bool IsNewFrameAvailable() noexcept;
 
-	bool Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept;
+	HRESULT Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept;
 
 	ID3D12Resource* GetOutput() noexcept {
 		return _output.get();
