@@ -8,21 +8,31 @@ public:
 	CursorManager(const CursorManager&) = delete;
 	CursorManager(CursorManager&&) = delete;
 
+	void Initialize(const RECT& srcRect, const RECT& destRect, const RECT& rendererRect, bool isSrcMoving, bool isSrcFocused) noexcept;
+
 	~CursorManager() noexcept;
 
 	void Update() noexcept;
 
-	void OnScalingPosChanged() noexcept;
+	void OnResizeStarted() noexcept;
 
-	void OnSrcStartMove() noexcept;
+	void OnResizedEnded() noexcept;
 
-	void OnSrcEndMove() noexcept;
+	void OnResized(const RECT& destRect, const RECT& rendererRect) noexcept;
 
-	void OnStartMove() noexcept;
+	void OnMoveStarted() noexcept;
 
-	void OnEndResizeMove() noexcept;
+	void OnMoveEnded() noexcept;
 
-	void OnSrcRectChanged() noexcept;
+	void OnMoved(const RECT& destRect, const RECT& rendererRect) noexcept;
+
+	void OnSrcMoveStarted() noexcept;
+
+	void OnSrcMoveEnded() noexcept;
+
+	void OnSrcMoved(const RECT& srcRect) noexcept;
+
+	void OnSrcFocusChanged(bool focused) noexcept;
 
 	// 光标不在缩放窗口上或隐藏时为 NULL
 	HCURSOR CursorHandle() const noexcept {
@@ -57,6 +67,16 @@ public:
 	}
 
 private:
+	POINT _SrcToScaling(POINT pt, bool skipBorder) const noexcept;
+
+	enum class _RoundMethod {
+		Round,
+		Floor,
+		Ceil
+	};
+
+	POINT _ScalingToSrc(POINT pt, _RoundMethod roundType = _RoundMethod::Round) const noexcept;
+
 	void _ShowSystemCursor(bool show, bool onDestory = false);
 
 	void _AdjustCursorSpeed() noexcept;
@@ -85,6 +105,10 @@ private:
 
 	void _RestoreClipCursor() noexcept;
 
+	RECT _srcRect{};
+	RECT _destRect{};
+	RECT _rendererRect{};
+
 	HCURSOR _hCursor = NULL;
 	POINT _cursorPos{ std::numeric_limits<LONG>::max() };
 
@@ -103,6 +127,11 @@ private:
 	uint32_t _lastCompletedHitTestId = 0;
 	POINT _lastCompletedHitTestPos{ std::numeric_limits<LONG>::max() };
 	int16_t _lastCompletedHitTestResult = HTNOWHERE;
+
+	bool _isMoving = false;
+	bool _isResizing = false;
+	bool _isSrcMoving = false;
+	bool _isSrcFocused = false;
 
 	bool _isUnderCapture = false;
 	// 当缩放后的光标位置在交换链窗口上且没有被其他窗口挡住时应绘制光标

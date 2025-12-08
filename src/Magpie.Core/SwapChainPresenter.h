@@ -24,7 +24,7 @@ public:
 
 	Size Size() const noexcept { return _size; }
 
-	HRESULT OnSizeChanged(struct Size size) noexcept;
+	HRESULT OnResized(struct Size size) noexcept;
 
 	void OnResizeStarted() noexcept;
 

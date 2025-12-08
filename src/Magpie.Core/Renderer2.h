@@ -27,13 +27,17 @@ public:
 
 	ComponentState Render(bool& waitingForFirstFrame, bool waitForGpu = false) noexcept;
 
-	void OnMonitorChanged(HMONITOR hMonitor) noexcept;
+	const RECT& OutputRect() const noexcept {
+		return _outputRect;
+	}
 
-	void OnSizeChanged(Size size) noexcept;
+	void OnMonitorChanged(HMONITOR hMonitor) noexcept;
 
 	void OnResizeStarted() noexcept;
 
 	void OnResizeEnded() noexcept;
+
+	void OnResized(Size size) noexcept;
 
 	void OnMsgDisplayChanged() noexcept;
 

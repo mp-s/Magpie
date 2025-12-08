@@ -61,11 +61,11 @@ public:
 	}
 
 	class Renderer& Renderer() noexcept {
-		return *_renderer;
+		return *_oldRenderer;
 	}
 
 	const class Renderer& Renderer() const noexcept {
-		return *_renderer;
+		return *_oldRenderer;
 	}
 
 	class CursorManager& CursorManager() noexcept {
@@ -130,11 +130,7 @@ private:
 
 	void _Show() noexcept;
 
-	bool _UpdateSrcState(
-		bool& isSrcRepositioning,
-		bool& srcFocusedChanged,
-		bool& srcMonitorChanged
-	) noexcept;
+	bool _UpdateSrcState(bool& isSrcRepositioning) noexcept;
 
 	bool _CheckForegroundFor3DGameMode(HWND hwndFore) const noexcept;
 
@@ -148,9 +144,9 @@ private:
 
 	static LRESULT CALLBACK _RendererWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-	void _ResizeRenderer() noexcept;
+	void _HandleResize() noexcept;
 
-	void _MoveRenderer() noexcept;
+	void _HandleMove() noexcept;
 
 	static LRESULT CALLBACK _BorderHelperWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -191,8 +187,8 @@ private:
 	uint32_t _nonTopBorderThicknessInClient = 0;
 
 	ScalingOptions _options;
-	std::unique_ptr<class Renderer> _renderer;
-	std::unique_ptr<class Renderer2> _renderer2;
+	std::unique_ptr<class Renderer> _oldRenderer;
+	std::unique_ptr<class Renderer2> _renderer;
 	std::unique_ptr<class CursorManager> _cursorManager;
 
 	class SrcTracker _srcTracker;

@@ -192,12 +192,6 @@ void Renderer2::OnMonitorChanged(HMONITOR hMonitor) noexcept {
 	_CheckResult(_UpdateColorSpace(), "_UpdateColorSpace 失败");
 }
 
-void Renderer2::OnSizeChanged(Size size) noexcept {
-	if (_state == ComponentState::NoError) {
-		_CheckResult(_presenter->OnSizeChanged(size), "SwapChainPresenter::OnSizeChanged 失败");
-	}
-}
-
 void Renderer2::OnResizeStarted() noexcept {
 	if (_state == ComponentState::NoError) {
 		_presenter->OnResizeStarted();
@@ -207,6 +201,12 @@ void Renderer2::OnResizeStarted() noexcept {
 void Renderer2::OnResizeEnded() noexcept {
 	if (_state == ComponentState::NoError) {
 		_CheckResult(_presenter->OnResizeEnded(), "SwapChainPresenter::OnResizeEnded 失败");
+	}
+}
+
+void Renderer2::OnResized(Size size) noexcept {
+	if (_state == ComponentState::NoError) {
+		_CheckResult(_presenter->OnResized(size), "SwapChainPresenter::OnResized 失败");
 	}
 }
 

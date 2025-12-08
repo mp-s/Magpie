@@ -312,8 +312,8 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		}
 	}
 
-	_renderer2 = std::make_unique<Renderer2>();
-	ScalingError error = _renderer2->Initialize(
+	_renderer = std::make_unique<Renderer2>();
+	ScalingError error = _renderer->Initialize(
 		_hwndRenderer,
 		_srcTracker.Monitor(),
 		Size{ uint32_t(_rendererRect.right - _rendererRect.left),uint32_t(_rendererRect.bottom - _rendererRect.top) },
@@ -325,14 +325,16 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		return error;
 	}
 
-	/*_renderer = std::make_unique<class Renderer>();
-	error = _renderer->Initialize(_hwndRenderer, _options.overlayOptions);
-	if (error != ScalingError::NoError) {
-		Logger::Get().Error("初始化 Renderer 失败");
-		return error;
-	}
-
-	_cursorManager = std::make_unique<class CursorManager>();*/
+	_cursorManager = std::make_unique<class CursorManager>();
+	const RECT& outputRect = _renderer->OutputRect();
+	const RECT destRect = {
+		_rendererRect.left + outputRect.left,
+		_rendererRect.top + outputRect.top,
+		_rendererRect.left + outputRect.right,
+		_rendererRect.top + outputRect.bottom
+	};
+	_cursorManager->Initialize(_srcTracker.SrcRect(), destRect, _rendererRect,
+		_srcTracker.IsMoving(), _srcTracker.IsFocused());
 
 	if (_options.IsTouchSupportEnabled()) {
 		// 应在 Renderer 初始化后调用。推迟到缩放窗口显示后再显示
@@ -394,36 +396,27 @@ void ScalingWindow::ToggleScaling(bool isWindowedMode) noexcept {
 }
 
 void ScalingWindow::SwitchToolbarState() noexcept {
-	if (_renderer) {
+	// TODO
+	/*if (_renderer) {
 		_renderer->SwitchToolbarState();
-	}
+	}*/
 }
 
 void ScalingWindow::Render() noexcept {
 	bool isSrcRepositioning = false;
-	bool srcFocusedChanged = false;
-	bool srcMonitorChanged = false;
-	if (!_UpdateSrcState(isSrcRepositioning, srcFocusedChanged, srcMonitorChanged)) {
+	if (!_UpdateSrcState(isSrcRepositioning)) {
 		Logger::Get().Info("源窗口状态改变");
 		_DelayedStop(false, isSrcRepositioning);
 		return;
 	}
 
-	if (srcFocusedChanged) {
-		_UpdateFocusState();
-	}
-
-	if (srcMonitorChanged) {
-		_renderer2->OnMonitorChanged(_srcTracker.Monitor());
-	}
-
 	// 虽然可以在第一帧渲染完成后再隐藏系统光标，但某些设备上显示窗口时光标状态会变成忙，
 	// 提前隐藏光标可以提高观感。缩放窗口显示后再隐藏光标还可能造成光标闪烁两次，第一次是
 	// 创建 D3D 设备后（可能是 OS bug），第二次是我们隐藏系统光标。
-	// _cursorManager->Update();
+	_cursorManager->Update();
 
 	bool waitingForFirstFrame = false;
-	ComponentState state = _renderer2->Render(waitingForFirstFrame, _shouldWaitForGpu || _isFirstFrame);
+	ComponentState state = _renderer->Render(waitingForFirstFrame, _shouldWaitForGpu || _isFirstFrame);
 	if (state == ComponentState::NoError) {
 		// 第一帧渲染完成后显示缩放窗口
 		if (_isFirstFrame && !waitingForFirstFrame) {
@@ -433,10 +426,10 @@ void ScalingWindow::Render() noexcept {
 	} else {
 		if (state == ComponentState::DeviceLost) {
 			// 设备丢失重新创建 Renderer
-			_renderer2.reset();
-			_renderer2 = std::make_unique<Renderer2>();
+			_renderer.reset();
+			_renderer = std::make_unique<Renderer2>();
 
-			ScalingError error = _renderer2->Initialize(
+			ScalingError error = _renderer->Initialize(
 				_hwndRenderer,
 				_srcTracker.Monitor(),
 				Size{ uint32_t(_rendererRect.right - _rendererRect.left),uint32_t(_rendererRect.bottom - _rendererRect.top) },
@@ -450,7 +443,7 @@ void ScalingWindow::Render() noexcept {
 			}
 
 			// 如果设备再次丢失不再尝试恢复
-			if (_renderer2->Render(waitingForFirstFrame) != ComponentState::NoError) {
+			if (_renderer->Render(waitingForFirstFrame) != ComponentState::NoError) {
 				_DelayedStop();
 				return;
 			}
@@ -478,10 +471,6 @@ winrt::hstring ScalingWindow::GetLocalizedString(std::wstring_view resName) cons
 }
 
 LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noexcept {
-	if (_renderer) {
-		_renderer->MessageHandler(msg, wParam, lParam);
-	}
-
 	switch (msg) {
 	case WM_CREATE:
 	{
@@ -560,9 +549,9 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		_isMoving = !_isPreparingForResizing;
 
 		if (_isResizing) {
-			_renderer2->OnResizeStarted();
+			_renderer->OnResizeStarted();
 		} else {
-			_cursorManager->OnStartMove();
+			_cursorManager->OnMoveStarted();
 		}
 
 		if (_options.IsTouchSupportEnabled()) {
@@ -580,11 +569,10 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		_isMoving = false;
 
 		if (oldIsResizing) {
-			_renderer2->OnResizeEnded();
+			_renderer->OnResizeEnded();
 		}
 
-		// TODO
-		// _cursorManager->OnEndResizeMove();
+		_cursorManager->OnMoveEnded();
 
 		if (!_srcTracker.MoveOnEndResizeMove()) {
 			Logger::Get().Error("SrcTracker::MoveOnEndResizeMove 失败");
@@ -592,8 +580,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 			return 0;
 		}
 
-		// TODO
-		// _cursorManager->OnSrcRectChanged();
+		_cursorManager->OnSrcMoved(_srcTracker.SrcRect());
 
 		if (_options.IsTouchSupportEnabled()) {
 			_UpdateTouchProps(_srcTracker.SrcRect());
@@ -653,12 +640,12 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		// 鼠标在叠加层工具栏上时可以拖动缩放窗口
 		/*if (_renderer->IsCursorOnOverlayCaptionArea()) {
 			return HTCAPTION;
-		}
+		}*/
 
 		const int16_t srcHitTest = _cursorManager->SrcHitTest();
 		if (srcHitTest != HTNOWHERE) {
 			return srcHitTest;
-		}*/
+		}
 
 		break;
 	}
@@ -848,7 +835,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 	{
 		// 如果全屏模式缩放包含 WS_MAXIMIZE 样式，创建窗口时将收到 WM_NCCALCSIZE，
 		// 应该忽略。
-		if (!_renderer2 || !wParam) {
+		if (!_renderer || !wParam) {
 			return 0;
 		}
 
@@ -934,8 +921,8 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 	}
 	case WM_DISPLAYCHANGE:
 	{
-		if (_renderer2) {
-			_renderer2->OnMsgDisplayChanged();
+		if (_renderer) {
+			_renderer->OnMsgDisplayChanged();
 		}
 		return 0;
 	}
@@ -959,7 +946,6 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		Logger::Get().Info("CursorManager 已析构");
 
 		_renderer.reset();
-		_renderer2.reset();
 		Logger::Get().Info("Renderer 已析构");
 
 		if (!_isSrcRepositioning) {
@@ -988,9 +974,9 @@ LRESULT ScalingWindow::_RendererWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 		if (!(windowPos.flags & SWP_NOSIZE)) {
 			// 为了平滑调整窗口尺寸，渲染所在窗口需要在 WM_WINDOWPOSCHANGING 中
 			// 更新渲染尺寸。
-			Get()._ResizeRenderer();
+			Get()._HandleResize();
 		} else if (!(windowPos.flags & SWP_NOMOVE)) {
-			Get()._MoveRenderer();
+			Get()._HandleMove();
 		}
 
 		return 0;
@@ -1347,29 +1333,34 @@ void ScalingWindow::_Show() noexcept {
 	};
 }
 
-void ScalingWindow::_ResizeRenderer() noexcept {
-	_renderer2->OnSizeChanged(
+void ScalingWindow::_HandleResize() noexcept {
+	_renderer->OnResized(
 		Size{ uint32_t(_rendererRect.right - _rendererRect.left), uint32_t(_rendererRect.bottom - _rendererRect.top) });
 
-	// TODO
-	// _cursorManager->OnScalingPosChanged();
+	const RECT& outputRect = _renderer->OutputRect();
+	const RECT destRect = {
+		_rendererRect.left + outputRect.left,
+		_rendererRect.top + outputRect.top,
+		_rendererRect.left + outputRect.right,
+		_rendererRect.top + outputRect.bottom
+	};
+	_cursorManager->OnResized(destRect, _rendererRect);
+
 	Render();
 }
 
-void ScalingWindow::_MoveRenderer() noexcept {
-	_renderer->OnMove();
-
-	if (!_isMovingDueToSrcMoved) {
-		_cursorManager->OnScalingPosChanged();
-		Render();
-	}
+void ScalingWindow::_HandleMove() noexcept {
+	const RECT& outputRect = _renderer->OutputRect();
+	const RECT destRect = {
+		_rendererRect.left + outputRect.left,
+		_rendererRect.top + outputRect.top,
+		_rendererRect.left + outputRect.right,
+		_rendererRect.top + outputRect.bottom
+	};
+	_cursorManager->OnMoved(destRect, _rendererRect);
 }
 
-bool ScalingWindow::_UpdateSrcState(
-	bool& isSrcRepositioning,
-	bool& srcFocusedChanged,
-	bool& srcMonitorChanged
-) noexcept {
+bool ScalingWindow::_UpdateSrcState(bool& isSrcRepositioning) noexcept {
 	HWND hwndFore = GetForegroundWindow();
 
 	if (hwndFore == Handle()) {
@@ -1386,9 +1377,11 @@ bool ScalingWindow::_UpdateSrcState(
 	}
 
 	bool isSrcInvisibleOrMinimized = false;
+	bool srcFocusedChanged = false;
 	bool srcRectChanged = false;
 	bool srcSizeChanged = false;
 	bool srcMovingChanged = false;
+	bool srcMonitorChanged = false;
 	if (!_srcTracker.UpdateState(hwndFore, _options.IsWindowedMode(), IsResizingOrMoving(),
 		isSrcInvisibleOrMinimized, srcFocusedChanged, srcRectChanged, srcSizeChanged, srcMovingChanged, srcMonitorChanged)) {
 		return false;
@@ -1414,9 +1407,9 @@ bool ScalingWindow::_UpdateSrcState(
 		assert(_options.IsWindowedMode());
 
 		if (_srcTracker.IsMoving()) {
-			_cursorManager->OnSrcStartMove();
+			_cursorManager->OnSrcMoveStarted();
 		} else {
-			_cursorManager->OnSrcEndMove();
+			_cursorManager->OnSrcMoveEnded();
 			_EnsureCaptionVisibleOnScreen();
 		}
 
@@ -1432,7 +1425,7 @@ bool ScalingWindow::_UpdateSrcState(
 	if (srcRectChanged) {
 		assert(_options.IsWindowedMode());
 
-		_cursorManager->OnSrcRectChanged();
+		_cursorManager->OnSrcMoved(_srcTracker.SrcRect());
 
 		// 窗口模式缩放时允许源窗口移动
 		const RECT& srcRect = _srcTracker.WindowRect();
@@ -1443,6 +1436,16 @@ bool ScalingWindow::_UpdateSrcState(
 		SetWindowPos(Handle(), NULL, newLeft, newTop, 0, 0,
 			SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE | SWP_NOSENDCHANGING);
 		_isMovingDueToSrcMoved = false;
+	}
+
+	if (srcFocusedChanged) {
+		_cursorManager->OnSrcFocusChanged(_srcTracker.IsFocused());
+
+		_UpdateFocusState();
+	}
+
+	if (srcMonitorChanged) {
+		_renderer->OnMonitorChanged(_srcTracker.Monitor());
 	}
 	
 	return true;
@@ -1486,18 +1489,17 @@ void ScalingWindow::_SetWindowProps() const noexcept {
 void ScalingWindow::_UpdateWindowProps() const noexcept {
 	const HWND hWnd = Handle();
 
-	const RECT& srcRect = _renderer->SrcRect();
+	const RECT& srcRect = _srcTracker.SrcRect();
 	SetProp(hWnd, L"Magpie.SrcLeft", (HANDLE)(INT_PTR)srcRect.left);
 	SetProp(hWnd, L"Magpie.SrcTop", (HANDLE)(INT_PTR)srcRect.top);
 	SetProp(hWnd, L"Magpie.SrcRight", (HANDLE)(INT_PTR)srcRect.right);
 	SetProp(hWnd, L"Magpie.SrcBottom", (HANDLE)(INT_PTR)srcRect.bottom);
 
-	// TODO
-	/*const RECT& destRect = _renderer->DestRect();
-	SetProp(hWnd, L"Magpie.DestLeft", (HANDLE)(INT_PTR)destRect.left);
-	SetProp(hWnd, L"Magpie.DestTop", (HANDLE)(INT_PTR)destRect.top);
-	SetProp(hWnd, L"Magpie.DestRight", (HANDLE)(INT_PTR)destRect.right);
-	SetProp(hWnd, L"Magpie.DestBottom", (HANDLE)(INT_PTR)destRect.bottom);*/
+	const RECT& outputRect = _renderer->OutputRect();
+	SetProp(hWnd, L"Magpie.DestLeft", (HANDLE)(INT_PTR)(_rendererRect.left + outputRect.left));
+	SetProp(hWnd, L"Magpie.DestTop", (HANDLE)(INT_PTR)(_rendererRect.top + outputRect.top));
+	SetProp(hWnd, L"Magpie.DestRight", (HANDLE)(INT_PTR)(_rendererRect.left + outputRect.right));
+	SetProp(hWnd, L"Magpie.DestBottom", (HANDLE)(INT_PTR)(_rendererRect.top + outputRect.bottom));
 }
 
 // 供 TouchHelper.exe 使用
@@ -1817,8 +1819,15 @@ static LRESULT CALLBACK BkgWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
 // 将黑边映射到源窗口
 RECT ScalingWindow::_CalcSrcTouchRect() const noexcept {
-	const RECT& srcRect = _renderer->SrcRect();
-	const RECT& destRect = _renderer->DestRect();
+	const RECT& srcRect = _srcTracker.SrcRect();
+
+	const RECT& outputRect = _renderer->OutputRect();
+	const RECT destRect = {
+		_rendererRect.left + outputRect.left,
+		_rendererRect.top + outputRect.top,
+		_rendererRect.left + outputRect.right,
+		_rendererRect.top + outputRect.bottom
+	};
 
 	const double scaleX = double(destRect.right - destRect.left) / (srcRect.right - srcRect.left);
 	const double scaleY = double(destRect.bottom - destRect.top) / (srcRect.bottom - srcRect.top);
@@ -2059,17 +2068,17 @@ void ScalingWindow::_UpdateRendererRect() noexcept {
 			_DelayedStop();
 			return;
 		}
-		// TODO
-		// _cursorManager->OnSrcRectChanged();
+		
+		_cursorManager->OnSrcMoved(_srcTracker.SrcRect());
 	}
 
 	if (_hwndRenderer == Handle()) {
 		if (resized) {
 			// 为了平滑调整窗口尺寸，渲染所在窗口需要在 WM_NCCALCSIZE 中
 			// 更新渲染尺寸。
-			_ResizeRenderer();
+			_HandleResize();
 		} else {
-			_MoveRenderer();
+			_HandleMove();
 		}
 	} else {
 		// 渲染口过程将在 WM_NCCALCSIZE 中更新渲染尺寸
