@@ -549,6 +549,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		_isMoving = !_isPreparingForResizing;
 
 		if (_isResizing) {
+			_cursorManager->OnResizeStarted();
 			_renderer->OnResizeStarted();
 		} else {
 			_cursorManager->OnMoveStarted();
@@ -569,10 +570,11 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		_isMoving = false;
 
 		if (oldIsResizing) {
+			_cursorManager->OnResizeEnded();
 			_renderer->OnResizeEnded();
+		} else {
+			_cursorManager->OnMoveEnded();
 		}
-
-		_cursorManager->OnMoveEnded();
 
 		if (!_srcTracker.MoveOnEndResizeMove()) {
 			Logger::Get().Error("SrcTracker::MoveOnEndResizeMove 失败");

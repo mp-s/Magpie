@@ -16,7 +16,7 @@ public:
 
 	void OnResizeStarted() noexcept;
 
-	void OnResizedEnded() noexcept;
+	void OnResizeEnded() noexcept;
 
 	void OnResized(const RECT& destRect, const RECT& rendererRect) noexcept;
 

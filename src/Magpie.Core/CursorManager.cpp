@@ -49,7 +49,7 @@ void CursorManager::OnResizeStarted() noexcept {
 	_isResizing = true;
 }
 
-void CursorManager::OnResizedEnded() noexcept {
+void CursorManager::OnResizeEnded() noexcept {
 	_isResizing = false;
 }
 
