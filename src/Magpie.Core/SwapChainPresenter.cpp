@@ -183,9 +183,9 @@ static void WaitForDwmComposition() noexcept {
 	}
 }
 
-HRESULT SwapChainPresenter::EndFrame() noexcept {
+HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 	const bool isRecreated = std::exchange(_isRecreated, false);
-	if (isRecreated) {
+	if (isRecreated || waitForGpu) {
 		// 下面两个调用用于减少调整窗口尺寸时的边缘闪烁。
 		// 
 		// 我们希望 DWM 绘制新的窗口框架时刚好合成新帧，但这不是我们能控制的，尤其是混合架构

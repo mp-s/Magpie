@@ -25,7 +25,7 @@ public:
 		OverlayOptions& overlayOptions
 	) noexcept;
 
-	ComponentState Render(bool force = false, bool waitForGpu = false) noexcept;
+	ComponentState Render(bool& waitingForFirstFrame, bool waitForGpu = false) noexcept;
 
 	void OnMonitorChanged(HMONITOR hMonitor) noexcept;
 

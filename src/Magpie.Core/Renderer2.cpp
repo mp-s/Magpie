@@ -79,7 +79,9 @@ ScalingError Renderer2::Initialize(
 	return ScalingError::NoError;
 }
 
-ComponentState Renderer2::Render(bool /*force*/, bool /*waitForGpu*/) noexcept {
+ComponentState Renderer2::Render(bool& waitingForFirstFrame, bool waitForGpu) noexcept {
+	assert(!waitingForFirstFrame);
+
 	if (_state != ComponentState::NoError) {
 		return _state;
 	}
@@ -89,6 +91,7 @@ ComponentState Renderer2::Render(bool /*force*/, bool /*waitForGpu*/) noexcept {
 	ID3D12Fence1* fenceToSignal;
 	UINT64 fenceValueToSignal;
 	if (!_sharedRingBuffer.ConsumerBeginFrame(curBuffer, bufferState, fenceToSignal, fenceValueToSignal, D3D12_RESOURCE_STATE_COPY_SOURCE)) {
+		waitingForFirstFrame = true;
 		return _state;
 	}
 
@@ -167,7 +170,7 @@ ComponentState Renderer2::Render(bool /*force*/, bool /*waitForGpu*/) noexcept {
 		return _state;
 	}
 
-	if (!_CheckResult(_presenter->EndFrame(), "SwapChainPresenter::EndFrame 失败")) {
+	if (!_CheckResult(_presenter->EndFrame(waitForGpu), "SwapChainPresenter::EndFrame 失败")) {
 		return _state;
 	}
 

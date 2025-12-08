@@ -422,10 +422,11 @@ void ScalingWindow::Render() noexcept {
 	// 创建 D3D 设备后（可能是 OS bug），第二次是我们隐藏系统光标。
 	// _cursorManager->Update();
 
-	ComponentState state = _renderer2->Render(false, _shouldWaitForGpu || _isFirstFrame);
+	bool waitingForFirstFrame = false;
+	ComponentState state = _renderer2->Render(waitingForFirstFrame, _shouldWaitForGpu || _isFirstFrame);
 	if (state == ComponentState::NoError) {
 		// 第一帧渲染完成后显示缩放窗口
-		if (_isFirstFrame) {
+		if (_isFirstFrame && !waitingForFirstFrame) {
 			_isFirstFrame = false;
 			_Show();
 		}
@@ -449,7 +450,7 @@ void ScalingWindow::Render() noexcept {
 			}
 
 			// 如果设备再次丢失不再尝试恢复
-			if (_renderer2->Render() != ComponentState::NoError) {
+			if (_renderer2->Render(waitingForFirstFrame) != ComponentState::NoError) {
 				_DelayedStop();
 				return;
 			}

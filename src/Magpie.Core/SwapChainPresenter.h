@@ -20,7 +20,7 @@ public:
 
 	void BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept;
 
-	HRESULT EndFrame() noexcept;
+	HRESULT EndFrame(bool waitForGpu = false) noexcept;
 
 	Size Size() const noexcept { return _size; }
 
