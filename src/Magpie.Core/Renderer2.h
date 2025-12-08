@@ -2,7 +2,6 @@
 #include "ColorInfo.h"
 #include "GraphicsContext.h"
 #include "ScalingOptions.h"
-#include "SharedRingBuffer.h"
 
 namespace Magpie {
 
@@ -25,7 +24,7 @@ public:
 		OverlayOptions& overlayOptions
 	) noexcept;
 
-	ComponentState Render(bool& waitingForFirstFrame, bool waitForGpu = false) noexcept;
+	ComponentState Render(bool waitForGpu = false, bool* waitingForFirstFrame = nullptr) noexcept;
 
 	const RECT& OutputRect() const noexcept {
 		return _outputRect;
@@ -48,6 +47,8 @@ private:
 
 	HRESULT _UpdateColorSpace() noexcept;
 
+	HRESULT _RenderImpl(bool waitForGpu = false, bool* waitingForFirstFrame = nullptr) noexcept;
+
 	bool _CheckResult(bool success, std::string_view errorMsg) noexcept;
 
 	bool _CheckResult(HRESULT hr, std::string_view errorMsg) noexcept;
@@ -61,7 +62,6 @@ private:
 	RECT _outputRect{};
 
 	GraphicsContext _graphicsContext;
-	SharedRingBuffer _sharedRingBuffer;
 	std::unique_ptr<FrameProducer> _frameProducer;
 	std::unique_ptr<SwapChainPresenter> _presenter;
 	

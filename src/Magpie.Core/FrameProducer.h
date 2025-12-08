@@ -1,11 +1,11 @@
 #pragma once
 #include "ColorInfo.h"
 #include "GraphicsContext.h"
+#include "SharedRingBuffer.h"
 #include "StepTimer.h"
 
 namespace Magpie {
 
-class SharedRingBuffer;
 class GraphicsCaptureFrameSource2;
 
 class FrameProducer {
@@ -18,13 +18,24 @@ public:
 
 	void InitializeAsync(
 		ID3D12Device5* device,
-		SharedRingBuffer& sharedRingBuffer,
 		const RECT& srcRect,
 		HMONITOR hMonSrc,
 		const ColorInfo& colorInfo
 	) noexcept;
 
 	bool WaitForInitialize(Size& outputSize) noexcept;
+
+	bool ConsumerBeginFrame(
+		ID3D12Resource*& buffer,
+		D3D12_RESOURCE_STATES& state,
+		ID3D12Fence1*& fenceToSignal,
+		UINT64& fenceValueToSignal,
+		D3D12_RESOURCE_STATES newState
+	) noexcept;
+
+	HRESULT OnResized(Size size, Size& outputSize) noexcept;
+
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
 	void _ThreadProc(
@@ -48,14 +59,15 @@ private:
 	std::thread _thread;
 	winrt::DispatcherQueue _dispatcher{ nullptr };
 
-	SharedRingBuffer* _sharedRingBuffer = nullptr;
-
 	GraphicsContext _graphicsContext;
+	SharedRingBuffer _sharedRingBuffer;
 	StepTimer _stepTimer;
-	winrt::com_ptr<ID3D12DescriptorHeap> _descHeap;
-	uint32_t _srvUavDescriptorSize = 0;
 	std::unique_ptr<GraphicsCaptureFrameSource2> _frameSource;
 
+	winrt::com_ptr<ID3D12DescriptorHeap> _descHeap;
+	uint32_t _srvUavDescriptorSize = 0;
+	
+	Size _inputSize{};
 	Size _outputSize{};
 
 	bool _isFP16Supported = false;

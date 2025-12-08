@@ -58,8 +58,7 @@ ScalingError Renderer2::Initialize(
 
 	_frameProducer = std::make_unique<FrameProducer>();
 	// 也会初始化 SharedRingBuffer
-	_frameProducer->InitializeAsync(
-		_graphicsContext.GetDevice(), _sharedRingBuffer, srcRect, hMonitor, _colorInfo);
+	_frameProducer->InitializeAsync(_graphicsContext.GetDevice(), srcRect, hMonitor, _colorInfo);
 
 	_presenter = std::make_unique<SwapChainPresenter>();
 	if (!_presenter->Initialize(_graphicsContext, hwndAttach, size, _colorInfo)) {
@@ -79,103 +78,10 @@ ScalingError Renderer2::Initialize(
 	return ScalingError::NoError;
 }
 
-ComponentState Renderer2::Render(bool& waitingForFirstFrame, bool waitForGpu) noexcept {
-	assert(!waitingForFirstFrame);
-
-	if (_state != ComponentState::NoError) {
-		return _state;
+ComponentState Renderer2::Render(bool waitForGpu, bool* waitingForFirstFrame) noexcept {
+	if (_state == ComponentState::NoError) {
+		_CheckResult(_RenderImpl(waitForGpu, waitingForFirstFrame), "_RenderImpl 失败");
 	}
-
-	ID3D12Resource* curBuffer;
-	D3D12_RESOURCE_STATES bufferState;
-	ID3D12Fence1* fenceToSignal;
-	UINT64 fenceValueToSignal;
-	if (!_sharedRingBuffer.ConsumerBeginFrame(curBuffer, bufferState, fenceToSignal, fenceValueToSignal, D3D12_RESOURCE_STATE_COPY_SOURCE)) {
-		waitingForFirstFrame = true;
-		return _state;
-	}
-
-	// SwapChain::BeginFrame 和 GraphicsContext::BeginFrame 无顺序要求，不过
-	// 前者通常等待时间更久，将它放在前面可以减少等待次数。
-	ID3D12Resource* frameTex;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	_presenter->BeginFrame(&frameTex, rtvHandle);
-
-	uint32_t frameIndex;
-	if (!_CheckResult(_graphicsContext.BeginFrame(frameIndex, nullptr), "GraphicsContext::BeginFrame 失败")) {
-		return _state;
-	}
-
-	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
-
-	if (const Size size = _presenter->Size(); _outputRect == RECT{ 0,0,(LONG)size.width,(LONG)size.height }) {
-		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
-			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
-			commandList->ResourceBarrier(1, &barrier);
-		} else {
-			CD3DX12_RESOURCE_BARRIER barriers[] = {
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0),
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
-			};
-			commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
-		}
-
-		commandList->CopyResource(frameTex, curBuffer);
-	} else {
-		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
-		commandList->ResourceBarrier(1, &barrier);
-
-		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
-		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
-		static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
-		commandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
-
-		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-			commandList->ResourceBarrier(1, &barrier);
-		} else {
-			CD3DX12_RESOURCE_BARRIER barriers[] = {
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0),
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
-			};
-			commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
-		}
-
-		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
-		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
-		commandList->CopyTextureRegion(&dest, _outputRect.left, _outputRect.top, 0, &src, nullptr);
-	}
-
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
-		commandList->ResourceBarrier(1, &barrier);
-	}
-
-	if (!_CheckResult(commandList->Close(), "ID3D12GraphicsCommandList::Close 失败")) {
-		return _state;
-	}
-
-	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
-	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
-
-	if (!_CheckResult(commandQueue->Signal(fenceToSignal, fenceValueToSignal), "ID3D12CommandQueue::Signal 失败")) {
-		return _state;
-	}
-
-	if (!_CheckResult(_presenter->EndFrame(waitForGpu), "SwapChainPresenter::EndFrame 失败")) {
-		return _state;
-	}
-
-	// GraphicsContext::EndFrame 必须在 SwapChain::EndFrame 之后
-	_CheckResult(_graphicsContext.EndFrame(), "GraphicsContext::EndFrame 失败");
 	return _state;
 }
 
@@ -205,9 +111,24 @@ void Renderer2::OnResizeEnded() noexcept {
 }
 
 void Renderer2::OnResized(Size size) noexcept {
-	if (_state == ComponentState::NoError) {
-		_CheckResult(_presenter->OnResized(size), "SwapChainPresenter::OnResized 失败");
+	if (_state != ComponentState::NoError) {
+		return;
 	}
+
+	// 会等待 GPU
+	if (!_CheckResult(_presenter->OnResized(size), "SwapChainPresenter::OnResized 失败")) {
+		return;
+	}
+
+	Size frameSize;
+	if (!_CheckResult(_frameProducer->OnResized(size, frameSize), "FrameProducer::OnResized 失败")) {
+		return;
+	}
+
+	_outputRect.right = frameSize.width;
+	_outputRect.bottom = frameSize.height;
+
+	_CheckResult(_RenderImpl(true), "_RenderImpl 失败");
 }
 
 void Renderer2::OnMsgDisplayChanged() noexcept {
@@ -346,7 +267,135 @@ bool Renderer2::_UpdateColorInfo() noexcept {
 }
 
 HRESULT Renderer2::_UpdateColorSpace() noexcept {
-	return E_NOTIMPL;
+	ColorInfo oldColorInfo = _colorInfo;
+	if (!_UpdateColorInfo()) {
+		return E_FAIL;
+	}
+
+	if (oldColorInfo == _colorInfo) {
+		return S_OK;
+	}
+
+	// 等待 GPU 完成然后改变交换链格式
+	HRESULT hr = _presenter->OnColorInfoChanged(_colorInfo);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("SwapChainPresenter::OnColorInfoChanged 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
+}
+
+HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noexcept {
+	assert(!waitingForFirstFrame || !*waitingForFirstFrame);
+
+	ID3D12Resource* curBuffer;
+	D3D12_RESOURCE_STATES bufferState;
+	ID3D12Fence1* fenceToSignal;
+	UINT64 fenceValueToSignal;
+	if (!_frameProducer->ConsumerBeginFrame(curBuffer, bufferState, fenceToSignal, fenceValueToSignal, D3D12_RESOURCE_STATE_COPY_SOURCE)) {
+		if (waitingForFirstFrame) {
+			*waitingForFirstFrame = true;
+		}
+
+		return S_OK;
+	}
+
+	// SwapChain::BeginFrame 和 GraphicsContext::BeginFrame 无顺序要求，不过
+	// 前者通常等待时间更久，将它放在前面可以减少等待次数。
+	ID3D12Resource* frameTex;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
+	_presenter->BeginFrame(&frameTex, rtvHandle);
+
+	uint32_t frameIndex;
+	HRESULT hr = _graphicsContext.BeginFrame(frameIndex, nullptr);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("GraphicsContext::BeginFrame 失败", hr);
+		return hr;
+	}
+
+	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
+
+	if (const Size size = _presenter->Size(); _outputRect == RECT{ 0,0,(LONG)size.width,(LONG)size.height }) {
+		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
+			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
+			commandList->ResourceBarrier(1, &barrier);
+		} else {
+			CD3DX12_RESOURCE_BARRIER barriers[] = {
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0),
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
+			};
+			commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
+		}
+
+		commandList->CopyResource(frameTex, curBuffer);
+	} else {
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+		commandList->ResourceBarrier(1, &barrier);
+
+		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
+		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
+		static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
+		commandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
+
+		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+			commandList->ResourceBarrier(1, &barrier);
+		} else {
+			CD3DX12_RESOURCE_BARRIER barriers[] = {
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0),
+				CD3DX12_RESOURCE_BARRIER::Transition(
+					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
+			};
+			commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
+		}
+
+		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
+		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
+		commandList->CopyTextureRegion(&dest, _outputRect.left, _outputRect.top, 0, &src, nullptr);
+	}
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
+		commandList->ResourceBarrier(1, &barrier);
+	}
+
+	hr = commandList->Close();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
+		return hr;
+	}
+
+	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
+	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
+
+	hr = commandQueue->Signal(fenceToSignal, fenceValueToSignal);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
+		return hr;
+	}
+
+	hr = _presenter->EndFrame(waitForGpu);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("SwapChainPresenter::EndFrame 失败", hr);
+		return hr;
+	}
+
+	// GraphicsContext::EndFrame 必须在 SwapChain::EndFrame 之后
+	hr = _graphicsContext.EndFrame();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("GraphicsContext::EndFrame 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
 }
 
 bool Renderer2::_CheckResult(bool success, std::string_view errorMsg) noexcept {

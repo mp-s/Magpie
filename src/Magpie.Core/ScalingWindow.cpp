@@ -416,7 +416,7 @@ void ScalingWindow::Render() noexcept {
 	_cursorManager->Update();
 
 	bool waitingForFirstFrame = false;
-	ComponentState state = _renderer->Render(waitingForFirstFrame, _shouldWaitForGpu || _isFirstFrame);
+	ComponentState state = _renderer->Render(_shouldWaitForGpu || _isFirstFrame, &waitingForFirstFrame);
 	if (state == ComponentState::NoError) {
 		// 第一帧渲染完成后显示缩放窗口
 		if (_isFirstFrame && !waitingForFirstFrame) {
@@ -443,7 +443,7 @@ void ScalingWindow::Render() noexcept {
 			}
 
 			// 如果设备再次丢失不再尝试恢复
-			if (_renderer->Render(waitingForFirstFrame) != ComponentState::NoError) {
+			if (_renderer->Render() != ComponentState::NoError) {
 				_DelayedStop();
 				return;
 			}

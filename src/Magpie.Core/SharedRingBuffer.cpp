@@ -6,44 +6,40 @@
 namespace Magpie {
 
 bool SharedRingBuffer::Initialize(ID3D12Device5* device, Size size, const ColorInfo& colorInfo) noexcept {
+	_device = device;
+	_size = size;
+	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+
 	const uint32_t slotCount = ScalingWindow::Get().Options().maxProducerInFlightFrames + 1;
 	_slots.resize(slotCount);
 
 	// 消费者应落后于生产者
 	_curConsumerSlot = slotCount - 1;
 
-	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-			DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT,
-		size.width,
-		size.height,
-		1, 1, 1, 0,
-		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-	);
-
-	for (uint32_t i = 0; i < slotCount; ++i) {
-		_FrameResourceSlot& curSlot = _slots[i];
-		curSlot.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-
-		HRESULT hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
-			&texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&curSlot.resource));
-		if (FAILED(hr)) {
-			return false;
-		}
-	}
-
 	HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_consumerFence));
 	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateFence 失败", hr);
 		return false;
 	}
 
 	hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_producerFence));
 	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateFence 失败", hr);
+		return false;
+	}
+
+	hr = _LoadBufferResources();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_LoadBufferResources 失败", hr);
 		return false;
 	}
 
 	return true;
+}
+
+ID3D12Resource* SharedRingBuffer::GetBuffer(uint32_t index) noexcept {
+	auto lk = _lock.lock_shared();
+	return _slots[index].resource.get();
 }
 
 HRESULT SharedRingBuffer::ProducerBeginFrame(
@@ -76,6 +72,7 @@ HRESULT SharedRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noe
 
 	HRESULT hr = commandQueue->Signal(_producerFence.get(), _slots[_curProducerSlot].producerFenceValue);
 	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
 		return hr;
 	}
 
@@ -90,6 +87,7 @@ HRESULT SharedRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noe
 			// 等待新缓冲区可用
 			hr = _producerFence->SetEventOnCompletion(fenceValueToWait, nullptr);
 			if (FAILED(hr)) {
+				Logger::Get().ComError("ID3D12Fence::SetEventOnCompletion 失败", hr);
 				return hr;
 			}
 			lk = _lock.lock_exclusive();
@@ -158,6 +156,61 @@ bool SharedRingBuffer::ConsumerBeginFrame(
 	curSlot.state = newState;
 
 	return true;
+}
+
+HRESULT SharedRingBuffer::OnResized(Size size) noexcept {
+	_size = size;
+
+	HRESULT hr = _LoadBufferResources();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_LoadBufferResources 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
+}
+
+HRESULT SharedRingBuffer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
+	const bool wasScRGB = _isScRGB;
+	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+
+	if (_isScRGB == wasScRGB) {
+		return S_OK;
+	}
+
+	HRESULT hr = _LoadBufferResources();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_LoadBufferResources 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
+}
+
+HRESULT SharedRingBuffer::_LoadBufferResources() noexcept {
+	auto lk = _lock.lock_exclusive();
+
+	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
+		_size.width,
+		_size.height,
+		1, 1, 1, 0,
+		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+	);
+
+	for (_FrameResourceSlot& slot : _slots) {
+		slot.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+		HRESULT hr = _device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+			&texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&slot.resource));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return hr;
+		}
+	}
+
+	return S_OK;
 }
 
 }

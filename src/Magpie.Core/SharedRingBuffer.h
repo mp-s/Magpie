@@ -13,6 +13,8 @@ public:
 
 	bool Initialize(ID3D12Device5* device, Size size, const ColorInfo& colorInfo) noexcept;
 
+	ID3D12Resource* GetBuffer(uint32_t index) noexcept;
+
 	HRESULT ProducerBeginFrame(
 		ID3D12Resource*& buffer,
 		D3D12_RESOURCE_STATES& state,
@@ -30,7 +32,15 @@ public:
 		D3D12_RESOURCE_STATES newState
 	) noexcept;
 
+	HRESULT OnResized(Size size) noexcept;
+
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+
 private:
+	HRESULT _LoadBufferResources() noexcept;
+
+	ID3D12Device5* _device = nullptr;
+
 	wil::srwlock _lock;
 
 	struct _FrameResourceSlot {
@@ -47,6 +57,9 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _consumerFence;
 	uint64_t _curConsumerFenceValue = 0;
 	winrt::com_ptr<ID3D12Fence1> _producerFence;
+
+	Size _size{};
+	bool _isScRGB = false;
 };
 
 }

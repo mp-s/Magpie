@@ -240,16 +240,15 @@ HRESULT SwapChainPresenter::OnResizeEnded() noexcept {
 	const uint32_t oldBufferCount = _bufferCount;
 	_bufferCount = _graphicContext->GetMaxInFlightFrameCount() + 1;
 
-	if (_bufferCount == oldBufferCount) {
-		return S_OK;
+	if (_bufferCount != oldBufferCount) {
+		HRESULT hr = _RecreateBuffers();
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_RecreateBuffers 失败", hr);
+			return hr;
+		}
 	}
 
-	HRESULT hr = _RecreateBuffers();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_RecreateBuffers 失败", hr);
-	}
-
-	return hr;
+	return S_OK;
 }
 
 HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {

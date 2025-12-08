@@ -4,7 +4,6 @@
 #include "GraphicsCaptureFrameSource2.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
-#include "SharedRingBuffer.h"
 #include "StrHelper.h"
 #include <dispatcherqueue.h>
 
@@ -33,13 +32,10 @@ FrameProducer::~FrameProducer() noexcept {
 
 void FrameProducer::InitializeAsync(
 	ID3D12Device5* device,
-	SharedRingBuffer& sharedRingBuffer,
 	const RECT& srcRect,
 	HMONITOR hMonSrc,
 	const ColorInfo& colorInfo
 ) noexcept {
-	_sharedRingBuffer = &sharedRingBuffer;
-
 	_thread = std::thread(
 		&FrameProducer::_ThreadProc,
 		this,
@@ -58,6 +54,83 @@ bool FrameProducer::WaitForInitialize(Size& outputSize) noexcept {
 	} else {
 		return false;
 	}
+}
+
+bool FrameProducer::ConsumerBeginFrame(
+	ID3D12Resource*& buffer,
+	D3D12_RESOURCE_STATES& state,
+	ID3D12Fence1*& fenceToSignal,
+	UINT64& fenceValueToSignal,
+	D3D12_RESOURCE_STATES newState
+) noexcept {
+	return _sharedRingBuffer.ConsumerBeginFrame(buffer, state, fenceToSignal, fenceValueToSignal, newState);
+}
+
+HRESULT FrameProducer::OnResized(Size /*size*/, Size& outputSize) noexcept {
+	HRESULT hr = S_OK;
+	std::atomic<bool> done = false;
+
+	_dispatcher.TryEnqueue([&] {
+		[&] {
+			hr = _graphicsContext.WaitForGpu();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+				return;
+			}
+
+			_outputSize = _inputSize;
+			outputSize = _outputSize;
+
+			hr = _sharedRingBuffer.OnResized(_outputSize);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("SharedRingBuffer::OnResized 失败", hr);
+				return;
+			}
+
+			hr = _Render();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_Render 失败", hr);
+			}
+		}();
+		
+		done.store(true, std::memory_order_release);
+		done.notify_one();
+	});
+
+	done.wait(false, std::memory_order_acquire);
+	return hr;
+}
+
+HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
+	HRESULT hr = S_OK;
+	std::atomic<bool> done = false;
+
+	_dispatcher.TryEnqueue([&] {
+		[&] {
+			hr = _graphicsContext.WaitForGpu();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+				return;
+			}
+
+			hr = _sharedRingBuffer.OnColorInfoChanged(colorInfo);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("SharedRingBuffer::OnColorInfoChanged 失败", hr);
+				return;
+			}
+
+			hr = _Render();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_Render 失败", hr);
+			}
+		}();
+		
+		done.store(true, std::memory_order_release);
+		done.notify_one();
+	});
+
+	done.wait(false, std::memory_order_acquire);
+	return hr;
 }
 
 void FrameProducer::_ThreadProc(
@@ -114,6 +187,8 @@ void FrameProducer::_ThreadProc(
 			if (stepTimerStatus == StepTimerStatus::ForceNewFrame || _frameSource->IsNewFrameAvailable()) {
 				HRESULT hr = _Render();
 				if (FAILED(hr)) {
+					Logger::Get().ComError("_Render 失败", hr);
+
 					if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
 						_state.store(ComponentState::DeviceLost, std::memory_order_relaxed);
 					} else {
@@ -176,10 +251,11 @@ bool FrameProducer::_Initialize(
 	}
 
 	// 初始化效果
-	_outputSize.width = uint32_t(srcRect.right - srcRect.left);
-	_outputSize.height = uint32_t(srcRect.bottom - srcRect.top);
+	_inputSize.width = srcRect.right - srcRect.left;
+	_inputSize.height = srcRect.bottom - srcRect.top;
+	_outputSize = _inputSize;
 
-	if (!_sharedRingBuffer->Initialize(device, _outputSize, colorInfo)) {
+	if (!_sharedRingBuffer.Initialize(device, _outputSize, colorInfo)) {
 		Logger::Get().Error("初始化 SharedRingBuffer 失败");
 		return false;
 	}
@@ -262,7 +338,7 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	ID3D12Resource* curBuffer;
 	D3D12_RESOURCE_STATES bufferState;
-	hr = _sharedRingBuffer->ProducerBeginFrame(
+	hr = _sharedRingBuffer.ProducerBeginFrame(
 		curBuffer, bufferState, commandQueue, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("SharedRingBuffer::ProducerBeginFrame 失败", hr);
@@ -311,7 +387,7 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
 
-	hr = _sharedRingBuffer->ProducerEndFrame(commandQueue);
+	hr = _sharedRingBuffer.ProducerEndFrame(commandQueue);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("SharedRingBuffer::ProducerEndFrame 失败", hr);
 		return hr;
