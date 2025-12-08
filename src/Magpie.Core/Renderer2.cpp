@@ -6,18 +6,28 @@
 #include "ScalingWindow.h"
 #include "SwapChainPresenter.h"
 #include "GraphicsCaptureFrameSource2.h"
+#include <d3dkmthk.h>
 #include <windows.graphics.display.interop.h>
 
 namespace Magpie {
-
-static constexpr HRESULT S_RECOVERED = CommonSharedConstants::S_RECOVERED;
 
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = (float)CommonSharedConstants::SCENE_REFERRED_SDR_WHITE_LEVEL;
 
 Renderer2::Renderer2() noexcept {}
 
 Renderer2::~Renderer2() noexcept {
-	_graphicsContext.WaitForGPU();
+	_graphicsContext.WaitForGpu();
+}
+
+static void SetGpuPriority() noexcept {
+	// 来自 https://github.com/obsproject/obs-studio/blob/16cb051a57bb357fe866252c1360ce2c38e2deec/libobs-d3d11/d3d11-subsystem.cpp#L429
+	// 不使用 REALTIME 优先级，它会造成系统不稳定，而且可能会导致源窗口卡顿。
+	// OBS 还调用了 SetGPUThreadPriority，但这个接口似乎无用。
+	NTSTATUS status = D3DKMTSetProcessSchedulingPriorityClass(
+		GetCurrentProcess(), D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH);
+	if (status != STATUS_SUCCESS) {
+		Logger::Get().NTError("D3DKMTSetProcessSchedulingPriorityClass 失败", status);
+	}
 }
 
 ScalingError Renderer2::Initialize(
@@ -30,10 +40,13 @@ ScalingError Renderer2::Initialize(
 	_hCurMonitor = hMonitor;
 
 	const ScalingOptions& options = ScalingWindow::Get().Options();
-	if (FAILED(_graphicsContext.Initialize(options.graphicsCardId, options.Is3DGameMode() ? 4 : 8, D3D12_COMMAND_LIST_TYPE_DIRECT))) {
+	if (!_graphicsContext.Initialize(options.graphicsCardId, options.Is3DGameMode() ? 4 : 8, D3D12_COMMAND_LIST_TYPE_DIRECT)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
+
+	// 每次创建 D3D 设备后尝试提高 GPU 优先级，OBS 也是这么做的
+	SetGpuPriority();
 
 	// 失败则回落到使用传统方法获取颜色显示能力
 	_TryInitDisplayInfo();

@@ -12,13 +12,15 @@ public:
 	bool Initialize(
 		const GraphicsCardId& graphicsCardId,
 		uint32_t maxInFlightFrameCount,
-		D3D12_COMMAND_LIST_TYPE commandListType
+		D3D12_COMMAND_LIST_TYPE commandListType,
+		bool disableFrameFenceTracking = false
 	) noexcept;
 
 	bool Initialize(
 		ID3D12Device5* device,
 		uint32_t maxInFlightFrameCount,
-		D3D12_COMMAND_LIST_TYPE commandListType
+		D3D12_COMMAND_LIST_TYPE commandListType,
+		bool disableFrameTracking = false
 	) noexcept;
 
 	IDXGIFactory7* GetDXGIFactory() const noexcept {
@@ -55,7 +57,7 @@ public:
 
 	HRESULT WaitForFenceValue(uint64_t fenceValue) noexcept;
 
-	HRESULT WaitForGPU() noexcept;
+	HRESULT WaitForGpu() noexcept;
 
 	HRESULT BeginFrame(
 		uint32_t& curFrameIndex,
@@ -67,7 +69,11 @@ public:
 private:
 	HRESULT _CreateDXGIFactory() noexcept;
 
-	bool _InitializeDeviceResources(uint32_t maxInFlightFrameCount, D3D12_COMMAND_LIST_TYPE commandListType) noexcept;
+	bool _InitializeDeviceResources(
+		uint32_t maxInFlightFrameCount,
+		D3D12_COMMAND_LIST_TYPE commandListType,
+		bool disableFrameFenceTracking
+	) noexcept;
 
 	bool _CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId) noexcept;
 

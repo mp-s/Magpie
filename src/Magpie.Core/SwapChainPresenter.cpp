@@ -9,8 +9,6 @@
 
 namespace Magpie {
 
-static constexpr uint32_t BUFFER_COUNT_DURING_RESIZE = 2;
-
 bool SwapChainPresenter::Initialize(
 	GraphicsContext& graphicContext,
 	HWND hwndAttach,
@@ -204,7 +202,7 @@ HRESULT SwapChainPresenter::EndFrame() noexcept {
 		// 实用价值。
 
 		// 等待渲染完成
-		HRESULT hr = _graphicContext->WaitForGPU();
+		HRESULT hr = _graphicContext->WaitForGpu();
 		if (FAILED(hr)) {
 			Logger::Get().ComError("GraphicsContext::WaitForGPU", hr);
 			return hr;
@@ -278,7 +276,7 @@ HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexc
 }
 
 HRESULT SwapChainPresenter::_RecreateBuffers() noexcept {
-	HRESULT hr = _graphicContext->WaitForGPU();
+	HRESULT hr = _graphicContext->WaitForGpu();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("GraphicsContext::WaitForGPU", hr);
 		return hr;

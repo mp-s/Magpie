@@ -126,7 +126,8 @@ void FrameProducer::_ThreadProc(
 		}
 	}
 
-	// 不能在缩放线程释放
+	_graphicsContext.WaitForGpu();
+	// 必须在创建线程释放
 	_frameSource.reset();
 }
 
@@ -157,7 +158,7 @@ bool FrameProducer::_Initialize(
 	}
 
 	const uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	if (!_graphicsContext.Initialize(device, maxInFlightFrameCount, D3D12_COMMAND_LIST_TYPE_COMPUTE)) {
+	if (!_graphicsContext.Initialize(device, maxInFlightFrameCount, D3D12_COMMAND_LIST_TYPE_COMPUTE, true)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return false;
 	}

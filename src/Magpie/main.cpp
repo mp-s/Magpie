@@ -65,7 +65,7 @@ static void InitializeDirectX() noexcept {
 		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
 			debugController->EnableDebugLayer();
 			// 启用 GPU-based validation，但会产生警告消息，而且这个消息无法轻易禁用
-			debugController->SetEnableGPUBasedValidation(TRUE);
+			// debugController->SetEnableGPUBasedValidation(TRUE);
 
 			// Win11 开始支持生成默认名字，包含资源的基本属性
 			if (winrt::com_ptr<ID3D12Debug5> debugController5 = debugController.try_as<ID3D12Debug5>()) {

@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "SharedRingBuffer.h"
-#include "GraphicsContext.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 

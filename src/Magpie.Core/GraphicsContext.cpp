@@ -3,14 +3,14 @@
 #include "Logger.h"
 #include "DirectXHelper.h"
 #include "StrHelper.h"
-#include <d3dkmthk.h>
 
 namespace Magpie {
 
 bool GraphicsContext::Initialize(
 	const GraphicsCardId& graphicsCardId,
 	uint32_t maxInFlightFrameCount,
-	D3D12_COMMAND_LIST_TYPE commandListType
+	D3D12_COMMAND_LIST_TYPE commandListType,
+	bool disableFrameFenceTracking
 ) noexcept {
 	HRESULT hr = _CreateDXGIFactory();
 	if (FAILED(hr)) {
@@ -23,7 +23,7 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 
-	if (!_InitializeDeviceResources(maxInFlightFrameCount, commandListType)) {
+	if (!_InitializeDeviceResources(maxInFlightFrameCount, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");
 		return false;
 	}
@@ -34,7 +34,8 @@ bool GraphicsContext::Initialize(
 bool GraphicsContext::Initialize(
 	ID3D12Device5* device,
 	uint32_t maxInFlightFrameCount,
-	D3D12_COMMAND_LIST_TYPE commandListType
+	D3D12_COMMAND_LIST_TYPE commandListType,
+	bool disableFrameFenceTracking
 ) noexcept {
 	_device.copy_from(device);
 
@@ -49,7 +50,7 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 	
-	if (!_InitializeDeviceResources(maxInFlightFrameCount, commandListType)) {
+	if (!_InitializeDeviceResources(maxInFlightFrameCount, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");
 		return false;
 	}
@@ -81,7 +82,7 @@ HRESULT GraphicsContext::WaitForFenceValue(uint64_t fenceValue) noexcept {
 	}
 }
 
-HRESULT GraphicsContext::WaitForGPU() noexcept {
+HRESULT GraphicsContext::WaitForGpu() noexcept {
 	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
 		return hr;
@@ -91,12 +92,14 @@ HRESULT GraphicsContext::WaitForGPU() noexcept {
 }
 
 HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState) noexcept {
-	HRESULT hr = WaitForFenceValue(_frameFenceValues[_curFrameIndex]);
-	if (FAILED(hr)) {
-		return hr;
+	if (!_frameFenceValues.empty()) {
+		HRESULT hr = WaitForFenceValue(_frameFenceValues[_curFrameIndex]);
+		if (FAILED(hr)) {
+			return hr;
+		}
 	}
 
-	hr = _commandAllocators[_curFrameIndex]->Reset();
+	HRESULT hr = _commandAllocators[_curFrameIndex]->Reset();
 	if (FAILED(hr)) {
 		return hr;
 	}
@@ -111,9 +114,11 @@ HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState
 }
 
 HRESULT GraphicsContext::EndFrame() noexcept {
-	HRESULT hr = Signal(_frameFenceValues[_curFrameIndex]);
-	if (FAILED(hr)) {
-		return hr;
+	if (!_frameFenceValues.empty()) {
+		HRESULT hr = Signal(_frameFenceValues[_curFrameIndex]);
+		if (FAILED(hr)) {
+			return hr;
+		}
 	}
 
 	_curFrameIndex = (_curFrameIndex + 1) % (uint32_t)_commandAllocators.size();
@@ -132,7 +137,11 @@ HRESULT GraphicsContext::_CreateDXGIFactory() noexcept {
 	return hr;
 }
 
-bool GraphicsContext::_InitializeDeviceResources(uint32_t maxInFlightFrameCount, D3D12_COMMAND_LIST_TYPE commandListType) noexcept {
+bool GraphicsContext::_InitializeDeviceResources(
+	uint32_t maxInFlightFrameCount,
+	D3D12_COMMAND_LIST_TYPE commandListType,
+	bool disableFrameFenceTracking
+) noexcept {
 	// 检查根签名版本
 	{
 		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
@@ -178,7 +187,10 @@ bool GraphicsContext::_InitializeDeviceResources(uint32_t maxInFlightFrameCount,
 		return false;
 	}
 
-	_frameFenceValues.resize(maxInFlightFrameCount);
+	// 如果已在外部同步则无需追踪每帧的栅栏值
+	if (!disableFrameFenceTracking) {
+		_frameFenceValues.resize(maxInFlightFrameCount);
+	}
 
 	return true;
 }
@@ -280,17 +292,6 @@ bool GraphicsContext::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCard
 	return true;
 }
 
-static void SetGpuPriority() noexcept {
-	// 来自 https://github.com/obsproject/obs-studio/blob/16cb051a57bb357fe866252c1360ce2c38e2deec/libobs-d3d11/d3d11-subsystem.cpp#L429
-	// 不使用 REALTIME 优先级，它会造成系统不稳定，而且可能会导致源窗口卡顿。
-	// OBS 还调用了 SetGPUThreadPriority，但这个接口似乎无用。
-	NTSTATUS status = D3DKMTSetProcessSchedulingPriorityClass(
-		GetCurrentProcess(), D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH);
-	if (status != STATUS_SUCCESS) {
-		Logger::Get().NTError("D3DKMTSetProcessSchedulingPriorityClass 失败", status);
-	}
-}
-
 bool GraphicsContext::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept {
 	HRESULT hr = D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&_device));
 	if (FAILED(hr)) {
@@ -347,9 +348,6 @@ bool GraphicsContext::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& a
 
 	Logger::Get().Info(fmt::format("当前图形适配器: \n\tVendorId: {:#x}\n\tDeviceId: {:#x}\n\tDescription: {}",
 		adapterDesc.VendorId, adapterDesc.DeviceId, StrHelper::UTF16ToUTF8(adapterDesc.Description)));
-
-	// 每次创建 D3D 设备后尝试提高 GPU 优先级，OBS 也是这么做的
-	SetGpuPriority();
 
 	return true;
 }
