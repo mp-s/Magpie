@@ -78,7 +78,7 @@ private:
 	};
 	std::vector<_FrameCrossAdapterResourceSlot> _crossAdapterSlots;
 	
-	winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice _wrappedD3DDevice{ nullptr };
+	winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice _wrappedDevice{ nullptr };
 	winrt::Windows::Graphics::Capture::GraphicsCaptureItem _captureItem{ nullptr };
 	winrt::Windows::Graphics::Capture::GraphicsCaptureSession _captureSession{ nullptr };
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool _captureFramePool{ nullptr };

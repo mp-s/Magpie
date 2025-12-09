@@ -204,6 +204,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		const LUID renderAdapterLUID = device->GetAdapterLuid();
 
 		if (desc.AdapterLuid != renderAdapterLUID) {
+			// 跨适配器捕获
 			if (!_CreateBridgeDeviceResources(srcMonAdapter.get())) {
 				// 失败则使用渲染设备捕获，WGC 内部使用内存中转
 				srcMonAdapter.copy_from(dxgiAdapter);
@@ -236,9 +237,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 	}
 
 	hr = CreateDirect3D11DeviceFromDXGIDevice(
-		dxgiDevice.get(),
-		reinterpret_cast<::IInspectable**>(winrt::put_abi(_wrappedD3DDevice))
-	);
+		dxgiDevice.get(), (IInspectable**)winrt::put_abi(_wrappedDevice));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateDirect3D11DeviceFromDXGIDevice 失败", hr);
 		return false;
@@ -272,7 +271,7 @@ bool GraphicsCaptureFrameSource2::Start() noexcept {
 	try {
 		// 创建帧缓冲池。帧的尺寸和 _captureItem.Size() 不同
 		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
-			_wrappedD3DDevice,
+			_wrappedDevice,
 			_isUsingScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
 			ScalingWindow::Get().Options().maxProducerInFlightFrames + 3,
 			{ (int)_frameBox.right, (int)_frameBox.bottom } // 帧的尺寸为包含源窗口的最小尺寸
@@ -341,6 +340,9 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
 		}
 	}
 
+	// 同适配器数据路径: frameResource -> output
+	// 跨适配器数据路径: frameResource -> bridgeResource|sharedResource -> output
+
 	if (!curSlot.frameResource) {
 		winrt::IDirect3DSurface d3dSurface = curSlot.capturedFrame.Surface();
 
@@ -382,7 +384,7 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
 				return hr;
 			}
 
-			// 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
+			// D3D11 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
 			{
 				CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
 				CD3DX12_TEXTURE_COPY_LOCATION dest(curCASlot.bridgeResource.get(), 0);
@@ -435,7 +437,7 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
 		_copyCommandList->CopyResource(
 			curSlot.output.get(), _crossAdapterSlots[frameIndex].sharedResource.get());
 	} else {
-		// 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
+		// D3D11 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
 		CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
 		CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
 		_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
