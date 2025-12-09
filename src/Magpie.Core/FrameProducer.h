@@ -1,7 +1,7 @@
 #pragma once
 #include "ColorInfo.h"
 #include "GraphicsContext.h"
-#include "SharedRingBuffer.h"
+#include "FrameRingBuffer.h"
 #include "StepTimer.h"
 
 namespace Magpie {
@@ -60,7 +60,7 @@ private:
 	winrt::DispatcherQueue _dispatcher{ nullptr };
 
 	GraphicsContext _graphicsContext;
-	SharedRingBuffer _sharedRingBuffer;
+	FrameRingBuffer _frameRingBuffer;
 	StepTimer _stepTimer;
 	std::unique_ptr<GraphicsCaptureFrameSource2> _frameSource;
 

@@ -88,7 +88,7 @@
     <ClInclude Include="Renderer2.h" />
     <ClInclude Include="ScalingWindow.h" />
     <ClInclude Include="ScreenshotHelper.h" />
-    <ClInclude Include="SharedRingBuffer.h" />
+    <ClInclude Include="FrameRingBuffer.h" />
     <ClInclude Include="SrcTracker.h" />
     <ClInclude Include="StepTimer.h" />
     <ClInclude Include="AdaptivePresenter.h" />
@@ -132,7 +132,7 @@
     <ClCompile Include="ScalingRuntime.cpp" />
     <ClCompile Include="ScalingWindow.cpp" />
     <ClCompile Include="ScreenshotHelper.cpp" />
-    <ClCompile Include="SharedRingBuffer.cpp" />
+    <ClCompile Include="FrameRingBuffer.cpp" />
     <ClCompile Include="SrcTracker.cpp" />
     <ClCompile Include="StepTimer.cpp" />
     <ClCompile Include="AdaptivePresenter.cpp" />

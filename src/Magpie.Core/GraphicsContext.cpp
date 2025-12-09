@@ -62,6 +62,7 @@ IDXGIFactory7* GraphicsContext::GetDXGIFactoryForEnumingAdapters() noexcept {
 	if (!_dxgiFactory->IsCurrent()) {
 		HRESULT hr = _CreateDXGIFactory();
 		if (FAILED(hr)) {
+			Logger::Get().ComError("_CreateDXGIFactory 失败", hr);
 			return nullptr;
 		}
 	}
@@ -85,27 +86,47 @@ HRESULT GraphicsContext::WaitForFenceValue(uint64_t fenceValue) noexcept {
 HRESULT GraphicsContext::WaitForGpu() noexcept {
 	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
 		return hr;
 	}
 
 	return WaitForFenceValue(_curFenceValue);
 }
 
+HRESULT GraphicsContext::WaitForCommandQueue(ID3D12CommandQueue* commandQueue) noexcept {
+	HRESULT hr = commandQueue->Signal(_fence.get(), ++_curFenceValue);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
+		return hr;
+	}
+
+	hr = _commandQueue->Wait(_fence.get(), _curFenceValue);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Wait 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
+}
+
 HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState) noexcept {
 	if (!_frameFenceValues.empty()) {
 		HRESULT hr = WaitForFenceValue(_frameFenceValues[_curFrameIndex]);
 		if (FAILED(hr)) {
+			Logger::Get().ComError("WaitForFenceValue 失败", hr);
 			return hr;
 		}
 	}
 
 	HRESULT hr = _commandAllocators[_curFrameIndex]->Reset();
 	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandAllocator::Reset 失败", hr);
 		return hr;
 	}
 
 	hr = _commandList->Reset(_commandAllocators[_curFrameIndex].get(), initialState);
 	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12GraphicsCommandList::Reset 失败", hr);
 		return hr;
 	}
 
@@ -117,6 +138,7 @@ HRESULT GraphicsContext::EndFrame() noexcept {
 	if (!_frameFenceValues.empty()) {
 		HRESULT hr = Signal(_frameFenceValues[_curFrameIndex]);
 		if (FAILED(hr)) {
+			Logger::Get().ComError("Signal 失败", hr);
 			return hr;
 		}
 	}

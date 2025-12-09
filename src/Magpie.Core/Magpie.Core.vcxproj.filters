@@ -152,7 +152,7 @@
     <ClInclude Include="FrameProducer.h">
       <Filter>Render</Filter>
     </ClInclude>
-    <ClInclude Include="SharedRingBuffer.h">
+    <ClInclude Include="FrameRingBuffer.h">
       <Filter>Render</Filter>
     </ClInclude>
   </ItemGroup>
@@ -261,7 +261,7 @@
     <ClCompile Include="FrameProducer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
-    <ClCompile Include="SharedRingBuffer.cpp">
+    <ClCompile Include="FrameRingBuffer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
   </ItemGroup>

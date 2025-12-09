@@ -63,7 +63,7 @@ bool FrameProducer::ConsumerBeginFrame(
 	UINT64& fenceValueToSignal,
 	D3D12_RESOURCE_STATES newState
 ) noexcept {
-	return _sharedRingBuffer.ConsumerBeginFrame(buffer, state, fenceToSignal, fenceValueToSignal, newState);
+	return _frameRingBuffer.ConsumerBeginFrame(buffer, state, fenceToSignal, fenceValueToSignal, newState);
 }
 
 HRESULT FrameProducer::OnResized(Size /*size*/, Size& outputSize) noexcept {
@@ -81,9 +81,9 @@ HRESULT FrameProducer::OnResized(Size /*size*/, Size& outputSize) noexcept {
 			_outputSize = _inputSize;
 			outputSize = _outputSize;
 
-			hr = _sharedRingBuffer.OnResized(_outputSize);
+			hr = _frameRingBuffer.OnResized(_outputSize);
 			if (FAILED(hr)) {
-				Logger::Get().ComError("SharedRingBuffer::OnResized 失败", hr);
+				Logger::Get().ComError("FrameRingBuffer::OnResized 失败", hr);
 				return;
 			}
 
@@ -113,9 +113,9 @@ HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 				return;
 			}
 
-			hr = _sharedRingBuffer.OnColorInfoChanged(colorInfo);
+			hr = _frameRingBuffer.OnColorInfoChanged(colorInfo);
 			if (FAILED(hr)) {
-				Logger::Get().ComError("SharedRingBuffer::OnColorInfoChanged 失败", hr);
+				Logger::Get().ComError("FrameRingBuffer::OnColorInfoChanged 失败", hr);
 				return;
 			}
 
@@ -255,17 +255,17 @@ bool FrameProducer::_Initialize(
 	_inputSize.height = srcRect.bottom - srcRect.top;
 	_outputSize = _inputSize;
 
-	if (!_sharedRingBuffer.Initialize(device, _outputSize, colorInfo)) {
-		Logger::Get().Error("初始化 SharedRingBuffer 失败");
+	if (!_frameRingBuffer.Initialize(device, _outputSize, colorInfo)) {
+		Logger::Get().Error("初始化 FrameRingBuffer 失败");
 		return false;
 	}
 
-	const uint32_t sharedRingBufferCount = maxInFlightFrameCount + 1;
+	const uint32_t frameBufferCount = maxInFlightFrameCount + 1;
 
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {
 			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-			.NumDescriptors = sharedRingBufferCount,
+			.NumDescriptors = frameBufferCount,
 			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
 		};
 		HRESULT hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_descHeap));
@@ -338,10 +338,10 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	ID3D12Resource* curBuffer;
 	D3D12_RESOURCE_STATES bufferState;
-	hr = _sharedRingBuffer.ProducerBeginFrame(
+	hr = _frameRingBuffer.ProducerBeginFrame(
 		curBuffer, bufferState, commandQueue, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("SharedRingBuffer::ProducerBeginFrame 失败", hr);
+		Logger::Get().ComError("FrameRingBuffer::ProducerBeginFrame 失败", hr);
 		return hr;
 	}
 
@@ -353,18 +353,18 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier(1, &barrier);
 	}
 
-	hr = _frameSource->Update(commandList, frameIndex);
+	hr = _frameSource->Update(frameIndex);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("GraphicsCaptureFrameSource2::Update 失败", hr);
 		return hr;
 	}
 
-	ID3D12Resource* input = _frameSource->GetOutput();
+	ID3D12Resource* input = _frameSource->GetOutput(frameIndex);
 
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				input, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE, 0),
+				input, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE, 0),
 			CD3DX12_RESOURCE_BARRIER::Transition(
 				curBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST, 0)
 		};
@@ -373,7 +373,7 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->CopyResource(curBuffer, input);
 
 		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
-		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
 		barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
 		barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
@@ -387,9 +387,9 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
 
-	hr = _sharedRingBuffer.ProducerEndFrame(commandQueue);
+	hr = _frameRingBuffer.ProducerEndFrame(commandQueue);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("SharedRingBuffer::ProducerEndFrame 失败", hr);
+		Logger::Get().ComError("FrameRingBuffer::ProducerEndFrame 失败", hr);
 		return hr;
 	}
 

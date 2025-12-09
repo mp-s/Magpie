@@ -59,6 +59,8 @@ public:
 
 	HRESULT WaitForGpu() noexcept;
 
+	HRESULT WaitForCommandQueue(ID3D12CommandQueue* commandQueue) noexcept;
+
 	HRESULT BeginFrame(
 		uint32_t& curFrameIndex,
 		ID3D12PipelineState* initialState = nullptr

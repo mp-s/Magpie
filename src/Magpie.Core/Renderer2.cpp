@@ -57,7 +57,7 @@ ScalingError Renderer2::Initialize(
 	}
 
 	_frameProducer = std::make_unique<FrameProducer>();
-	// 也会初始化 SharedRingBuffer
+	// 也会初始化 FrameRingBuffer
 	_frameProducer->InitializeAsync(_graphicsContext.GetDevice(), srcRect, hMonitor, _colorInfo);
 
 	_presenter = std::make_unique<SwapChainPresenter>();
@@ -397,6 +397,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noex
 }
 
 void Renderer2::_UpdateOutputRect(Size outputSize) noexcept {
+	// TODO: 窗口模式缩放始终填充画面
 	const Size rendererSize = _presenter->Size();
 	OutputAlignment alignment = ScalingWindow::Get().Options().outputAlignment;
 

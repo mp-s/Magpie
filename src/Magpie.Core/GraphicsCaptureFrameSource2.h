@@ -35,10 +35,10 @@ public:
 
 	bool IsNewFrameAvailable() noexcept;
 
-	HRESULT Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept;
+	HRESULT Update(uint32_t frameIndex) noexcept;
 
-	ID3D12Resource* GetOutput() noexcept {
-		return _output.get();
+	ID3D12Resource* GetOutput(uint32_t index) noexcept {
+		return _slots[index].output.get();
 	}
 
 private:
@@ -53,18 +53,17 @@ private:
 
 	void _StopCapture() noexcept;
 
-	ID3D12Device5* _renderingDevice = nullptr;
+	GraphicsContext* _graphicsContext = nullptr;
 
 	winrt::com_ptr<ID3D11Device5> _d3d11Device;
 	winrt::com_ptr<ID3D11DeviceContext4> _d3d11DC;
 
+	winrt::com_ptr<ID3D12CommandQueue> _copyCommandQueue;
+	winrt::com_ptr<ID3D12GraphicsCommandList> _copyCommandList;
+
 	// 用于跨适配器捕获
 	winrt::com_ptr<ID3D12Device5> _bridgeDevice;
-	winrt::com_ptr<ID3D12CommandQueue> _bridgeCommandQueue;
-	winrt::com_ptr<ID3D12GraphicsCommandList> _bridgeCommandList;
-	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _bridgeCommandAllocators;
-	std::vector<winrt::com_ptr<ID3D12Resource>> _bridgeResources;
-
+	
 	winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice _wrappedD3DDevice{ nullptr };
 	winrt::Windows::Graphics::Capture::GraphicsCaptureItem _captureItem{ nullptr };
 	winrt::Windows::Graphics::Capture::GraphicsCaptureSession _captureSession{ nullptr };
@@ -76,13 +75,15 @@ private:
 
 	std::atomic<DWORD> _producerThreadId;
 
-	struct _CapturedFrame {
+	struct _FrameResourceSlot {
+		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
+		// 保留引用防止 WGC 再次写入
 		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame frame{ nullptr };
-		winrt::com_ptr<ID3D12Resource> sharedResource;
+		winrt::com_ptr<ID3D12Resource> copySource;
+		winrt::com_ptr<ID3D12Resource> output;
 	};
-	std::vector<_CapturedFrame> _framesInUse;
 
-	winrt::com_ptr<ID3D12Resource> _output;
+	std::vector<_FrameResourceSlot> _slots;
 	
 	D3D12_BOX _frameBox{};
 	bool _isUsingScRGB = false;

@@ -5,11 +5,11 @@ namespace Magpie {
 
 class GraphicsContext;
 
-class SharedRingBuffer {
+class FrameRingBuffer {
 public:
-	SharedRingBuffer() = default;
-	SharedRingBuffer(const SharedRingBuffer&) = delete;
-	SharedRingBuffer(SharedRingBuffer&&) = delete;
+	FrameRingBuffer() = default;
+	FrameRingBuffer(const FrameRingBuffer&) = delete;
+	FrameRingBuffer(FrameRingBuffer&&) = delete;
 
 	bool Initialize(ID3D12Device5* device, Size size, const ColorInfo& colorInfo) noexcept;
 
@@ -51,8 +51,8 @@ private:
 	};
 
 	std::vector<_FrameResourceSlot> _slots;
-	uint32_t _curConsumerSlot = 0;
-	uint32_t _curProducerSlot = 0;
+	uint32_t _curConsumerIdx = 0;
+	uint32_t _curProducerIdx = 0;
 
 	winrt::com_ptr<ID3D12Fence1> _consumerFence;
 	uint64_t _curConsumerFenceValue = 0;

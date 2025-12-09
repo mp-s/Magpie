@@ -107,7 +107,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 ) noexcept {
 	assert(hMonSrc);
 
-	_renderingDevice = graphicsContext.GetDevice();
+	_graphicsContext = &graphicsContext;
 	_isUsingScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	if (!winrt::GraphicsCaptureSession::IsSupported()) {
@@ -139,6 +139,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		};
 	}
 
+	ID3D12Device5* device = graphicsContext.GetDevice();
 	IDXGIAdapter1* dxgiAdapter = graphicsContext.GetDXGIAdapter();
 	// 查找源窗口所在屏幕连接的适配器
 	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
@@ -152,7 +153,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 			return false;
 		}
 
-		const LUID renderAdapterLUID = _renderingDevice->GetAdapterLuid();
+		const LUID renderAdapterLUID = device->GetAdapterLuid();
 
 		if (desc.AdapterLuid != renderAdapterLUID) {
 			// 通过 D3D12 跨适配器共享机制共享捕获图像
@@ -204,13 +205,24 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
-	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	_framesInUse.reserve(frameCount);
-	for (uint32_t i = 0; i < frameCount; ++i) {
-		_framesInUse.emplace_back(nullptr);
+	_producerThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
+
+	D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
+	hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_copyCommandQueue));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandQueue 失败", hr);
+		return false;
 	}
 
-	_producerThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
+	hr = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COPY,
+		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_copyCommandList));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandList1 失败", hr);
+		return false;
+	}
+
+	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
+	_slots.resize(frameCount);
 
 	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
@@ -220,11 +232,20 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		1, 1, 1, 0,
 		D3D12_RESOURCE_FLAG_NONE
 	);
-	hr = _renderingDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
-		&texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&_output));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateCommittedResource 失败", hr);
-		return false;
+	for (_FrameResourceSlot& slot : _slots) {
+		hr = device->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&slot.commandAllocator));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandAllocator 失败", hr);
+			return false;
+		}
+
+		hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+			&texDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&slot.output));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return false;
+		}
 	}
 
 	return true;
@@ -287,8 +308,8 @@ bool GraphicsCaptureFrameSource2::IsNewFrameAvailable() noexcept {
 	return _isNewFrameAvailable;
 }
 
-HRESULT GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandList, uint32_t frameIndex) noexcept {
-	_CapturedFrame& currentFrame = _framesInUse[frameIndex];
+HRESULT GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
+	_FrameResourceSlot& curSlot = _slots[frameIndex];
 
 	{
 		// 不要在持有 _newFrameLock 时释放 Direct3D11CaptureFrame。WGC 内部使用 Critical Section
@@ -296,19 +317,19 @@ HRESULT GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandLi
 		winrt::Direct3D11CaptureFrame lastestFrame{ nullptr };
 		{
 			auto lk = _newFrameLock.lock_exclusive();
-			if (currentFrame.frame != _lastestFrame) {
+			if (curSlot.frame != _lastestFrame) {
 				lastestFrame = _lastestFrame;
 				_isNewFrameAvailable = false;
 			}
 		}
 		if (lastestFrame) {
-			currentFrame.sharedResource = nullptr;
-			currentFrame.frame = std::move(lastestFrame);
+			curSlot.copySource = nullptr;
+			curSlot.frame = std::move(lastestFrame);
 		}
 	}
 
-	if (!currentFrame.sharedResource) {
-		winrt::IDirect3DSurface d3dSurface = currentFrame.frame.Surface();
+	if (!curSlot.copySource) {
+		winrt::IDirect3DSurface d3dSurface = curSlot.frame.Surface();
 
 		auto dxgiInterfaceAccess =
 			d3dSurface.try_as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
@@ -329,13 +350,14 @@ HRESULT GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandLi
 		}
 
 		if (_bridgeDevice) {
-			hr = _bridgeDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.sharedResource));
+			hr = _bridgeDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&curSlot.copySource));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("OpenSharedHandle 失败", hr);
 				return hr;
 			}
 		} else {
-			hr = _renderingDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&currentFrame.sharedResource));
+			hr = _graphicsContext->GetDevice()->OpenSharedHandle(
+				hSharedResource.get(), IID_PPV_ARGS(&curSlot.copySource));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("OpenSharedHandle 失败", hr);
 				return hr;
@@ -343,24 +365,37 @@ HRESULT GraphicsCaptureFrameSource2::Update(ID3D12GraphicsCommandList* commandLi
 		}
 	}
 
+	HRESULT hr = curSlot.commandAllocator->Reset();
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	hr = _copyCommandList->Reset(curSlot.commandAllocator.get(), nullptr);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.copySource.get(), 0);
+	CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
+	_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+
+	hr = _copyCommandList->Close();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
+		return hr;
+	}
+
 	// 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
-	D3D12_RESOURCE_BARRIER barrier = {
-		.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-		.Transition = {
-			.pResource = _output.get(),
-			.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-			.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST
-		}
-	};
-	commandList->ResourceBarrier(1, &barrier);
+	{
+		ID3D12CommandList* t = _copyCommandList.get();
+		_copyCommandQueue->ExecuteCommandLists(1, &t);
+	}
 
-	CD3DX12_TEXTURE_COPY_LOCATION src(currentFrame.sharedResource.get(), 0);
-	CD3DX12_TEXTURE_COPY_LOCATION dest(_output.get(), 0);
-	commandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
-
-	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-	commandList->ResourceBarrier(1, &barrier);
+	hr = _graphicsContext->WaitForCommandQueue(_copyCommandQueue.get());
+	if (FAILED(hr)) {
+		Logger::Get().ComError("GraphicsContext::WaitForCommandQueue 失败", hr);
+		return hr;
+	}
 
 	return S_OK;
 }
@@ -457,30 +492,7 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 
 	Logger::Get().Info("已创建 D3D12 设备");
 
-	{
-		// 只需要复制
-		D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
-		hr = _bridgeDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_bridgeCommandQueue));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommandQueue 失败", hr);
-			return false;
-		}
-	}
-	
-	hr = _bridgeDevice->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COPY,
-		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_bridgeCommandList));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateCommandList1 失败", hr);
-		return false;
-	}
-
-	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	_bridgeCommandAllocators.resize(frameCount);
-	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _bridgeCommandAllocators) {
-		if (FAILED(_bridgeDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&commandAllocator)))) {
-			return false;
-		}
-	}
+	/*const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
 
 	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
@@ -500,7 +512,7 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 			Logger::Get().ComError("CreateCommittedResource 失败", hr);
 			return false;
 		}
-	}
+	}*/
 
 	return true;
 }
