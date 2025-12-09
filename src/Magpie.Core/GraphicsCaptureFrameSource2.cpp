@@ -139,7 +139,55 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		};
 	}
 
+	_producerThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
+
 	ID3D12Device5* device = graphicsContext.GetDevice();
+
+	{
+		D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
+		HRESULT hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_copyCommandQueue));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandQueue 失败", hr);
+			return false;
+		}
+	}
+
+	HRESULT hr = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COPY,
+		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_copyCommandList));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandList1 失败", hr);
+		return false;
+	}
+
+	_slots.resize(ScalingWindow::Get().Options().maxProducerInFlightFrames);
+
+	{
+		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+			_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
+			UINT64(_frameBox.right - _frameBox.left),
+			_frameBox.bottom - _frameBox.top,
+			1, 1, 1, 0,
+			D3D12_RESOURCE_FLAG_NONE
+		);
+
+		for (_FrameResourceSlot& slot : _slots) {
+			hr = device->CreateCommandAllocator(
+				D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&slot.commandAllocator));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommandAllocator 失败", hr);
+				return false;
+			}
+
+			hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+				&texDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&slot.output));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommittedResource 失败", hr);
+				return false;
+			}
+		}
+	}
+
 	IDXGIAdapter1* dxgiAdapter = graphicsContext.GetDXGIAdapter();
 	// 查找源窗口所在屏幕连接的适配器
 	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
@@ -147,7 +195,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 
 	if (srcMonAdapter) {
 		DXGI_ADAPTER_DESC desc;
-		HRESULT hr = srcMonAdapter->GetDesc(&desc);
+		hr = srcMonAdapter->GetDesc(&desc);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("IDXGIAdapter1::GetDesc 失败", hr);
 			return false;
@@ -156,24 +204,32 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		const LUID renderAdapterLUID = device->GetAdapterLuid();
 
 		if (desc.AdapterLuid != renderAdapterLUID) {
-			// 通过 D3D12 跨适配器共享机制共享捕获图像
-			if (!_CreateBridgeDeviceResources(dxgiAdapter)) {
+			if (!_CreateBridgeDeviceResources(srcMonAdapter.get())) {
 				// 失败则使用渲染设备捕获，WGC 内部使用内存中转
 				srcMonAdapter.copy_from(dxgiAdapter);
+
+				// 清理跨适配器资源
+				_bridgeDevice = nullptr;
+				_bridgeCopyCommandQueue = nullptr;
+				_bridgeCopyCommandList = nullptr;
+				_sharedHeap = nullptr;
+				_bridgeHeap = nullptr;
+				_sharedFence = nullptr;
+				_bridgeFence = nullptr;
+				_crossAdapterSlots.clear();
 			}
 		}
-		
 	} else {
 		// 找不到源窗口所在屏幕的适配器则使用渲染设备
 		srcMonAdapter.copy_from(dxgiAdapter);
 	}
 
-	if (!_CreateD3D11Device(dxgiAdapter)) {
+	if (!_CreateD3D11Device(srcMonAdapter.get())) {
 		return false;
 	}
 
 	winrt::com_ptr<IDXGIDevice> dxgiDevice;
-	HRESULT hr = _d3d11Device->QueryInterface<IDXGIDevice>(dxgiDevice.put());
+	hr = _d3d11Device->QueryInterface<IDXGIDevice>(dxgiDevice.put());
 	if (FAILED(hr)) {
 		Logger::Get().ComError("获取 IDXGIDevice 失败", hr);
 		return false;
@@ -203,49 +259,6 @@ bool GraphicsCaptureFrameSource2::Initialize(
 	if (FAILED(hr)) {
 		Logger::Get().ComError("IGraphicsCaptureItemInterop::CreateForWindow 失败", hr);
 		return false;
-	}
-
-	_producerThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
-
-	D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
-	hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_copyCommandQueue));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateCommandQueue 失败", hr);
-		return false;
-	}
-
-	hr = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COPY,
-		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_copyCommandList));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateCommandList1 失败", hr);
-		return false;
-	}
-
-	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	_slots.resize(frameCount);
-
-	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
-		UINT64(_frameBox.right - _frameBox.left),
-		_frameBox.bottom - _frameBox.top,
-		1, 1, 1, 0,
-		D3D12_RESOURCE_FLAG_NONE
-	);
-	for (_FrameResourceSlot& slot : _slots) {
-		hr = device->CreateCommandAllocator(
-			D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&slot.commandAllocator));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommandAllocator 失败", hr);
-			return false;
-		}
-
-		hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
-			&texDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&slot.output));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
-			return false;
-		}
 	}
 
 	return true;
@@ -317,19 +330,19 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
 		winrt::Direct3D11CaptureFrame lastestFrame{ nullptr };
 		{
 			auto lk = _newFrameLock.lock_exclusive();
-			if (curSlot.frame != _lastestFrame) {
+			if (curSlot.capturedFrame != _lastestFrame) {
 				lastestFrame = _lastestFrame;
 				_isNewFrameAvailable = false;
 			}
 		}
 		if (lastestFrame) {
-			curSlot.copySource = nullptr;
-			curSlot.frame = std::move(lastestFrame);
+			curSlot.frameResource = nullptr;
+			curSlot.capturedFrame = std::move(lastestFrame);
 		}
 	}
 
-	if (!curSlot.copySource) {
-		winrt::IDirect3DSurface d3dSurface = curSlot.frame.Surface();
+	if (!curSlot.frameResource) {
+		winrt::IDirect3DSurface d3dSurface = curSlot.capturedFrame.Surface();
 
 		auto dxgiInterfaceAccess =
 			d3dSurface.try_as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
@@ -350,14 +363,57 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
 		}
 
 		if (_bridgeDevice) {
-			hr = _bridgeDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&curSlot.copySource));
+			hr = _bridgeDevice->OpenSharedHandle(
+				hSharedResource.get(), IID_PPV_ARGS(&curSlot.frameResource));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("OpenSharedHandle 失败", hr);
 				return hr;
 			}
+
+			_FrameCrossAdapterResourceSlot& curCASlot = _crossAdapterSlots[frameIndex];
+
+			hr = curCASlot.commandAllocator->Reset();
+			if (FAILED(hr)) {
+				return hr;
+			}
+
+			hr = _bridgeCopyCommandList->Reset(curCASlot.commandAllocator.get(), nullptr);
+			if (FAILED(hr)) {
+				return hr;
+			}
+
+			// 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
+			{
+				CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
+				CD3DX12_TEXTURE_COPY_LOCATION dest(curCASlot.bridgeResource.get(), 0);
+				_bridgeCopyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+			}
+
+			hr = _bridgeCopyCommandList->Close();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
+				return hr;
+			}
+
+			{
+				ID3D12CommandList* t = _bridgeCopyCommandList.get();
+				_bridgeCopyCommandQueue->ExecuteCommandLists(1, &t);
+			}
+
+			hr = _bridgeCopyCommandQueue->Signal(_bridgeFence.get(), ++_curCrossAdapterFenceValue);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
+				return hr;
+			}
+
+			hr = _copyCommandQueue->Wait(_sharedFence.get(), _curCrossAdapterFenceValue);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("ID3D12CommandQueue::Wait 失败", hr);
+				return hr;
+			}
 		} else {
 			hr = _graphicsContext->GetDevice()->OpenSharedHandle(
-				hSharedResource.get(), IID_PPV_ARGS(&curSlot.copySource));
+				hSharedResource.get(), IID_PPV_ARGS(&curSlot.frameResource));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("OpenSharedHandle 失败", hr);
 				return hr;
@@ -375,17 +431,22 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t frameIndex) noexcept {
 		return hr;
 	}
 
-	CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.copySource.get(), 0);
-	CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
-	_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
-
+	if (_bridgeDevice) {
+		_copyCommandList->CopyResource(
+			curSlot.output.get(), _crossAdapterSlots[frameIndex].sharedResource.get());
+	} else {
+		// 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
+		CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
+		CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
+		_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+	}
+	
 	hr = _copyCommandList->Close();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
 		return hr;
 	}
 
-	// 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
 	{
 		ID3D12CommandList* t = _copyCommandList.get();
 		_copyCommandQueue->ExecuteCommandLists(1, &t);
@@ -483,6 +544,7 @@ bool GraphicsCaptureFrameSource2::_CreateD3D11Device(IDXGIAdapter1* dxgiAdapter)
 	return true;
 }
 
+// 通过 D3D12 跨适配器共享机制共享捕获图像
 bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept {
 	HRESULT hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&_bridgeDevice));
 	if (FAILED(hr)) {
@@ -492,10 +554,28 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 
 	Logger::Get().Info("已创建 D3D12 设备");
 
-	/*const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
+	ID3D12Device5* device = _graphicsContext->GetDevice();
+	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
 
-	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+	_crossAdapterSlots.resize(frameCount);
+
+	{
+		D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
+		hr = _bridgeDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_bridgeCopyCommandQueue));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandQueue 失败", hr);
+			return false;
+		}
+	}
+
+	hr = _bridgeDevice->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COPY,
+		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_bridgeCopyCommandList));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandList1 失败", hr);
+		return false;
+	}
+
+	CD3DX12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 		_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM,
 		UINT64(_frameBox.right - _frameBox.left),
 		_frameBox.bottom - _frameBox.top,
@@ -504,15 +584,98 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 		D3D12_TEXTURE_LAYOUT_ROW_MAJOR
 	);
 
-	_bridgeResources.resize(frameCount);
-	for (winrt::com_ptr<ID3D12Resource>& resouce : _bridgeResources) {
-		hr = _renderingDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER,
-			&texDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&resouce));
+	D3D12_RESOURCE_ALLOCATION_INFO textureInfo = device->GetResourceAllocationInfo(0, 1, &textureDesc);
+
+	// 创建跨适配器共享堆
+	{
+		CD3DX12_HEAP_DESC heapDesc(
+			textureInfo.SizeInBytes * frameCount,
+			D3D12_HEAP_TYPE_DEFAULT,
+			0,
+			D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER
+		);
+		hr = device->CreateHeap(&heapDesc, IID_PPV_ARGS(&_sharedHeap));
 		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			Logger::Get().ComError("CreateHeap 失败", hr);
 			return false;
 		}
-	}*/
+
+		wil::unique_handle hSharedHeap;
+		hr = device->CreateSharedHandle(
+			_sharedHeap.get(), nullptr, GENERIC_ALL, nullptr, hSharedHeap.put());
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateSharedHandle 失败", hr);
+			return false;
+		}
+
+		hr = _bridgeDevice->OpenSharedHandle(hSharedHeap.get(), IID_PPV_ARGS(&_bridgeHeap));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("OpenSharedHandle 失败", hr);
+			return false;
+		}
+	}
+	
+	for (uint32_t i = 0; i < frameCount; ++i) {
+		_FrameCrossAdapterResourceSlot& curSlot = _crossAdapterSlots[i];
+
+		hr = _bridgeDevice->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&curSlot.commandAllocator));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandAllocator 失败", hr);
+			return false;
+		}
+
+		hr = device->CreatePlacedResource(
+			_sharedHeap.get(),
+			textureInfo.SizeInBytes * i,
+			&textureDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&curSlot.sharedResource)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreatePlacedResource 失败", hr);
+			return false;
+		}
+
+		hr = _bridgeDevice->CreatePlacedResource(
+			_bridgeHeap.get(),
+			textureInfo.SizeInBytes * i,
+			&textureDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&curSlot.bridgeResource)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreatePlacedResource 失败", hr);
+			return false;
+		}
+	}
+
+	// 创建跨适配器栅栏
+	hr = device->CreateFence(
+		0,
+		D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER,
+		IID_PPV_ARGS(&_sharedFence)
+	);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateFence 失败", hr);
+		return false;
+	}
+
+	wil::unique_handle hSharedFence;
+	hr = device->CreateSharedHandle(
+		_sharedFence.get(), nullptr, GENERIC_ALL, nullptr, hSharedFence.put());
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateSharedHandle 失败", hr);
+		return false;
+	}
+
+	hr = _bridgeDevice->OpenSharedHandle(hSharedFence.get(), IID_PPV_ARGS(&_bridgeFence));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("OpenSharedHandle 失败", hr);
+		return false;
+	}
 
 	return true;
 }

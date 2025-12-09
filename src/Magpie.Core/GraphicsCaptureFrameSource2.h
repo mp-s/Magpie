@@ -63,6 +63,20 @@ private:
 
 	// 用于跨适配器捕获
 	winrt::com_ptr<ID3D12Device5> _bridgeDevice;
+	winrt::com_ptr<ID3D12CommandQueue> _bridgeCopyCommandQueue;
+	winrt::com_ptr<ID3D12GraphicsCommandList> _bridgeCopyCommandList;
+	winrt::com_ptr<ID3D12Heap> _sharedHeap;
+	winrt::com_ptr<ID3D12Heap> _bridgeHeap;
+	winrt::com_ptr<ID3D12Fence> _sharedFence;
+	winrt::com_ptr<ID3D12Fence> _bridgeFence;
+	uint64_t _curCrossAdapterFenceValue = 0;
+
+	struct _FrameCrossAdapterResourceSlot {
+		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
+		winrt::com_ptr<ID3D12Resource> sharedResource;
+		winrt::com_ptr<ID3D12Resource> bridgeResource;
+	};
+	std::vector<_FrameCrossAdapterResourceSlot> _crossAdapterSlots;
 	
 	winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice _wrappedD3DDevice{ nullptr };
 	winrt::Windows::Graphics::Capture::GraphicsCaptureItem _captureItem{ nullptr };
@@ -78,11 +92,10 @@ private:
 	struct _FrameResourceSlot {
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
 		// 保留引用防止 WGC 再次写入
-		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame frame{ nullptr };
-		winrt::com_ptr<ID3D12Resource> copySource;
+		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame capturedFrame{ nullptr };
+		winrt::com_ptr<ID3D12Resource> frameResource;
 		winrt::com_ptr<ID3D12Resource> output;
 	};
-
 	std::vector<_FrameResourceSlot> _slots;
 	
 	D3D12_BOX _frameBox{};
