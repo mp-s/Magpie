@@ -90,6 +90,14 @@ HRESULT FrameProducer::OnResized(Size /*size*/, Size& outputSize) noexcept {
 			hr = _Render();
 			if (FAILED(hr)) {
 				Logger::Get().ComError("_Render 失败", hr);
+				return;
+			}
+
+			// 等待渲染完成
+			hr = _graphicsContext.WaitForGpu();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+				return;
 			}
 		}();
 		
