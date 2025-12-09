@@ -794,24 +794,24 @@ void ProfileViewModel::LaunchParameters(const hstring& value) {
 	RaisePropertyChanged(L"LaunchParameters");
 }
 
-int ProfileViewModel::DestAlignment() const noexcept {
-	return (int)_data->destAlignment;
+int ProfileViewModel::OutputAlignment() const noexcept {
+	return (int)_data->outputAlignment;
 }
 
-void ProfileViewModel::DestAlignment(int value) {
+void ProfileViewModel::OutputAlignment(int value) {
 	if (value < 0) {
 		return;
 	}
 
-	::Magpie::DestAlignment alignment = (::Magpie::DestAlignment)value;
-	if (_data->destAlignment == alignment) {
+	::Magpie::OutputAlignment alignment = (::Magpie::OutputAlignment)value;
+	if (_data->outputAlignment == alignment) {
 		return;
 	}
 
-	_data->destAlignment = alignment;
+	_data->outputAlignment = alignment;
 	AppSettings::Get().SaveAsync();
 
-	RaisePropertyChanged(L"DestAlignment");
+	RaisePropertyChanged(L"OutputAlignment");
 }
 
 bool ProfileViewModel::IsDirectFlipDisabled() const noexcept {

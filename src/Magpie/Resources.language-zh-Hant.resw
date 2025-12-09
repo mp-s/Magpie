@@ -1018,37 +1018,37 @@
   <data name="Profile_Cursor_AutoHide_Delay.Header" xml:space="preserve">
     <value>隱藏倒數（秒）</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment.Description" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment.Description" xml:space="preserve">
     <value>僅適用於全螢幕模式縮放</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment.Header" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment.Header" xml:space="preserve">
     <value>輸出畫面位置</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_BottomCenter.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_BottomCenter.Content" xml:space="preserve">
     <value>底部置中</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_BottomLeft.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_BottomLeft.Content" xml:space="preserve">
     <value>左下角</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_BottomRight.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_BottomRight.Content" xml:space="preserve">
     <value>右下角</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_Center.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_Center.Content" xml:space="preserve">
     <value>置中對齊</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_Left.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_Left.Content" xml:space="preserve">
     <value>向左對齊</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_Right.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_Right.Content" xml:space="preserve">
     <value>向右對齊</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_TopCenter.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_TopCenter.Content" xml:space="preserve">
     <value>頂部置中</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_TopLeft.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_TopLeft.Content" xml:space="preserve">
     <value>左上角</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_TopRight.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_TopRight.Content" xml:space="preserve">
     <value>右上角</value>
   </data>
   <data name="Home_Advanced_DeveloperOptions_DisableTopmost.Content" xml:space="preserve">

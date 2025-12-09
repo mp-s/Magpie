@@ -66,14 +66,13 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	Size frameSize;
-	if (!_frameProducer->WaitForInitialize(frameSize)) {
+	Size outputSize;
+	if (!_frameProducer->WaitForInitialize(outputSize)) {
 		Logger::Get().Error("FrameProducer::WaitForInitialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	_outputRect.right = frameSize.width;
-	_outputRect.bottom = frameSize.height;
+	_UpdateOutputRect(outputSize);
 
 	return ScalingError::NoError;
 }
@@ -120,13 +119,12 @@ void Renderer2::OnResized(Size size) noexcept {
 		return;
 	}
 
-	Size frameSize;
-	if (!_CheckResult(_frameProducer->OnResized(size, frameSize), "FrameProducer::OnResized 失败")) {
+	Size outputSize;
+	if (!_CheckResult(_frameProducer->OnResized(size, outputSize), "FrameProducer::OnResized 失败")) {
 		return;
 	}
 
-	_outputRect.right = frameSize.width;
-	_outputRect.bottom = frameSize.height;
+	_UpdateOutputRect(outputSize);
 
 	_CheckResult(_RenderImpl(true), "_RenderImpl 失败");
 }
@@ -396,6 +394,38 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noex
 	}
 
 	return S_OK;
+}
+
+void Renderer2::_UpdateOutputRect(Size outputSize) noexcept {
+	const Size rendererSize = _presenter->Size();
+	OutputAlignment alignment = ScalingWindow::Get().Options().outputAlignment;
+
+	using enum OutputAlignment;
+
+	if (alignment == LeftTop || alignment == Left || alignment == LeftBottom) {
+		_outputRect.left = 0;
+		_outputRect.right = outputSize.width;
+	} else if (alignment == Top || alignment == Center || alignment == Bottom) {
+		_outputRect.left = (rendererSize.width - outputSize.width) / 2;
+		_outputRect.right = _outputRect.left + outputSize.width;
+	} else {
+		_outputRect.left = rendererSize.width - outputSize.width;
+		_outputRect.right = rendererSize.width;
+	}
+
+	if (alignment == LeftTop || alignment == Top || alignment == RightTop) {
+		_outputRect.top = 0;
+		_outputRect.bottom = outputSize.height;
+	} else if (alignment == Left || alignment == Center || alignment == Right) {
+		_outputRect.top = (rendererSize.height - outputSize.height) / 2;
+		_outputRect.bottom = _outputRect.top + outputSize.height;
+	} else {
+		_outputRect.top = rendererSize.height - outputSize.height;
+		_outputRect.bottom = rendererSize.height;
+	}
+
+	assert(_outputRect.left + (LONG)outputSize.width == _outputRect.right);
+	assert(_outputRect.top + (LONG)outputSize.height == _outputRect.bottom);
 }
 
 bool Renderer2::_CheckResult(bool success, std::string_view errorMsg) noexcept {

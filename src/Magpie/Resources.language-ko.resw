@@ -1018,37 +1018,37 @@
   <data name="NotifyIcon_Timer_Windowed" xml:space="preserve">
     <value>{}초 후에 스케일링 (창모드)</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment.Description" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment.Description" xml:space="preserve">
     <value>전체 화면 스케일링에만 적용</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment.Header" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment.Header" xml:space="preserve">
     <value>출력 정렬</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_BottomCenter.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_BottomCenter.Content" xml:space="preserve">
     <value>가운데 아래</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_BottomLeft.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_BottomLeft.Content" xml:space="preserve">
     <value>왼쪽 아래</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_BottomRight.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_BottomRight.Content" xml:space="preserve">
     <value>오른쪽 아래</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_Center.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_Center.Content" xml:space="preserve">
     <value>가운데</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_Left.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_Left.Content" xml:space="preserve">
     <value>왼쪽</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_Right.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_Right.Content" xml:space="preserve">
     <value>오른쪽</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_TopCenter.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_TopCenter.Content" xml:space="preserve">
     <value>가운데 위</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_TopLeft.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_TopLeft.Content" xml:space="preserve">
     <value>왼쪽 위</value>
   </data>
-  <data name="Profile_Advanced_DestAlignment_TopRight.Content" xml:space="preserve">
+  <data name="Profile_Advanced_OutputAlignment_TopRight.Content" xml:space="preserve">
     <value>오른쪽 위</value>
   </data>
   <data name="Home_Advanced_DeveloperOptions_DisableTopmost.Content" xml:space="preserve">

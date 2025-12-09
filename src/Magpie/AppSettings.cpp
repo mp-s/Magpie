@@ -140,8 +140,8 @@ static void WriteProfile(rapidjson::PrettyWriter<rapidjson::StringBuffer>& write
 	writer.Double(profile.cropping.Bottom);
 	writer.EndObject();
 
-	writer.Key("destAlignment");
-	writer.Uint((uint32_t)profile.destAlignment);
+	writer.Key("outputAlignment");
+	writer.Uint((uint32_t)profile.outputAlignment);
 
 	writer.EndObject();
 }
@@ -1135,12 +1135,12 @@ bool AppSettings::_LoadProfile(
 	}
 
 	{
-		uint32_t destAlignment = (uint32_t)DestAlignment::Center;
-		JsonHelper::ReadUInt(profileObj, "destAlignment", destAlignment);
-		if (destAlignment >= (uint32_t)DestAlignment::COUNT) {
-			destAlignment = (uint32_t)DestAlignment::Center;
+		uint32_t outputAlignment = (uint32_t)OutputAlignment::Center;
+		JsonHelper::ReadUInt(profileObj, "outputAlignment", outputAlignment);
+		if (outputAlignment >= (uint32_t)OutputAlignment::COUNT) {
+			outputAlignment = (uint32_t)OutputAlignment::Center;
 		}
-		profile.destAlignment = (DestAlignment)destAlignment;
+		profile.outputAlignment = (OutputAlignment)outputAlignment;
 	}
 
 	return true;

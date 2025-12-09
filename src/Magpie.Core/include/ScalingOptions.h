@@ -42,7 +42,7 @@ struct GraphicsCardId {
 	uint32_t deviceId = 0;
 };
 
-enum class DestAlignment {
+enum class OutputAlignment {
 	LeftTop,
 	Top,
 	RightTop,
@@ -199,7 +199,7 @@ struct ScalingOptions {
 	float cursorScaling = 1.0f;
 	CaptureMethod captureMethod = CaptureMethod::GraphicsCapture;
 	MultiMonitorUsage multiMonitorUsage = MultiMonitorUsage::Closest;
-	DestAlignment destAlignment = DestAlignment::Center;
+	OutputAlignment outputAlignment = OutputAlignment::Center;
 	CursorInterpolationMode cursorInterpolationMode = CursorInterpolationMode::NearestNeighbor;
 	std::optional<float> autoHideCursorDelay;
 	DuplicateFrameDetectionMode duplicateFrameDetectionMode = DuplicateFrameDetectionMode::Dynamic;

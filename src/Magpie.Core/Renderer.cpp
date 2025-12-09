@@ -699,44 +699,6 @@ ID3D11Texture2D* Renderer::_ResizeEffects() noexcept {
 }
 
 void Renderer::_UpdateDestRect() noexcept {
-	const RECT& rendererRect = ScalingWindow::Get().RendererRect();
-	DestAlignment alignment = ScalingWindow::Get().Options().destAlignment;
-
-	LONG destWidth;
-	LONG destHeight;
-	{
-		D3D11_TEXTURE2D_DESC desc;
-		_frontendSharedTexture->GetDesc(&desc);
-		destWidth = (LONG)desc.Width;
-		destHeight = (LONG)desc.Height;
-	}
-
-	using enum DestAlignment;
-
-	if (alignment == LeftTop || alignment == Left || alignment == LeftBottom) {
-		_destRect.left = 0;
-		_destRect.right = destWidth;
-	} else if (alignment == Top || alignment == Center || alignment == Bottom) {
-		_destRect.left = (rendererRect.left + rendererRect.right - destWidth) / 2;
-		_destRect.right = _destRect.left + destWidth;
-	} else {
-		_destRect.left = rendererRect.right - destWidth;
-		_destRect.right = rendererRect.right;
-	}
-
-	if (alignment == LeftTop || alignment == Top || alignment == RightTop) {
-		_destRect.top = 0;
-		_destRect.bottom = destHeight;
-	} else if (alignment == Left || alignment == Center || alignment == Right) {
-		_destRect.top = (rendererRect.top + rendererRect.bottom - destHeight) / 2;
-		_destRect.bottom = _destRect.top + destHeight;
-	} else {
-		_destRect.top = rendererRect.bottom - destHeight;
-		_destRect.bottom = rendererRect.bottom;
-	}
-
-	assert(_destRect.left + destWidth == _destRect.right);
-	assert(_destRect.top + destHeight == _destRect.bottom);
 }
 
 HANDLE Renderer::_CreateSharedTexture(ID3D11Texture2D* effectsOutput) noexcept {

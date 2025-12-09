@@ -65,7 +65,7 @@ namespace Magpie {
 		String AutoHideCursorDelayText { get; };
 
 		String LaunchParameters;
-		Int32 DestAlignment;
+		Int32 OutputAlignment;
 		Boolean IsDirectFlipDisabled;
 	}
 }

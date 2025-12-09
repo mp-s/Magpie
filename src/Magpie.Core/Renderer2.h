@@ -49,6 +49,8 @@ private:
 
 	HRESULT _RenderImpl(bool waitForGpu = false, bool* waitingForFirstFrame = nullptr) noexcept;
 
+	void _UpdateOutputRect(Size outputSize) noexcept;
+
 	bool _CheckResult(bool success, std::string_view errorMsg) noexcept;
 
 	bool _CheckResult(HRESULT hr, std::string_view errorMsg) noexcept;
