@@ -44,9 +44,7 @@ ID3D12Resource* FrameRingBuffer::GetBuffer(uint32_t index) noexcept {
 
 HRESULT FrameRingBuffer::ProducerBeginFrame(
 	ID3D12Resource*& buffer,
-	D3D12_RESOURCE_STATES& state,
-	ID3D12CommandQueue* commandQueue,
-	D3D12_RESOURCE_STATES newState
+	ID3D12CommandQueue* commandQueue
 ) noexcept {
 	auto lk = _lock.lock_exclusive();
 
@@ -61,9 +59,6 @@ HRESULT FrameRingBuffer::ProducerBeginFrame(
 	}
 
 	buffer = curSlot.resource.get();
-	state = curSlot.state;
-	curSlot.state = newState;
-
 	return S_OK;
 }
 
@@ -109,10 +104,8 @@ HRESULT FrameRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noex
 
 bool FrameRingBuffer::ConsumerBeginFrame(
 	ID3D12Resource*& buffer,
-	D3D12_RESOURCE_STATES& state,
 	ID3D12Fence1*& fenceToSignal,
-	UINT64& fenceValueToSignal,
-	D3D12_RESOURCE_STATES newState
+	UINT64& fenceValueToSignal
 ) noexcept {
 	auto lk = _lock.lock_exclusive();
 
@@ -152,9 +145,6 @@ bool FrameRingBuffer::ConsumerBeginFrame(
 	curSlot.consumerFenceValue = fenceValueToSignal;
 
 	buffer = curSlot.resource.get();
-	state = curSlot.state;
-	curSlot.state = newState;
-
 	return true;
 }
 
@@ -200,10 +190,8 @@ HRESULT FrameRingBuffer::_LoadBufferResources() noexcept {
 	);
 
 	for (_FrameResourceSlot& slot : _slots) {
-		slot.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-
 		HRESULT hr = _device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
-			&texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&slot.resource));
+			&texDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&slot.resource));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateCommittedResource 失败", hr);
 			return hr;

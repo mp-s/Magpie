@@ -287,11 +287,11 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noexcept {
 	assert(!waitingForFirstFrame || !*waitingForFirstFrame);
 
+	// curBuffer 处于 COPY_SOURCE 状态，使用结束后也应处于该状态
 	ID3D12Resource* curBuffer;
-	D3D12_RESOURCE_STATES bufferState;
 	ID3D12Fence1* fenceToSignal;
 	UINT64 fenceValueToSignal;
-	if (!_frameProducer->ConsumerBeginFrame(curBuffer, bufferState, fenceToSignal, fenceValueToSignal, D3D12_RESOURCE_STATE_COPY_SOURCE)) {
+	if (!_frameProducer->ConsumerBeginFrame(curBuffer, fenceToSignal, fenceValueToSignal)) {
 		if (waitingForFirstFrame) {
 			*waitingForFirstFrame = true;
 		}
@@ -315,43 +315,29 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noex
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
 	if (const Size size = _presenter->Size(); _outputRect == RECT{ 0,0,(LONG)size.width,(LONG)size.height }) {
-		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
+		{
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
 			commandList->ResourceBarrier(1, &barrier);
-		} else {
-			CD3DX12_RESOURCE_BARRIER barriers[] = {
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0),
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
-			};
-			commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 		}
 
 		commandList->CopyResource(frameTex, curBuffer);
 	} else {
-		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
-		commandList->ResourceBarrier(1, &barrier);
+		{
+			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+			commandList->ResourceBarrier(1, &barrier);
+		}
 
 		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
 		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
 		static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
 		commandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
 
-		if (bufferState == D3D12_RESOURCE_STATE_COPY_SOURCE) {
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+		{
+			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0);
 			commandList->ResourceBarrier(1, &barrier);
-		} else {
-			CD3DX12_RESOURCE_BARRIER barriers[] = {
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0),
-				CD3DX12_RESOURCE_BARRIER::Transition(
-					curBuffer, bufferState, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
-			};
-			commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 		}
 
 		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);

@@ -27,10 +27,8 @@ public:
 
 	bool ConsumerBeginFrame(
 		ID3D12Resource*& buffer,
-		D3D12_RESOURCE_STATES& state,
 		ID3D12Fence1*& fenceToSignal,
-		UINT64& fenceValueToSignal,
-		D3D12_RESOURCE_STATES newState
+		UINT64& fenceValueToSignal
 	) noexcept;
 
 	HRESULT OnResized(Size size, Size& outputSize) noexcept;

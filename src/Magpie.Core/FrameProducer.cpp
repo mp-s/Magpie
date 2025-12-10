@@ -58,12 +58,10 @@ bool FrameProducer::WaitForInitialize(Size& outputSize) noexcept {
 
 bool FrameProducer::ConsumerBeginFrame(
 	ID3D12Resource*& buffer,
-	D3D12_RESOURCE_STATES& state,
 	ID3D12Fence1*& fenceToSignal,
-	UINT64& fenceValueToSignal,
-	D3D12_RESOURCE_STATES newState
+	UINT64& fenceValueToSignal
 ) noexcept {
-	return _frameRingBuffer.ConsumerBeginFrame(buffer, state, fenceToSignal, fenceValueToSignal, newState);
+	return _frameRingBuffer.ConsumerBeginFrame(buffer, fenceToSignal, fenceValueToSignal);
 }
 
 HRESULT FrameProducer::OnResized(Size /*size*/, Size& outputSize) noexcept {
@@ -344,10 +342,9 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 
+	// curBuffer 处于 COPY_SOURCE 状态，使用结束后也应处于该状态
 	ID3D12Resource* curBuffer;
-	D3D12_RESOURCE_STATES bufferState;
-	hr = _frameRingBuffer.ProducerBeginFrame(
-		curBuffer, bufferState, commandQueue, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	hr = _frameRingBuffer.ProducerBeginFrame(curBuffer, commandQueue);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("FrameRingBuffer::ProducerBeginFrame 失败", hr);
 		return hr;
@@ -355,9 +352,9 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
-	if (bufferState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			curBuffer, bufferState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0);
+			curBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0);
 		commandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -377,13 +374,17 @@ HRESULT FrameProducer::_Render() noexcept {
 				curBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST, 0)
 		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
+	}
 
-		commandList->CopyResource(curBuffer, input);
+	commandList->CopyResource(curBuffer, input);
 
-		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
-		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-		barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-		barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+	{
+		D3D12_RESOURCE_BARRIER barriers[] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				input, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON, 0),
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				curBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
+		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
