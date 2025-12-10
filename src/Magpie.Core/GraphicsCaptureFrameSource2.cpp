@@ -456,7 +456,7 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 			return hr;
 		}
 
-		_copyCommandList->CopyResource(curSlot.output.get(), curCASlot.bridgeResource.get());
+		_copyCommandList->CopyResource(curSlot.output.get(), curCASlot.sharedResource.get());
 	} else {
 		// D3D11 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
 		CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
@@ -610,7 +610,8 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 
 	D3D12_RESOURCE_ALLOCATION_INFO textureInfo = device->GetResourceAllocationInfo(0, 1, &textureDesc);
 
-	// 创建跨适配器共享堆
+	// 创建跨适配器共享堆。应遵循“写入者创建”的原则，否则可能无法正确同步，Intel 集显作为
+	// 捕获设备时存在这个问题。
 	{
 		CD3DX12_HEAP_DESC heapDesc(
 			textureInfo.SizeInBytes * frameCount,
@@ -618,21 +619,21 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 			0,
 			D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER
 		);
-		hr = device->CreateHeap(&heapDesc, IID_PPV_ARGS(&_sharedHeap));
+		hr = _bridgeDevice->CreateHeap(&heapDesc, IID_PPV_ARGS(&_bridgeHeap));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateHeap 失败", hr);
 			return false;
 		}
 
 		wil::unique_handle hSharedHeap;
-		hr = device->CreateSharedHandle(
-			_sharedHeap.get(), nullptr, GENERIC_ALL, nullptr, hSharedHeap.put());
+		hr = _bridgeDevice->CreateSharedHandle(
+			_bridgeHeap.get(), nullptr, GENERIC_ALL, nullptr, hSharedHeap.put());
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateSharedHandle 失败", hr);
 			return false;
 		}
 
-		hr = _bridgeDevice->OpenSharedHandle(hSharedHeap.get(), IID_PPV_ARGS(&_bridgeHeap));
+		hr = device->OpenSharedHandle(hSharedHeap.get(), IID_PPV_ARGS(&_sharedHeap));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("OpenSharedHandle 失败", hr);
 			return false;
@@ -649,19 +650,6 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 			return false;
 		}
 
-		hr = device->CreatePlacedResource(
-			_sharedHeap.get(),
-			textureInfo.SizeInBytes * i,
-			&textureDesc,
-			D3D12_RESOURCE_STATE_COMMON,
-			nullptr,
-			IID_PPV_ARGS(&curSlot.sharedResource)
-		);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreatePlacedResource 失败", hr);
-			return false;
-		}
-
 		hr = _bridgeDevice->CreatePlacedResource(
 			_bridgeHeap.get(),
 			textureInfo.SizeInBytes * i,
@@ -674,13 +662,26 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 			Logger::Get().ComError("CreatePlacedResource 失败", hr);
 			return false;
 		}
+
+		hr = device->CreatePlacedResource(
+			_sharedHeap.get(),
+			textureInfo.SizeInBytes * i,
+			&textureDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&curSlot.sharedResource)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreatePlacedResource 失败", hr);
+			return false;
+		}
 	}
 
-	// 创建跨适配器栅栏
-	hr = device->CreateFence(
+	// 创建跨适配器栅栏，遵循“写入者创建”的原则
+	hr = _bridgeDevice->CreateFence(
 		0,
 		D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER,
-		IID_PPV_ARGS(&_sharedFence)
+		IID_PPV_ARGS(&_bridgeFence)
 	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateFence 失败", hr);
@@ -688,14 +689,14 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 	}
 
 	wil::unique_handle hSharedFence;
-	hr = device->CreateSharedHandle(
-		_sharedFence.get(), nullptr, GENERIC_ALL, nullptr, hSharedFence.put());
+	hr = _bridgeDevice->CreateSharedHandle(
+		_bridgeFence.get(), nullptr, GENERIC_ALL, nullptr, hSharedFence.put());
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateSharedHandle 失败", hr);
 		return false;
 	}
 
-	hr = _bridgeDevice->OpenSharedHandle(hSharedFence.get(), IID_PPV_ARGS(&_bridgeFence));
+	hr = device->OpenSharedHandle(hSharedFence.get(), IID_PPV_ARGS(&_sharedFence));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("OpenSharedHandle 失败", hr);
 		return false;

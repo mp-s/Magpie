@@ -65,16 +65,16 @@ private:
 	winrt::com_ptr<ID3D12Device5> _bridgeDevice;
 	winrt::com_ptr<ID3D12CommandQueue> _bridgeCopyCommandQueue;
 	winrt::com_ptr<ID3D12GraphicsCommandList> _bridgeCopyCommandList;
-	winrt::com_ptr<ID3D12Heap> _sharedHeap;
 	winrt::com_ptr<ID3D12Heap> _bridgeHeap;
-	winrt::com_ptr<ID3D12Fence> _sharedFence;
-	winrt::com_ptr<ID3D12Fence> _bridgeFence;
+	winrt::com_ptr<ID3D12Heap> _sharedHeap;
+	winrt::com_ptr<ID3D12Fence1> _bridgeFence;
+	winrt::com_ptr<ID3D12Fence1> _sharedFence;
 	uint64_t _curCrossAdapterFenceValue = 0;
 
 	struct _FrameCrossAdapterResourceSlot {
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
-		winrt::com_ptr<ID3D12Resource> sharedResource;
 		winrt::com_ptr<ID3D12Resource> bridgeResource;
+		winrt::com_ptr<ID3D12Resource> sharedResource;
 	};
 
 	std::vector<_FrameCrossAdapterResourceSlot> _crossAdapterSlots;
