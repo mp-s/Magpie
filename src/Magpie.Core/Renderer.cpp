@@ -759,7 +759,7 @@ void Renderer::_BackendThreadProc() noexcept {
 		return;
 	}
 
-	StepTimerStatus stepTimerStatus = StepTimerStatus::WaitForNewFrame;
+	StepTimerStatus stepTimerStatus = StepTimerStatus::WaitingForNewFrame;
 	const bool waitMsgForNewFrame =
 		_frameSource->WaitType() == FrameSourceWaitType::WaitForMessage;
 
@@ -767,7 +767,7 @@ void Renderer::_BackendThreadProc() noexcept {
 	while (true) {
 		bool fpsUpdated = false;
 		stepTimerStatus = _stepTimer.WaitForNextFrame(
-			waitMsgForNewFrame && stepTimerStatus != StepTimerStatus::WaitForFPSLimiter,
+			waitMsgForNewFrame && stepTimerStatus != StepTimerStatus::WaitingForFPSLimiter,
 			fpsUpdated
 		);
 
@@ -781,7 +781,7 @@ void Renderer::_BackendThreadProc() noexcept {
 			DispatchMessage(&msg);
 		}
 
-		if (stepTimerStatus == StepTimerStatus::WaitForFPSLimiter) {
+		if (stepTimerStatus == StepTimerStatus::WaitingForFPSLimiter) {
 			// 新帧消息可能已被处理，之后的 WaitForNextFrame 不要等待消息，直到状态变化
 			continue;
 		}

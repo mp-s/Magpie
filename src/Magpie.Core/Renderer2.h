@@ -26,7 +26,7 @@ public:
 
 	ComponentState Render(bool waitForGpu = false, bool* waitingForFirstFrame = nullptr) noexcept;
 
-	const RECT& OutputRect() const noexcept {
+	const RECT& GetOutputRect() const noexcept {
 		return _outputRect;
 	}
 

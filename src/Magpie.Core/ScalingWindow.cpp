@@ -326,7 +326,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	}
 
 	_cursorManager = std::make_unique<class CursorManager>();
-	const RECT& outputRect = _renderer->OutputRect();
+	const RECT& outputRect = _renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,
@@ -1339,7 +1339,7 @@ void ScalingWindow::_HandleResize() noexcept {
 	_renderer->OnResized(
 		Size{ uint32_t(_rendererRect.right - _rendererRect.left), uint32_t(_rendererRect.bottom - _rendererRect.top) });
 
-	const RECT& outputRect = _renderer->OutputRect();
+	const RECT& outputRect = _renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,
@@ -1352,7 +1352,7 @@ void ScalingWindow::_HandleResize() noexcept {
 }
 
 void ScalingWindow::_HandleMove() noexcept {
-	const RECT& outputRect = _renderer->OutputRect();
+	const RECT& outputRect = _renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,
@@ -1497,7 +1497,7 @@ void ScalingWindow::_UpdateWindowProps() const noexcept {
 	SetProp(hWnd, L"Magpie.SrcRight", (HANDLE)(INT_PTR)srcRect.right);
 	SetProp(hWnd, L"Magpie.SrcBottom", (HANDLE)(INT_PTR)srcRect.bottom);
 
-	const RECT& outputRect = _renderer->OutputRect();
+	const RECT& outputRect = _renderer->GetOutputRect();
 	SetProp(hWnd, L"Magpie.DestLeft", (HANDLE)(INT_PTR)(_rendererRect.left + outputRect.left));
 	SetProp(hWnd, L"Magpie.DestTop", (HANDLE)(INT_PTR)(_rendererRect.top + outputRect.top));
 	SetProp(hWnd, L"Magpie.DestRight", (HANDLE)(INT_PTR)(_rendererRect.left + outputRect.right));
@@ -1823,7 +1823,7 @@ static LRESULT CALLBACK BkgWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 RECT ScalingWindow::_CalcSrcTouchRect() const noexcept {
 	const RECT& srcRect = _srcTracker.SrcRect();
 
-	const RECT& outputRect = _renderer->OutputRect();
+	const RECT& outputRect = _renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,

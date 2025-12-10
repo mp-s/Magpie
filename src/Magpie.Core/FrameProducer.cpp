@@ -158,16 +158,15 @@ void FrameProducer::_ThreadProc(
 		return;
 	}
 
-	StepTimerStatus stepTimerStatus = StepTimerStatus::WaitForNewFrame;
-	const bool waitMsgForNewFrame =
-		_frameSource->WaitType() == FrameSourceWaitType::WaitForMessage;
+	StepTimerStatus stepTimerStatus = StepTimerStatus::WaitingForNewFrame;
+	const bool waitMsgForNewFrame = _frameSource->ShouldWaitMessageForNewFrame();
 
 	MSG msg;
 	while (true) {
 		bool fpsUpdated = false;
-		// WaitForFPSLimiter 状态下新帧消息可能已被处理，不要等待消息，直到状态变化
+		// WaitingForFPSLimiter 状态下新帧消息可能已被处理，不要等待消息，直到状态变化
 		stepTimerStatus = _stepTimer.WaitForNextFrame(
-			waitMsgForNewFrame && stepTimerStatus != StepTimerStatus::WaitForFPSLimiter,
+			waitMsgForNewFrame && stepTimerStatus != StepTimerStatus::WaitingForFPSLimiter,
 			fpsUpdated
 		);
 
@@ -189,21 +188,28 @@ void FrameProducer::_ThreadProc(
 			break;
 		}
 
-		if (stepTimerStatus != StepTimerStatus::WaitForFPSLimiter) {
-			if (stepTimerStatus == StepTimerStatus::ForceNewFrame || _frameSource->IsNewFrameAvailable()) {
-				HRESULT hr = _Render();
-				if (FAILED(hr)) {
-					Logger::Get().ComError("_Render 失败", hr);
+		if (stepTimerStatus == StepTimerStatus::WaitingForFPSLimiter) {
+			continue;
+		}
 
-					if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-						_state.store(ComponentState::DeviceLost, std::memory_order_relaxed);
-					} else {
-						_state.store(ComponentState::Error, std::memory_order_relaxed);
-					}
+		const FrameSourceState frameSourceState = _frameSource->GetState();
+		if (frameSourceState == FrameSourceState::WaitingForFirstFrame ||
+			(frameSourceState == FrameSourceState::Waiting &&
+				stepTimerStatus != StepTimerStatus::ForceNewFrame)) {
+			continue;
+		}
 
-					break;
-				}
+		HRESULT hr = _Render();
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_Render 失败", hr);
+
+			if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+				_state.store(ComponentState::DeviceLost, std::memory_order_relaxed);
+			} else {
+				_state.store(ComponentState::Error, std::memory_order_relaxed);
 			}
+
+			break;
 		}
 	}
 
@@ -291,7 +297,7 @@ bool FrameProducer::_Initialize(
 
 	{
 		std::optional<float> maxFrameRate;
-		if (_frameSource->WaitType() == FrameSourceWaitType::NoWait) {
+		if (!_frameSource->ShouldWaitMessageForNewFrame()) {
 			// 某些捕获方式不会限制捕获帧率，因此将捕获帧率限制为屏幕刷新率
 			const HMONITOR hMon = hMonSrc;
 
@@ -358,13 +364,14 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier(1, &barrier);
 	}
 
-	hr = _frameSource->Update(frameIndex);
+	uint32_t frameSourceOutputIdx;
+	hr = _frameSource->Update(frameSourceOutputIdx);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("GraphicsCaptureFrameSource2::Update 失败", hr);
 		return hr;
 	}
 
-	ID3D12Resource* input = _frameSource->GetOutput(frameIndex);
+	ID3D12Resource* input = _frameSource->GetOutput(frameSourceOutputIdx);
 
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {

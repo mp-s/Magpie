@@ -3,8 +3,8 @@
 namespace Magpie {
 
 enum class StepTimerStatus {
-	WaitForNewFrame,
-	WaitForFPSLimiter,
+	WaitingForNewFrame,
+	WaitingForFPSLimiter,
 	ForceNewFrame
 };
 

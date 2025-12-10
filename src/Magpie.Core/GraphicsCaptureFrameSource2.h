@@ -6,10 +6,10 @@ namespace Magpie {
 
 class GraphicsContext;
 
-enum class FrameSourceWaitType {
-	NoWait,
-	WaitForMessage,
-	WaitForFrame
+enum class FrameSourceState {
+	WaitingForFirstFrame,
+	Waiting,
+	NewFrameAvailable
 };
 
 class GraphicsCaptureFrameSource2 {
@@ -29,17 +29,17 @@ public:
 
 	bool Start() noexcept;
 
-	FrameSourceWaitType WaitType() const noexcept {
-		return FrameSourceWaitType::WaitForMessage;
-	}
-
-	bool IsNewFrameAvailable() noexcept;
-
-	HRESULT Update(uint32_t frameIndex) noexcept;
-
 	ID3D12Resource* GetOutput(uint32_t index) noexcept {
 		return _slots[index].output.get();
 	}
+
+	bool ShouldWaitMessageForNewFrame() const noexcept {
+		return true;
+	}
+
+	FrameSourceState GetState() noexcept;
+
+	HRESULT Update(uint32_t& outputIdx) noexcept;
 
 private:
 	bool _CreateD3D11Device(IDXGIAdapter1* dxgiAdapter) noexcept;
@@ -76,6 +76,7 @@ private:
 		winrt::com_ptr<ID3D12Resource> sharedResource;
 		winrt::com_ptr<ID3D12Resource> bridgeResource;
 	};
+
 	std::vector<_FrameCrossAdapterResourceSlot> _crossAdapterSlots;
 	
 	winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice _wrappedDevice{ nullptr };
@@ -83,20 +84,21 @@ private:
 	winrt::Windows::Graphics::Capture::GraphicsCaptureSession _captureSession{ nullptr };
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool _captureFramePool{ nullptr };
 
-	wil::srwlock _newFrameLock;
+	wil::srwlock _lastestFrameLock;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _lastestFrame{ nullptr };
-	bool _isNewFrameAvailable = false;
 
 	std::atomic<DWORD> _producerThreadId;
 
 	struct _FrameResourceSlot {
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
 		// 保留引用防止 WGC 再次写入
-		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame capturedFrame{ nullptr };
+		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame captureFrame{ nullptr };
 		winrt::com_ptr<ID3D12Resource> frameResource;
 		winrt::com_ptr<ID3D12Resource> output;
 	};
+
 	std::vector<_FrameResourceSlot> _slots;
+	uint32_t _curFrameIdx = 0;
 	
 	D3D12_BOX _frameBox{};
 	bool _isUsingScRGB = false;

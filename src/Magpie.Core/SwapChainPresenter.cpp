@@ -12,7 +12,7 @@ namespace Magpie {
 bool SwapChainPresenter::Initialize(
 	GraphicsContext& graphicContext,
 	HWND hwndAttach,
-	struct Size size,
+	Size size,
 	const ColorInfo& colorInfo
 ) noexcept {
 	_graphicContext = &graphicContext;
@@ -215,7 +215,7 @@ HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 	return _dxgiSwapChain->Present(0, 0);
 }
 
-HRESULT SwapChainPresenter::OnResized(struct Size size) noexcept {
+HRESULT SwapChainPresenter::OnResized(Size size) noexcept {
 	_size = size;
 	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
 	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;

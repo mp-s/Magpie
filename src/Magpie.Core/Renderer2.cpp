@@ -314,7 +314,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noex
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
-	if (const Size size = _presenter->Size(); _outputRect == RECT{ 0,0,(LONG)size.width,(LONG)size.height }) {
+	if (const Size size = _presenter->GetSize(); _outputRect == RECT{ 0,0,(LONG)size.width,(LONG)size.height }) {
 		{
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
@@ -384,7 +384,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noex
 
 void Renderer2::_UpdateOutputRect(Size outputSize) noexcept {
 	// TODO: 窗口模式缩放始终填充画面
-	const Size rendererSize = _presenter->Size();
+	const Size rendererSize = _presenter->GetSize();
 	OutputAlignment alignment = ScalingWindow::Get().Options().outputAlignment;
 
 	using enum OutputAlignment;

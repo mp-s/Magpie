@@ -22,9 +22,9 @@ public:
 
 	HRESULT EndFrame(bool waitForGpu = false) noexcept;
 
-	Size Size() const noexcept { return _size; }
+	Size GetSize() const noexcept { return _size; }
 
-	HRESULT OnResized(struct Size size) noexcept;
+	HRESULT OnResized(Size size) noexcept;
 
 	void OnResizeStarted() noexcept;
 
@@ -46,7 +46,7 @@ private:
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
 	uint32_t _rtvDescriptorSize = 0;
 
-	struct Size _size{};
+	Size _size{};
 	uint32_t _bufferCount = 0;
 	bool _isScRGB = false;
 
