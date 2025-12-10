@@ -48,6 +48,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BackendDescriptorStore.h" />
+    <ClInclude Include="CatumullRomEffectDrawer.h" />
     <ClInclude Include="ColorInfo.h" />
     <ClInclude Include="CompSwapchainPresenter.h" />
     <ClInclude Include="CursorManager.h" />
@@ -59,6 +60,7 @@
     <ClInclude Include="DwmSharedSurfaceFrameSource.h" />
     <ClInclude Include="EffectCacheManager.h" />
     <ClInclude Include="EffectDrawer.h" />
+    <ClInclude Include="EffectDrawerBase.h" />
     <ClInclude Include="EffectHelper.h" />
     <ClInclude Include="EffectsProfiler.h" />
     <ClInclude Include="ExclModeHelper.h" />
@@ -98,6 +100,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BackendDescriptorStore.cpp" />
+    <ClCompile Include="CatumullRomEffectDrawer.cpp" />
     <ClCompile Include="CompSwapchainPresenter.cpp" />
     <ClCompile Include="CursorManager.cpp" />
     <ClCompile Include="CursorDrawer.cpp" />
@@ -142,6 +145,9 @@
     <ClCompile Include="WindowHelper.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <FxCompile Include="CatmullRomCS.hlsl">
+      <ShaderType>Compute</ShaderType>
+    </FxCompile>
     <FxCompile Include="shaders\DuplicateFrameCS.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>

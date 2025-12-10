@@ -287,7 +287,7 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noexcept {
 	assert(!waitingForFirstFrame || !*waitingForFirstFrame);
 
-	// curBuffer 处于 COPY_SOURCE 状态，使用结束后也应处于该状态
+	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
 	ID3D12Fence1* fenceToSignal;
 	UINT64 fenceValueToSignal;

@@ -3,6 +3,7 @@
 #include "GraphicsContext.h"
 #include "FrameRingBuffer.h"
 #include "StepTimer.h"
+#include "CatumullRomEffectDrawer.h"
 
 namespace Magpie {
 
@@ -64,6 +65,8 @@ private:
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _descHeap;
 	uint32_t _srvUavDescriptorSize = 0;
+
+	CatumullRomEffectDrawer _catumullRomEffectDrawer;
 	
 	Size _inputSize{};
 	Size _outputSize{};

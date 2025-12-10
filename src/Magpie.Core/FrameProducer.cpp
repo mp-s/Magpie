@@ -263,6 +263,12 @@ bool FrameProducer::_Initialize(
 	}
 
 	// 初始化效果
+	HRESULT hr = _catumullRomEffectDrawer.Initialize(_graphicsContext);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CatumullRomEffectDrawer::Initialize 失败", hr);
+		return false;
+	}
+
 	_inputSize.width = srcRect.right - srcRect.left;
 	_inputSize.height = srcRect.bottom - srcRect.top;
 	_outputSize = _inputSize;
@@ -280,7 +286,7 @@ bool FrameProducer::_Initialize(
 			.NumDescriptors = frameBufferCount,
 			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
 		};
-		HRESULT hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_descHeap));
+		hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_descHeap));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
 			return false;
@@ -348,7 +354,7 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 
-	// curBuffer 处于 COPY_SOURCE 状态，使用结束后也应处于该状态
+	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
 	hr = _frameRingBuffer.ProducerBeginFrame(curBuffer, commandQueue);
 	if (FAILED(hr)) {
@@ -371,6 +377,7 @@ HRESULT FrameProducer::_Render() noexcept {
 		return hr;
 	}
 
+	// 处于 COMMON 状态，使用结束后也应处于此状态
 	ID3D12Resource* input = _frameSource->GetOutput(frameSourceOutputIdx);
 
 	{

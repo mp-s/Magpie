@@ -76,10 +76,6 @@ float4 Pass1(float2 pos) {
 	float4 rowtaps = weight4(1 - f.x);
 	float4 coltaps = weight4(1 - f.y);
 
-	// make sure all taps added together is exactly 1.0, otherwise some (very small) distortion can occur
-	rowtaps /= rowtaps.r + rowtaps.g + rowtaps.b + rowtaps.a;
-	coltaps /= coltaps.r + coltaps.g + coltaps.b + coltaps.a;
-
 	float2 uv1 = pos1 * inputPt;
 	float2 uv0 = uv1 - inputPt;
 	float2 uv2 = uv1 + inputPt;

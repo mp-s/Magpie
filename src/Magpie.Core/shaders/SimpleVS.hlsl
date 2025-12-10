@@ -1,9 +1,11 @@
-void main(
-	float2 pos : POSITION,
-	float2 coord : TEXCOORD,
-	out noperspective float2 outCoord : TEXCOORD,
-	out noperspective float4 outPos : SV_POSITION
-) {
-	outPos = float4(pos, 0, 1);
-	outCoord = coord;
+struct PSInput {
+    noperspective float2 uv : TEXCOORD;
+    noperspective float4 position : SV_POSITION;
+};
+
+PSInput main(float2 position : POSITION, float2 uv : TEXCOORD) {
+    PSInput result;
+    result.position = float4(position, 0, 1);
+    result.uv = uv;
+    return result;
 }
