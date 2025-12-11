@@ -25,9 +25,9 @@ public:
 		UINT64& fenceValueToSignal
 	) noexcept;
 
-	HRESULT SetEventOnNewFrame(uint64_t& fenceValue, HANDLE hEvent) noexcept;
+	HRESULT SetEventOnNewFrame(uint64_t& frameNumber, HANDLE hEvent) const noexcept;
 
-	uint64_t GetFrameNumber() noexcept;
+	uint64_t GetLatestFrameNumber() const noexcept;
 
 	HRESULT OnResized(Size size) noexcept;
 

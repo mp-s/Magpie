@@ -70,7 +70,7 @@ private:
 	HMONITOR _hCurMonitor = NULL;
 	ColorInfo _colorInfo;
 
-	uint64_t _curProducerFrameNumber = 0;
+	uint64_t _lastProducerFrameNumber = 0;
 };
 
 }

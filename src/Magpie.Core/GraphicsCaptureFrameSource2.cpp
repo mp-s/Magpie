@@ -319,8 +319,8 @@ bool GraphicsCaptureFrameSource2::Start() noexcept {
 
 FrameSourceState GraphicsCaptureFrameSource2::GetState() noexcept {
 	{
-		auto lk = _lastestFrameLock.lock_shared();
-		if (_lastestFrame) {
+		auto lk = _latestFrameLock.lock_shared();
+		if (_latestFrame) {
 			return FrameSourceState::NewFrameAvailable;
 		}
 	}
@@ -366,16 +366,16 @@ static HRESULT GetFrameResourceFromCaptureFrame(
 
 HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 	{
-		// 不要在持有 _lastestFrameLock 时释放 Direct3D11CaptureFrame。WGC 内部使用 Critical Section
+		// 不要在持有 _latestFrameLock 时释放 Direct3D11CaptureFrame。WGC 内部使用 Critical Section
 		// 同步，如果此时 _Direct3D11CaptureFramePool_FrameArrived 正在执行会死锁。
-		winrt::Direct3D11CaptureFrame lastestFrame{ nullptr };
+		winrt::Direct3D11CaptureFrame latestFrame{ nullptr };
 		{
-			auto lk = _lastestFrameLock.lock_exclusive();
-			lastestFrame = std::move(_lastestFrame);
-			_lastestFrame = nullptr;
+			auto lk = _latestFrameLock.lock_exclusive();
+			latestFrame = std::move(_latestFrame);
+			_latestFrame = nullptr;
 		}
 
-		if (!lastestFrame) {
+		if (!latestFrame) {
 			// 没有新帧
 			outputIdx = _curFrameIdx;
 			return S_OK;
@@ -385,7 +385,7 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 
 		_FrameResourceSlot& curSlot = _slots[_curFrameIdx];
 		curSlot.frameResource = nullptr;
-		curSlot.captureFrame = std::move(lastestFrame);
+		curSlot.captureFrame = std::move(latestFrame);
 	}
 
 	_FrameResourceSlot& curSlot = _slots[_curFrameIdx];
@@ -724,8 +724,8 @@ void GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived(
 	}
 
 	{
-		auto lk = _lastestFrameLock.lock_exclusive();
-		_lastestFrame = std::move(frame);
+		auto lk = _latestFrameLock.lock_exclusive();
+		_latestFrame = std::move(frame);
 	}
 
 	// 唤起生产者线程

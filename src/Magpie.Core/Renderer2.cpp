@@ -84,15 +84,17 @@ ComponentState Renderer2::Render(bool waitForGpu, bool* waitingForFirstFrame) no
 		return _state;
 	}
 
-	uint64_t newFrameNumber = _frameProducer->GetFrameNumber();
-	if (newFrameNumber == _curProducerFrameNumber) {
-		if (waitingForFirstFrame && newFrameNumber == 0) {
-			*waitingForFirstFrame = true;
-		}
+	{
+		uint64_t latestProducerFrameNumber = _frameProducer->GetLatestFrameNumber();
+		if (latestProducerFrameNumber == _lastProducerFrameNumber) {
+			if (waitingForFirstFrame && latestProducerFrameNumber == 0) {
+				*waitingForFirstFrame = true;
+			}
 
-		return _state;
-	} else {
-		_curProducerFrameNumber = newFrameNumber;
+			return _state;
+		} else {
+			_lastProducerFrameNumber = latestProducerFrameNumber;
+		}
 	}
 
 	_CheckResult(_RenderImpl(waitForGpu), "_RenderImpl 失败");

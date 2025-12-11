@@ -25,9 +25,9 @@ public:
 		const ColorInfo& colorInfo
 	) noexcept;
 
-	bool WaitForInitialize(Size& outputSize) noexcept;
+	bool WaitForInitialize(Size& outputSize) const noexcept;
 
-	uint64_t GetFrameNumber() noexcept;
+	uint64_t GetLatestFrameNumber() const noexcept;
 
 	bool ConsumerBeginFrame(
 		ID3D12Resource*& buffer,

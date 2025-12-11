@@ -48,7 +48,7 @@ void FrameProducer::InitializeAsync(
 	);
 }
 
-bool FrameProducer::WaitForInitialize(Size& outputSize) noexcept {
+bool FrameProducer::WaitForInitialize(Size& outputSize) const noexcept {
 	_state.wait(ComponentState::Initializing, std::memory_order_relaxed);
 	if (_state.load(std::memory_order_acquire) == ComponentState::NoError) {
 		outputSize = _outputSize;
@@ -58,8 +58,8 @@ bool FrameProducer::WaitForInitialize(Size& outputSize) noexcept {
 	}
 }
 
-uint64_t FrameProducer::GetFrameNumber() noexcept {
-	return _frameRingBuffer.GetFrameNumber();
+uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
+	return _frameRingBuffer.GetLatestFrameNumber();
 }
 
 bool FrameProducer::ConsumerBeginFrame(
@@ -514,10 +514,10 @@ void FrameProducer::_MonitorThreadProc() noexcept {
 		return;
 	}
 
-	uint64_t fenceValue = 1;
+	uint64_t frameNumber = 1;
 
 	// 绑定新帧渲染完成时触发的事件
-	HRESULT hr = _frameRingBuffer.SetEventOnNewFrame(fenceValue, event.get());
+	HRESULT hr = _frameRingBuffer.SetEventOnNewFrame(frameNumber, event.get());
 	if (FAILED(hr)) {
 		Logger::Get().ComError("FrameRingBuffer::SetEventOnNewFrame 失败", hr);
 		return;
@@ -539,7 +539,7 @@ void FrameProducer::_MonitorThreadProc() noexcept {
 			// 通知消费者渲染
 			PostMessage(ScalingWindow::Get().Handle(), CommonSharedConstants::WM_FRONTEND_RENDER, 0, 0);
 
-			hr = _frameRingBuffer.SetEventOnNewFrame(fenceValue, event.get());
+			hr = _frameRingBuffer.SetEventOnNewFrame(frameNumber, event.get());
 			if (FAILED(hr)) {
 				Logger::Get().ComError("FrameRingBuffer::SetEventOnNewFrame 失败", hr);
 				return;

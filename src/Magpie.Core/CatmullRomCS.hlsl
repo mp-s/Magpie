@@ -23,12 +23,14 @@ float4 weight4(float x) {
 	);
 }
 
+#ifdef MP_SRGB
 // 来自 https://github.com/GPUOpen-Effects/FidelityFX-FSR/blob/a21ffb8f6c13233ba336352bdff293894c706575/ffx-fsr/ffx_a.h#L2189-L2190
 float3 LinearToSrgb(float3 c) {
     float3 j = { 0.0031308 * 12.92, 12.92, 1.0 / 2.4 };
     float2 k = { 1.055, -0.055 };
     return clamp(j.xxx, c * j.yyy, pow(c, j.zzz) * k.xxx + k.yyy);
 }
+#endif
 
 float4 CatmullRom(float2 pos) {
 	pos *= inputSize;
@@ -69,7 +71,10 @@ float4 CatmullRom(float2 pos) {
 	bottom += input.Load(int3(coord_bottom_right, 0)).rgb * rowtaps.w;
 	total += bottom * coltaps.w;
 
-    return float4(LinearToSrgb(saturate(total)), 1);
+#ifdef MP_SRGB
+	total = LinearToSrgb(saturate(total));
+#endif
+	return float4(total, 1);
 }
 
 uint Bfe(uint src, uint off, uint bits) {

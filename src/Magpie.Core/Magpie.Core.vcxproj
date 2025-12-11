@@ -148,6 +148,9 @@
     <FxCompile Include="CatmullRomCS.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>
+    <FxCompile Include="CatmullRomCS_sRGB.hlsl">
+      <ShaderType>Compute</ShaderType>
+    </FxCompile>
     <FxCompile Include="shaders\DuplicateFrameCS.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>

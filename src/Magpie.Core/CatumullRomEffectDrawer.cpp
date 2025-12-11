@@ -3,6 +3,7 @@
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "shaders/CatmullRomCS.h"
+#include "shaders/CatmullRomCS_sRGB.h"
 #include "EffectHelper.h"
 
 namespace Magpie {
@@ -92,7 +93,10 @@ HRESULT CatumullRomEffectDrawer::Initialize(
 	{
 		D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 			.pRootSignature = _rootSignature.get(),
-			.CS = {.pShaderBytecode = CatmullRomCS, .BytecodeLength = sizeof(CatmullRomCS)}
+			.CS = CD3DX12_SHADER_BYTECODE(
+				_outputColorSpace == EffectColorSpace::sRGB ? CatmullRomCS_sRGB : CatmullRomCS,
+				_outputColorSpace == EffectColorSpace::sRGB ? sizeof(CatmullRomCS_sRGB) : sizeof(CatmullRomCS)
+			)
 		};
 		HRESULT hr = device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
 		if (FAILED(hr)) {
@@ -120,6 +124,7 @@ void CatumullRomEffectDrawer::CreateDeviceResources(
 		if (_inputColorSpace == EffectColorSpace::linear_sRGB) {
 			format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		} else if (_inputColorSpace == EffectColorSpace::sRGB) {
+			// 着色器输入始终是 linear rgb
 			if (_isFirst) {
 				format = DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
 			} else {

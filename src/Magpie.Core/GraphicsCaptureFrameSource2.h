@@ -84,8 +84,8 @@ private:
 	winrt::Windows::Graphics::Capture::GraphicsCaptureSession _captureSession{ nullptr };
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool _captureFramePool{ nullptr };
 
-	wil::srwlock _lastestFrameLock;
-	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _lastestFrame{ nullptr };
+	wil::srwlock _latestFrameLock;
+	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _latestFrame{ nullptr };
 
 	std::atomic<DWORD> _producerThreadId;
 
