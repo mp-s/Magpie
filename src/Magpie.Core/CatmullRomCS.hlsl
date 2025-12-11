@@ -69,7 +69,7 @@ float4 CatmullRom(float2 pos) {
 	bottom += input.Load(int3(coord_bottom_right, 0)).rgb * rowtaps.w;
 	total += bottom * coltaps.w;
 
-    return float4(LinearToSrgb(total), 1);
+    return float4(LinearToSrgb(saturate(total)), 1);
 }
 
 uint Bfe(uint src, uint off, uint bits) {

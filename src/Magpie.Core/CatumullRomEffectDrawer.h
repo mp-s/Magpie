@@ -19,6 +19,7 @@ public:
 
 	HRESULT Initialize(
 		GraphicsContext& graphicsContext,
+		uint32_t descriptorSize,
 		Size inputSize,
 		Size outputSize,
 		bool isFirst,
@@ -29,15 +30,23 @@ public:
 		uint32_t& descriptorCount
 	) noexcept;
 
-	HRESULT CreateDeviceResources(
+	void CreateDeviceResources(
 		const SmallVectorImpl<ID3D12Resource*>& inputSlots,
 		const SmallVectorImpl<ID3D12Resource*>& outputSlots,
 		CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
-		CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
-		uint32_t descriptorSize
+		CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle
 	) noexcept;
 
-	HRESULT Draw(uint32_t inputSlot, uint32_t outputSlot) noexcept;
+	void Draw(uint32_t inputSlot, uint32_t outputSlot) noexcept;
+
+	void OnResize(
+		Size inputSize,
+		Size outputSize,
+		const SmallVectorImpl<ID3D12Resource*>& inputSlots,
+		const SmallVectorImpl<ID3D12Resource*>& outputSlots,
+		CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
+		CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle
+	);
 
 private:
 	GraphicsContext* _graphicsContext = nullptr;

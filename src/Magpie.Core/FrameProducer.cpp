@@ -87,6 +87,32 @@ HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {
 				return;
 			}
 
+			{
+				const uint32_t maxInFlightFrameCount =
+					ScalingWindow::Get().Options().maxProducerInFlightFrames;
+
+				SmallVector<ID3D12Resource*, 3> inputs;
+				inputs.resize(maxInFlightFrameCount);
+				for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
+					inputs[i] = _frameSource->GetOutput(i);
+				}
+
+				SmallVector<ID3D12Resource*, 4> outputs;
+				const uint32_t frameBufferCount = maxInFlightFrameCount + 1;
+				outputs.resize(frameBufferCount);
+				for (uint32_t i = 0; i < frameBufferCount; ++i) {
+					outputs[i] = _frameRingBuffer.GetBuffer(i);
+				}
+
+				CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle(
+					_descriptorHeap->GetCPUDescriptorHandleForHeapStart());
+				CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle(
+					_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+				_catumullRomEffectDrawer.OnResize(
+					_inputSize, outputSize, inputs, outputs, descriptorCpuHandle, descriptorGpuHandle);
+			}
+
 			hr = _Render();
 			if (FAILED(hr)) {
 				Logger::Get().ComError("_Render 失败", hr);
@@ -266,6 +292,8 @@ bool FrameProducer::_Initialize(
 		}
 	}
 
+	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
 	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
 	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
 		Logger::Get().Error("初始化 GraphicsCaptureFrameSource2 失败");
@@ -280,7 +308,7 @@ bool FrameProducer::_Initialize(
 	// 初始化效果
 	uint32_t descriptorTotal;
 	HRESULT hr = _catumullRomEffectDrawer.Initialize(
-		_graphicsContext, _inputSize, _outputSize, true,
+		_graphicsContext, _descriptorSize, _inputSize, _outputSize, true,
 		EffectColorSpace::sRGB, EffectColorSpace::sRGB, maxInFlightFrameCount, maxInFlightFrameCount + 1, descriptorTotal);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CatumullRomEffectDrawer::Initialize 失败", hr);
@@ -305,8 +333,6 @@ bool FrameProducer::_Initialize(
 		}
 	}
 
-	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
 	{
 		SmallVector<ID3D12Resource*, 3> inputs;
 		inputs.resize(maxInFlightFrameCount);
@@ -327,7 +353,7 @@ bool FrameProducer::_Initialize(
 			_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
 		_catumullRomEffectDrawer.CreateDeviceResources(
-			inputs, outputs, descriptorCpuHandle, descriptorGpuHandle, _descriptorSize);
+			inputs, outputs, descriptorCpuHandle, descriptorGpuHandle);
 	}
 
 	{

@@ -9,6 +9,7 @@ namespace Magpie {
 
 HRESULT CatumullRomEffectDrawer::Initialize(
 	GraphicsContext& graphicsContext,
+	uint32_t descriptorSize,
 	Size inputSize,
 	Size outputSize,
 	bool isFirst,
@@ -21,6 +22,7 @@ HRESULT CatumullRomEffectDrawer::Initialize(
 	assert(!(isFirst && inputColorSpace == EffectColorSpace::linear_sRGB));
 
 	_graphicsContext = &graphicsContext;
+	_descriptorSize = descriptorSize;
 	_isFirst = isFirst;
 	_inputSize = inputSize;
 	_outputSize = outputSize;
@@ -103,15 +105,12 @@ HRESULT CatumullRomEffectDrawer::Initialize(
 	return S_OK;
 }
 
-HRESULT CatumullRomEffectDrawer::CreateDeviceResources(
+void CatumullRomEffectDrawer::CreateDeviceResources(
 	const SmallVectorImpl<ID3D12Resource*>& inputSlots,
 	const SmallVectorImpl<ID3D12Resource*>& outputSlots,
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
-	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
-	uint32_t descriptorSize
+	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle
 ) noexcept {
-	_descriptorSize = descriptorSize;
-
 	ID3D12Device5* device = _graphicsContext->GetDevice();
 
 	{
@@ -135,11 +134,11 @@ HRESULT CatumullRomEffectDrawer::CreateDeviceResources(
 				CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(format, 1);
 			device->CreateShaderResourceView(inputSlots[i], &desc, descriptorCpuHandle);
 
-			descriptorCpuHandle.Offset(1, descriptorSize);
+			descriptorCpuHandle.Offset(1, _descriptorSize);
 		}
 
 		_inputDescriptorBase = descriptorGpuHandle;
-		descriptorGpuHandle.Offset(inputSlotCount, descriptorSize);
+		descriptorGpuHandle.Offset(inputSlotCount, _descriptorSize);
 	}
 	
 	
@@ -158,17 +157,15 @@ HRESULT CatumullRomEffectDrawer::CreateDeviceResources(
 				CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(format);
 			device->CreateUnorderedAccessView(outputSlots[i], nullptr, &desc, descriptorCpuHandle);
 
-			descriptorCpuHandle.Offset(1, descriptorSize);
+			descriptorCpuHandle.Offset(1, _descriptorSize);
 		}
 
 		_outputDescriptorBase = descriptorGpuHandle;
-		descriptorGpuHandle.Offset(outputSlotCount, descriptorSize);
+		descriptorGpuHandle.Offset(outputSlotCount, _descriptorSize);
 	}
-
-	return S_OK;
 }
 
-HRESULT CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) noexcept {
+void CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) noexcept {
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
 
 	commandList->SetPipelineState(_pipelineState.get());
@@ -199,8 +196,20 @@ HRESULT CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) n
 		(_outputSize.height + BLOCK_SIZE - 1) / BLOCK_SIZE,
 		1
 	);
-	
-	return S_OK;
+}
+
+void CatumullRomEffectDrawer::OnResize(
+	Size inputSize,
+	Size outputSize,
+	const SmallVectorImpl<ID3D12Resource*>& inputSlots,
+	const SmallVectorImpl<ID3D12Resource*>& outputSlots,
+	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
+	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle
+) {
+	_inputSize = inputSize;
+	_outputSize = outputSize;
+
+	CreateDeviceResources(inputSlots, outputSlots, descriptorCpuHandle, descriptorGpuHandle);
 }
 
 }
