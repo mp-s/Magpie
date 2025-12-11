@@ -58,7 +58,7 @@ ScalingError Renderer2::Initialize(
 
 	_frameProducer = std::make_unique<FrameProducer>();
 	// 也会初始化 FrameRingBuffer
-	_frameProducer->InitializeAsync(_graphicsContext.GetDevice(), srcRect, hMonitor, _colorInfo);
+	_frameProducer->InitializeAsync(_graphicsContext.GetDevice(), srcRect, size, hMonitor, _colorInfo);
 
 	_presenter = std::make_unique<SwapChainPresenter>();
 	if (!_presenter->Initialize(_graphicsContext, hwndAttach, size, _colorInfo)) {

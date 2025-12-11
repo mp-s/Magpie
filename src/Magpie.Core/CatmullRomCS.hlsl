@@ -2,8 +2,8 @@
 
 cbuffer RootConstants : register(b0) {
 	uint2 inputSize;
+    uint2 outputSize;
 	float2 inputPt;
-	uint2 outputSize;
 	float2 outputPt;
 };
 
@@ -23,13 +23,20 @@ float4 weight4(float x) {
 	);
 }
 
+// 来自 https://github.com/GPUOpen-Effects/FidelityFX-FSR/blob/a21ffb8f6c13233ba336352bdff293894c706575/ffx-fsr/ffx_a.h#L2189-L2190
+float3 LinearToSrgb(float3 c) {
+    float3 j = { 0.0031308 * 12.92, 12.92, 1.0 / 2.4 };
+    float2 k = { 1.055, -0.055 };
+    return clamp(j.xxx, c * j.yyy, pow(c, j.zzz) * k.xxx + k.yyy);
+}
+
 float4 CatmullRom(float2 pos) {
 	pos *= inputSize;
 	float2 pos1 = floor(pos - 0.5) + 0.5;
 	float2 f = pos - pos1;
 
-	float4 rowtaps = weight4(1 - f.x);
-	float4 coltaps = weight4(1 - f.y);
+	float4 rowtaps = weight4(f.x);
+	float4 coltaps = weight4(f.y);
 	
 	float2 uv1 = pos1 * inputPt;
 	float2 uv0 = uv1 - inputPt;
@@ -62,7 +69,7 @@ float4 CatmullRom(float2 pos) {
 	bottom += input.Load(int3(coord_bottom_right, 0)).rgb * rowtaps.w;
 	total += bottom * coltaps.w;
 
-	return float4(total, 1);
+    return float4(LinearToSrgb(total), 1);
 }
 
 uint Bfe(uint src, uint off, uint bits) {

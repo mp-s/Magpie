@@ -985,9 +985,8 @@ static uint32_t ResolvePasses(SmallVector<std::string_view>& blocks, EffectDesc&
 							return 1;
 						}
 
-						// INPUT 和从文件读取的纹理不能作为输出。
-						// 只有最后一个通道能输出到 OUTPUT，这是为了方便截图。
-						if (it->second == 0 || it->second == 1 || !desc.textures[it->second].source.empty()) {
+						// INPUT 和从文件读取的纹理不能作为输出
+						if (it->second == 0 || !desc.textures[it->second].source.empty()) {
 							return 1;
 						}
 
@@ -1119,6 +1118,10 @@ static uint32_t ResolvePasses(SmallVector<std::string_view>& blocks, EffectDesc&
 		if (passDesc.desc.empty()) {
 			passDesc.desc = fmt::format("Pass {}", i + 1);
 		}
+
+		// 排序输入和输出纹理以便于渲染
+		std::sort(passDesc.inputs.begin(), passDesc.inputs.end());
+		std::sort(passDesc.outputs.begin(), passDesc.outputs.end());
 	}
 
 	return 0;

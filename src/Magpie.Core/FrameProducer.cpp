@@ -33,6 +33,7 @@ FrameProducer::~FrameProducer() noexcept {
 void FrameProducer::InitializeAsync(
 	ID3D12Device5* device,
 	const RECT& srcRect,
+	Size rendererSize,
 	HMONITOR hMonSrc,
 	const ColorInfo& colorInfo
 ) noexcept {
@@ -41,6 +42,7 @@ void FrameProducer::InitializeAsync(
 		this,
 		device,
 		srcRect,
+		rendererSize,
 		hMonSrc,
 		colorInfo
 	);
@@ -64,7 +66,7 @@ bool FrameProducer::ConsumerBeginFrame(
 	return _frameRingBuffer.ConsumerBeginFrame(buffer, fenceToSignal, fenceValueToSignal);
 }
 
-HRESULT FrameProducer::OnResized(Size /*size*/, Size& outputSize) noexcept {
+HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {
 	HRESULT hr = S_OK;
 	std::atomic<bool> done = false;
 
@@ -76,7 +78,7 @@ HRESULT FrameProducer::OnResized(Size /*size*/, Size& outputSize) noexcept {
 				return;
 			}
 
-			_outputSize = _inputSize;
+			_outputSize = rendererSize;
 			outputSize = _outputSize;
 
 			hr = _frameRingBuffer.OnResized(_outputSize);
@@ -142,6 +144,7 @@ HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 void FrameProducer::_ThreadProc(
 	ID3D12Device5* device,
 	RECT srcRect,
+	Size rendererSize,
 	HMONITOR hMonSrc,
 	ColorInfo colorInfo
 ) noexcept {
@@ -149,7 +152,7 @@ void FrameProducer::_ThreadProc(
 	SetThreadDescription(GetCurrentThread(), L"Magpie-缩放生产者线程");
 #endif
 
-	if (_Initialize(device, srcRect, hMonSrc, colorInfo)) {
+	if (_Initialize(device, srcRect, rendererSize, hMonSrc, colorInfo)) {
 		_state.store(ComponentState::NoError, std::memory_order_release);
 		_state.notify_one();
 	} else {
@@ -221,6 +224,7 @@ void FrameProducer::_ThreadProc(
 bool FrameProducer::_Initialize(
 	ID3D12Device5* device,
 	const RECT& srcRect,
+	Size rendererSize,
 	HMONITOR hMonSrc,
 	const ColorInfo& colorInfo
 ) noexcept {
@@ -262,43 +266,68 @@ bool FrameProducer::_Initialize(
 		}
 	}
 
-	// 初始化效果
-	HRESULT hr = _catumullRomEffectDrawer.Initialize(_graphicsContext);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CatumullRomEffectDrawer::Initialize 失败", hr);
+	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
+	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
+		Logger::Get().Error("初始化 GraphicsCaptureFrameSource2 失败");
 		return false;
 	}
 
 	_inputSize.width = srcRect.right - srcRect.left;
 	_inputSize.height = srcRect.bottom - srcRect.top;
-	_outputSize = _inputSize;
+
+	_outputSize = rendererSize;
+
+	// 初始化效果
+	uint32_t descriptorTotal;
+	HRESULT hr = _catumullRomEffectDrawer.Initialize(
+		_graphicsContext, _inputSize, _outputSize, true,
+		EffectColorSpace::sRGB, EffectColorSpace::sRGB, maxInFlightFrameCount, maxInFlightFrameCount + 1, descriptorTotal);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CatumullRomEffectDrawer::Initialize 失败", hr);
+		return false;
+	}
 
 	if (!_frameRingBuffer.Initialize(device, _outputSize, colorInfo)) {
 		Logger::Get().Error("初始化 FrameRingBuffer 失败");
 		return false;
 	}
 
-	const uint32_t frameBufferCount = maxInFlightFrameCount + 1;
-
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {
 			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-			.NumDescriptors = frameBufferCount,
+			.NumDescriptors = descriptorTotal,
 			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
 		};
-		hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_descHeap));
+		hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_descriptorHeap));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
 			return false;
 		}
-
-		_srvUavDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	}
 
-	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
-	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
-		Logger::Get().Error("初始化 GraphicsCaptureFrameSource2 失败");
-		return false;
+	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+	{
+		SmallVector<ID3D12Resource*, 3> inputs;
+		inputs.resize(maxInFlightFrameCount);
+		for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
+			inputs[i] = _frameSource->GetOutput(i);
+		}
+
+		SmallVector<ID3D12Resource*, 4> outputs;
+		const uint32_t frameBufferCount = maxInFlightFrameCount + 1;
+		outputs.resize(frameBufferCount);
+		for (uint32_t i = 0; i < frameBufferCount; ++i) {
+			outputs[i] = _frameRingBuffer.GetBuffer(i);
+		}
+
+		CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle(
+			_descriptorHeap->GetCPUDescriptorHandleForHeapStart());
+		CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle(
+			_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+		_catumullRomEffectDrawer.CreateDeviceResources(
+			inputs, outputs, descriptorCpuHandle, descriptorGpuHandle, _descriptorSize);
 	}
 
 	{
@@ -354,20 +383,11 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 
-	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
-	ID3D12Resource* curBuffer;
-	hr = _frameRingBuffer.ProducerBeginFrame(curBuffer, commandQueue);
+	uint32_t frameRingBufferIdx;
+	hr = _frameRingBuffer.ProducerBeginFrame(frameRingBufferIdx, commandQueue);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("FrameRingBuffer::ProducerBeginFrame 失败", hr);
 		return hr;
-	}
-
-	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
-
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			curBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0);
-		commandList->ResourceBarrier(1, &barrier);
 	}
 
 	uint32_t frameSourceOutputIdx;
@@ -379,25 +399,34 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	// 处于 COMMON 状态，使用结束后也应处于此状态
 	ID3D12Resource* input = _frameSource->GetOutput(frameSourceOutputIdx);
+	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
+	ID3D12Resource* output = _frameRingBuffer.GetBuffer(frameRingBufferIdx);
+
+	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				input, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE, 0),
+				input, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, 0),
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				curBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST, 0)
+				output, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0)
 		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
-	commandList->CopyResource(curBuffer, input);
+	{
+		ID3D12DescriptorHeap* t = _descriptorHeap.get();
+		commandList->SetDescriptorHeaps(1, &t);
+	}
+
+	_catumullRomEffectDrawer.Draw(frameSourceOutputIdx, frameRingBufferIdx);
 
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				input, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON, 0),
+				input, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON, 0),
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				curBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
+				output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
 		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}

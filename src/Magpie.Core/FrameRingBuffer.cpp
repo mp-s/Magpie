@@ -43,7 +43,7 @@ ID3D12Resource* FrameRingBuffer::GetBuffer(uint32_t index) noexcept {
 }
 
 HRESULT FrameRingBuffer::ProducerBeginFrame(
-	ID3D12Resource*& buffer,
+	uint32_t& bufferIdx,
 	ID3D12CommandQueue* commandQueue
 ) noexcept {
 	auto lk = _lock.lock_exclusive();
@@ -58,7 +58,7 @@ HRESULT FrameRingBuffer::ProducerBeginFrame(
 		}
 	}
 
-	buffer = curSlot.resource.get();
+	bufferIdx = _curProducerIdx;
 	return S_OK;
 }
 

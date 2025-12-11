@@ -15,7 +15,7 @@ public:
 
 	ID3D12Resource* GetBuffer(uint32_t index) noexcept;
 
-	HRESULT ProducerBeginFrame(ID3D12Resource*& buffer, ID3D12CommandQueue* commandQueue) noexcept;
+	HRESULT ProducerBeginFrame(uint32_t& bufferIdx, ID3D12CommandQueue* commandQueue) noexcept;
 
 	HRESULT ProducerEndFrame(ID3D12CommandQueue* commandQueue) noexcept;
 

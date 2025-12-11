@@ -20,6 +20,7 @@ public:
 	void InitializeAsync(
 		ID3D12Device5* device,
 		const RECT& srcRect,
+		Size rendererSize,
 		HMONITOR hMonSrc,
 		const ColorInfo& colorInfo
 	) noexcept;
@@ -32,7 +33,7 @@ public:
 		UINT64& fenceValueToSignal
 	) noexcept;
 
-	HRESULT OnResized(Size size, Size& outputSize) noexcept;
+	HRESULT OnResized(Size rendererSize, Size& outputSize) noexcept;
 
 	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
@@ -40,6 +41,7 @@ private:
 	void _ThreadProc(
 		ID3D12Device5* device,
 		RECT srcRect,
+		Size rendererSize,
 		HMONITOR hMonSrc,
 		ColorInfo colorInfo
 	) noexcept;
@@ -47,6 +49,7 @@ private:
 	bool _Initialize(
 		ID3D12Device5* device,
 		const RECT& srcRect,
+		Size rendererSize,
 		HMONITOR hMonSrc,
 		const ColorInfo& colorInfo
 	) noexcept;
@@ -63,8 +66,8 @@ private:
 	StepTimer _stepTimer;
 	std::unique_ptr<GraphicsCaptureFrameSource2> _frameSource;
 
-	winrt::com_ptr<ID3D12DescriptorHeap> _descHeap;
-	uint32_t _srvUavDescriptorSize = 0;
+	winrt::com_ptr<ID3D12DescriptorHeap> _descriptorHeap;
+	uint32_t _descriptorSize = 0;
 
 	CatumullRomEffectDrawer _catumullRomEffectDrawer;
 	

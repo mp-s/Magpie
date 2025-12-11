@@ -19,6 +19,9 @@
     <Filter Include="Presenter">
       <UniqueIdentifier>{bf1f1896-560d-4f37-9c3a-891b7c9cd2af}</UniqueIdentifier>
     </Filter>
+    <Filter Include="EffectDrawer">
+      <UniqueIdentifier>{ae93c055-e8c1-41c3-ba76-3422dac27328}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
@@ -83,9 +86,6 @@
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="DeviceResources.h">
-      <Filter>Render</Filter>
-    </ClInclude>
-    <ClInclude Include="EffectDrawer.h">
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="ExclModeHelper.h">
@@ -154,6 +154,15 @@
     </ClInclude>
     <ClInclude Include="FrameRingBuffer.h">
       <Filter>Render</Filter>
+    </ClInclude>
+    <ClInclude Include="EffectDrawer.h">
+      <Filter>Render</Filter>
+    </ClInclude>
+    <ClInclude Include="EffectDrawerBase.h">
+      <Filter>EffectDrawer</Filter>
+    </ClInclude>
+    <ClInclude Include="CatumullRomEffectDrawer.h">
+      <Filter>EffectDrawer</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -263,6 +272,9 @@
     </ClCompile>
     <ClCompile Include="FrameRingBuffer.cpp">
       <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="CatumullRomEffectDrawer.cpp">
+      <Filter>EffectDrawer</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
