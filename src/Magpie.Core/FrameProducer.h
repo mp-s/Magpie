@@ -27,6 +27,8 @@ public:
 
 	bool WaitForInitialize(Size& outputSize) noexcept;
 
+	uint64_t GetFrameNumber() noexcept;
+
 	bool ConsumerBeginFrame(
 		ID3D12Resource*& buffer,
 		ID3D12Fence1*& fenceToSignal,
@@ -38,7 +40,7 @@ public:
 	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
-	void _ThreadProc(
+	void _ProducerThreadProc(
 		ID3D12Device5* device,
 		RECT srcRect,
 		Size rendererSize,
@@ -56,10 +58,14 @@ private:
 
 	HRESULT _Render() noexcept;
 
+	void _MonitorThreadProc() noexcept;
+
 	std::atomic<ComponentState> _state = ComponentState::Initializing;
 
-	std::thread _thread;
+	std::thread _producerThread;
 	winrt::DispatcherQueue _dispatcher{ nullptr };
+
+	std::thread _monitorThread;
 
 	GraphicsContext _graphicsContext;
 	FrameRingBuffer _frameRingBuffer;

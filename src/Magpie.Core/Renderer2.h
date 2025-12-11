@@ -47,7 +47,7 @@ private:
 
 	HRESULT _UpdateColorSpace() noexcept;
 
-	HRESULT _RenderImpl(bool waitForGpu = false, bool* waitingForFirstFrame = nullptr) noexcept;
+	HRESULT _RenderImpl(bool waitForGpu = false) noexcept;
 
 	void _UpdateOutputRect(Size outputSize) noexcept;
 
@@ -69,6 +69,8 @@ private:
 	
 	HMONITOR _hCurMonitor = NULL;
 	ColorInfo _colorInfo;
+
+	uint64_t _curProducerFrameNumber = 0;
 };
 
 }

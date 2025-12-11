@@ -10,11 +10,11 @@
 namespace Magpie {
 
 FrameProducer::~FrameProducer() noexcept {
-	if (_thread.joinable()) {
-		const HANDLE hThread = _thread.native_handle();
+	if (_producerThread.joinable()) {
+		const HANDLE hThread = _producerThread.native_handle();
 
 		if (!wil::handle_wait(hThread, 0)) {
-			const DWORD threadId = GetThreadId(_thread.native_handle());
+			const DWORD threadId = GetThreadId(_producerThread.native_handle());
 
 			while (true) {
 				// 持续尝试直到 _producerThread 创建了消息队列
@@ -26,7 +26,7 @@ FrameProducer::~FrameProducer() noexcept {
 			}
 		}
 
-		_thread.join();
+		_producerThread.join();
 	}
 }
 
@@ -37,8 +37,8 @@ void FrameProducer::InitializeAsync(
 	HMONITOR hMonSrc,
 	const ColorInfo& colorInfo
 ) noexcept {
-	_thread = std::thread(
-		&FrameProducer::_ThreadProc,
+	_producerThread = std::thread(
+		&FrameProducer::_ProducerThreadProc,
 		this,
 		device,
 		srcRect,
@@ -56,6 +56,10 @@ bool FrameProducer::WaitForInitialize(Size& outputSize) noexcept {
 	} else {
 		return false;
 	}
+}
+
+uint64_t FrameProducer::GetFrameNumber() noexcept {
+	return _frameRingBuffer.GetFrameNumber();
 }
 
 bool FrameProducer::ConsumerBeginFrame(
@@ -167,7 +171,7 @@ HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 	return hr;
 }
 
-void FrameProducer::_ThreadProc(
+void FrameProducer::_ProducerThreadProc(
 	ID3D12Device5* device,
 	RECT srcRect,
 	Size rendererSize,
@@ -245,6 +249,25 @@ void FrameProducer::_ThreadProc(
 	_graphicsContext.WaitForGpu();
 	// 必须在创建线程释放
 	_frameSource.reset();
+
+	if (_monitorThread.joinable()) {
+		const HANDLE hThread = _monitorThread.native_handle();
+
+		if (!wil::handle_wait(hThread, 0)) {
+			const DWORD threadId = GetThreadId(_monitorThread.native_handle());
+
+			while (true) {
+				// 持续尝试直到创建了消息队列
+				PostThreadMessage(threadId, WM_QUIT, 0, 0);
+
+				if (wil::handle_wait(hThread, 1)) {
+					break;
+				}
+			}
+		}
+
+		_monitorThread.join();
+	}
 }
 
 bool FrameProducer::_Initialize(
@@ -307,9 +330,11 @@ bool FrameProducer::_Initialize(
 
 	// 初始化效果
 	uint32_t descriptorTotal;
+	EffectColorSpace colorSpace = colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
+		EffectColorSpace::sRGB : EffectColorSpace::scRGB;
 	HRESULT hr = _catumullRomEffectDrawer.Initialize(
 		_graphicsContext, _descriptorSize, _inputSize, _outputSize, true,
-		EffectColorSpace::sRGB, EffectColorSpace::sRGB, maxInFlightFrameCount, maxInFlightFrameCount + 1, descriptorTotal);
+		colorSpace, colorSpace, maxInFlightFrameCount, maxInFlightFrameCount + 1, descriptorTotal);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CatumullRomEffectDrawer::Initialize 失败", hr);
 		return false;
@@ -387,6 +412,8 @@ bool FrameProducer::_Initialize(
 			? std::numeric_limits<float>::max() : options.minFrameRate;
 		_stepTimer.Initialize(minFrameRate, maxFrameRate);
 	}
+
+	_monitorThread = std::thread(&FrameProducer::_MonitorThreadProc, this);
 
 	// 最后启动捕获以尽可能推迟显示黄色边框 (Win10) 或禁用圆角 (Win11)
 	if (!_frameSource->Start()) {
@@ -478,6 +505,47 @@ HRESULT FrameProducer::_Render() noexcept {
 	}
 
 	return S_OK;
+}
+
+void FrameProducer::_MonitorThreadProc() noexcept {
+	wil::unique_event_nothrow event;
+	if (!event.try_create(wil::EventOptions::None, nullptr)) {
+		Logger::Get().Win32Error("创建事件失败");
+		return;
+	}
+
+	uint64_t fenceValue = 1;
+
+	// 绑定新帧渲染完成时触发的事件
+	HRESULT hr = _frameRingBuffer.SetEventOnNewFrame(fenceValue, event.get());
+	if (FAILED(hr)) {
+		Logger::Get().ComError("FrameRingBuffer::SetEventOnNewFrame 失败", hr);
+		return;
+	}
+
+	MSG msg;
+	while (true) {
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				return;
+			}
+
+			DispatchMessage(&msg);
+		}
+
+		// 有新帧可用时返回 WAIT_OBJECT_0，有新消息时返回 WAIT_OBJECT_0 + 1
+		HANDLE hEvent = event.get();
+		if (MsgWaitForMultipleObjectsEx(1, &hEvent, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE) == WAIT_OBJECT_0) {
+			// 通知消费者渲染
+			PostMessage(ScalingWindow::Get().Handle(), CommonSharedConstants::WM_FRONTEND_RENDER, 0, 0);
+
+			hr = _frameRingBuffer.SetEventOnNewFrame(fenceValue, event.get());
+			if (FAILED(hr)) {
+				Logger::Get().ComError("FrameRingBuffer::SetEventOnNewFrame 失败", hr);
+				return;
+			}
+		}
+	}
 }
 
 }

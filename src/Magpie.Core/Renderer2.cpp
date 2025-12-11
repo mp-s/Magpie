@@ -40,7 +40,7 @@ ScalingError Renderer2::Initialize(
 	_hCurMonitor = hMonitor;
 
 	const ScalingOptions& options = ScalingWindow::Get().Options();
-	if (!_graphicsContext.Initialize(options.graphicsCardId, options.Is3DGameMode() ? 4 : 8, D3D12_COMMAND_LIST_TYPE_DIRECT)) {
+	if (!_graphicsContext.Initialize(options.graphicsCardId, options.Is3DGameMode() ? 2 : 6, D3D12_COMMAND_LIST_TYPE_DIRECT)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -78,9 +78,24 @@ ScalingError Renderer2::Initialize(
 }
 
 ComponentState Renderer2::Render(bool waitForGpu, bool* waitingForFirstFrame) noexcept {
-	if (_state == ComponentState::NoError) {
-		_CheckResult(_RenderImpl(waitForGpu, waitingForFirstFrame), "_RenderImpl 失败");
+	assert(!waitingForFirstFrame || !*waitingForFirstFrame);
+
+	if (_state != ComponentState::NoError) {
+		return _state;
 	}
+
+	uint64_t newFrameNumber = _frameProducer->GetFrameNumber();
+	if (newFrameNumber == _curProducerFrameNumber) {
+		if (waitingForFirstFrame && newFrameNumber == 0) {
+			*waitingForFirstFrame = true;
+		}
+
+		return _state;
+	} else {
+		_curProducerFrameNumber = newFrameNumber;
+	}
+
+	_CheckResult(_RenderImpl(waitForGpu), "_RenderImpl 失败");
 	return _state;
 }
 
@@ -284,18 +299,14 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 	return S_OK;
 }
 
-HRESULT Renderer2::_RenderImpl(bool waitForGpu, bool* waitingForFirstFrame) noexcept {
-	assert(!waitingForFirstFrame || !*waitingForFirstFrame);
-
+HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
 	ID3D12Fence1* fenceToSignal;
 	UINT64 fenceValueToSignal;
 	if (!_frameProducer->ConsumerBeginFrame(curBuffer, fenceToSignal, fenceValueToSignal)) {
-		if (waitingForFirstFrame) {
-			*waitingForFirstFrame = true;
-		}
-
+		// 不应出现第一帧未完成的情况
+		assert(false);
 		return S_OK;
 	}
 

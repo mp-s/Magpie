@@ -148,6 +148,22 @@ bool FrameRingBuffer::ConsumerBeginFrame(
 	return true;
 }
 
+HRESULT FrameRingBuffer::SetEventOnNewFrame(uint64_t& fenceValue, HANDLE hEvent) noexcept {
+	HRESULT hr = _producerFence->SetEventOnCompletion(fenceValue, hEvent);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12Fence::SetEventOnCompletion 失败", hr);
+		return hr;
+	}
+
+	// 下一个要等待的值
+	fenceValue = std::max(_producerFence->GetCompletedValue(), fenceValue) + 1;
+	return S_OK;
+}
+
+uint64_t FrameRingBuffer::GetFrameNumber() noexcept {
+	return _producerFence->GetCompletedValue();
+}
+
 HRESULT FrameRingBuffer::OnResized(Size size) noexcept {
 	_size = size;
 

@@ -25,6 +25,10 @@ public:
 		UINT64& fenceValueToSignal
 	) noexcept;
 
+	HRESULT SetEventOnNewFrame(uint64_t& fenceValue, HANDLE hEvent) noexcept;
+
+	uint64_t GetFrameNumber() noexcept;
+
 	HRESULT OnResized(Size size) noexcept;
 
 	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
