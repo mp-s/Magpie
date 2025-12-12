@@ -29,11 +29,12 @@ public:
 
 	uint64_t GetLatestFrameNumber() const noexcept;
 
-	bool ConsumerBeginFrame(
-		ID3D12Resource*& buffer,
-		ID3D12Fence1*& fenceToSignal,
-		UINT64& fenceValueToSignal
-	) noexcept;
+	bool ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept;
+
+	HRESULT ConsumerEndFrame(
+		ID3D12CommandQueue* commandQueue,
+		UINT64 fenceValueToSignal
+	) const noexcept;
 
 	HRESULT OnResized(Size rendererSize, Size& outputSize) noexcept;
 

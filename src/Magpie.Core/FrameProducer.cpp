@@ -62,12 +62,15 @@ uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
 	return _frameRingBuffer.GetLatestFrameNumber();
 }
 
-bool FrameProducer::ConsumerBeginFrame(
-	ID3D12Resource*& buffer,
-	ID3D12Fence1*& fenceToSignal,
-	UINT64& fenceValueToSignal
-) noexcept {
-	return _frameRingBuffer.ConsumerBeginFrame(buffer, fenceToSignal, fenceValueToSignal);
+bool FrameProducer::ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept {
+	return _frameRingBuffer.ConsumerBeginFrame(buffer, fenceValueToSignal);
+}
+
+HRESULT FrameProducer::ConsumerEndFrame(
+	ID3D12CommandQueue* commandQueue,
+	UINT64 fenceValueToSignal
+) const noexcept {
+	return _frameRingBuffer.ConsumerEndFrame(commandQueue, fenceValueToSignal);
 }
 
 HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {

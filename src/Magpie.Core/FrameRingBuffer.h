@@ -19,11 +19,12 @@ public:
 
 	HRESULT ProducerEndFrame(ID3D12CommandQueue* commandQueue) noexcept;
 
-	bool ConsumerBeginFrame(
-		ID3D12Resource*& buffer,
-		ID3D12Fence1*& fenceToSignal,
-		UINT64& fenceValueToSignal
-	) noexcept;
+	bool ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept;
+
+	HRESULT ConsumerEndFrame(
+		ID3D12CommandQueue* commandQueue,
+		UINT64 fenceValueToSignal
+	) const noexcept;
 
 	HRESULT SetEventOnNewFrame(uint64_t& frameNumber, HANDLE hEvent) const noexcept;
 

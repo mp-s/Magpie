@@ -50,3 +50,21 @@ static uint32_t Measure(const Fn& func) noexcept {
 
 	return (uint32_t)dura.count();
 }
+
+#ifdef _DEBUG
+static inline struct {
+	// 启用 GPU-based validation
+	bool enableGPUBasedValidation = false;
+	// 模拟低速 GPU
+	float gpuSlowDownFactor = 0.0f;
+
+	// 用于同步对下面成员的访问
+	wil::srwlock lock;
+	// 生产者当前帧序号
+	uint32_t producerFrameNumber = 0;
+	// 消费者者当前帧序号
+	uint32_t consumerFrameNumber = 0;
+	// 消费者落后生产者的帧数
+	uint32_t consumerLatency = 0;
+} DEBUG_INFO;
+#endif

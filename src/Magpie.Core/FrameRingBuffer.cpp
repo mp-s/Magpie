@@ -34,6 +34,15 @@ bool FrameRingBuffer::Initialize(ID3D12Device5* device, Size size, const ColorIn
 		return false;
 	}
 
+#ifdef _DEBUG
+	{
+		auto debugLock = DEBUG_INFO.lock.lock_exclusive();
+		DEBUG_INFO.producerFrameNumber = 1;
+		DEBUG_INFO.consumerFrameNumber = 0;
+		DEBUG_INFO.consumerLatency = DEBUG_INFO.producerFrameNumber - DEBUG_INFO.consumerFrameNumber;
+	}
+#endif
+
 	return true;
 }
 
@@ -99,14 +108,18 @@ HRESULT FrameRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noex
 	_curProducerIdx = nextProducerSlot;
 	_slots[nextProducerSlot].producerFenceValue = nextFenceValue;
 
+#ifdef _DEBUG
+	{
+		auto debugLock = DEBUG_INFO.lock.lock_exclusive();
+		// 在这里计算的 consumerLatency 不准确
+		DEBUG_INFO.producerFrameNumber = (uint32_t)nextFenceValue;
+	}
+#endif
+
 	return S_OK;
 }
 
-bool FrameRingBuffer::ConsumerBeginFrame(
-	ID3D12Resource*& buffer,
-	ID3D12Fence1*& fenceToSignal,
-	UINT64& fenceValueToSignal
-) noexcept {
+bool FrameRingBuffer::ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept {
 	auto lk = _lock.lock_exclusive();
 
 	if (_curConsumerIdx != _curProducerIdx) {
@@ -138,14 +151,33 @@ bool FrameRingBuffer::ConsumerBeginFrame(
 		}
 	}
 
-	fenceToSignal = _consumerFence.get();
-
 	_FrameResourceSlot& curSlot = _slots[_curConsumerIdx];
 	fenceValueToSignal = ++_curConsumerFenceValue;
 	curSlot.consumerFenceValue = fenceValueToSignal;
 
 	buffer = curSlot.resource.get();
 	return true;
+}
+
+HRESULT FrameRingBuffer::ConsumerEndFrame(
+	ID3D12CommandQueue* commandQueue,
+	UINT64 fenceValueToSignal
+) const noexcept {
+	HRESULT hr = commandQueue->Signal(_consumerFence.get(), fenceValueToSignal);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
+		return hr;
+	}
+
+#ifdef _DEBUG
+	{
+		auto debugLock = DEBUG_INFO.lock.lock_exclusive();
+		DEBUG_INFO.consumerFrameNumber = (uint32_t)_slots[_curConsumerIdx].producerFenceValue;
+		DEBUG_INFO.consumerLatency = DEBUG_INFO.producerFrameNumber - DEBUG_INFO.consumerFrameNumber;
+	}
+#endif
+
+	return S_OK;
 }
 
 HRESULT FrameRingBuffer::SetEventOnNewFrame(uint64_t& frameNumber, HANDLE hEvent) const noexcept {

@@ -45,6 +45,26 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
+#ifdef _DEBUG
+	// 模拟低速 GPU
+	{
+		winrt::com_ptr<ID3D12DebugDevice1> debugDevice;
+		HRESULT hr = _graphicsContext.GetDevice()->QueryInterface<ID3D12DebugDevice1>(debugDevice.put());
+		if (SUCCEEDED(hr)) {
+			D3D12_DEBUG_DEVICE_GPU_SLOWDOWN_PERFORMANCE_FACTOR value = {
+				.SlowdownFactor = DEBUG_INFO.gpuSlowDownFactor
+			};
+			hr = debugDevice->SetDebugParameter(
+				D3D12_DEBUG_DEVICE_PARAMETER_GPU_SLOWDOWN_PERFORMANCE_FACTOR, &value, sizeof(value));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("ID3D12DebugDevice1::SetDebugParameter 失败", hr);
+			}
+		} else {
+			Logger::Get().ComError("获取 ID3D12DebugDevice1 失败", hr);
+		}
+	}
+#endif
+
 	// 每次创建 D3D 设备后尝试提高 GPU 优先级，OBS 也是这么做的
 	SetGpuPriority();
 
@@ -304,9 +324,8 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
-	ID3D12Fence1* fenceToSignal;
 	UINT64 fenceValueToSignal;
-	if (!_frameProducer->ConsumerBeginFrame(curBuffer, fenceToSignal, fenceValueToSignal)) {
+	if (!_frameProducer->ConsumerBeginFrame(curBuffer, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -373,9 +392,9 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
 
-	hr = commandQueue->Signal(fenceToSignal, fenceValueToSignal);
+	hr =_frameProducer->ConsumerEndFrame(commandQueue, fenceValueToSignal);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
+		Logger::Get().ComError("FrameProducer::ConsumerEndFrame 失败", hr);
 		return hr;
 	}
 

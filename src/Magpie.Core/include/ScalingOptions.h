@@ -203,7 +203,7 @@ struct ScalingOptions {
 	CursorInterpolationMode cursorInterpolationMode = CursorInterpolationMode::NearestNeighbor;
 	std::optional<float> autoHideCursorDelay;
 	DuplicateFrameDetectionMode duplicateFrameDetectionMode = DuplicateFrameDetectionMode::Dynamic;
-	uint32_t maxProducerInFlightFrames = 3;
+	uint32_t maxProducerInFlightFrames = 2;
 	ToolbarState fullscreenInitialToolbarState = ToolbarState::AutoHide;
 	ToolbarState windowedInitialToolbarState = ToolbarState::AutoHide;
 	float initialWindowedScaleFactor = 0.0f;
