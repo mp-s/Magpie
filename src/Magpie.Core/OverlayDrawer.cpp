@@ -900,7 +900,7 @@ bool OverlayDrawer::_DrawToolbar(uint32_t fps, int& itemId) noexcept {
 	return needRedraw;
 }
 
-#ifdef MP_DEBUG_INFO_ON_OVERLAY
+#ifdef MP_DEBUG_INFO
 static std::string RectToStr(const RECT& rect) noexcept {
 	return fmt::format("{},{},{},{} ({}x{})",
 		rect.left, rect.top, rect.right, rect.bottom,
@@ -1039,7 +1039,7 @@ bool OverlayDrawer::_DrawProfiler(const SmallVector<float>& effectTimings, uint3
 		showPasses = false;
 	}
 
-#ifdef MP_DEBUG_INFO_ON_OVERLAY
+#ifdef MP_DEBUG_INFO
 	ImGui::Spacing();
 	if (ImGui::CollapsingHeader("调试信息", ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::TextUnformatted(StrHelper::Concat("源矩形: ",

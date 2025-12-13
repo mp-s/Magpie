@@ -34,15 +34,6 @@ bool FrameRingBuffer::Initialize(ID3D12Device5* device, Size size, const ColorIn
 		return false;
 	}
 
-#ifdef _DEBUG
-	{
-		auto debugLock = DEBUG_INFO.lock.lock_exclusive();
-		DEBUG_INFO.producerFrameNumber = 1;
-		DEBUG_INFO.consumerFrameNumber = 0;
-		DEBUG_INFO.consumerLatency = DEBUG_INFO.producerFrameNumber - DEBUG_INFO.consumerFrameNumber;
-	}
-#endif
-
 	return true;
 }
 
@@ -108,7 +99,7 @@ HRESULT FrameRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noex
 	_curProducerIdx = nextProducerSlot;
 	_slots[nextProducerSlot].producerFenceValue = nextFenceValue;
 
-#ifdef _DEBUG
+#ifdef MP_DEBUG_INFO
 	{
 		auto debugLock = DEBUG_INFO.lock.lock_exclusive();
 		// 在这里计算的 consumerLatency 不准确
@@ -169,7 +160,7 @@ HRESULT FrameRingBuffer::ConsumerEndFrame(
 		return hr;
 	}
 
-#ifdef _DEBUG
+#ifdef MP_DEBUG_INFO
 	{
 		auto debugLock = DEBUG_INFO.lock.lock_exclusive();
 		DEBUG_INFO.consumerFrameNumber = (uint32_t)_slots[_curConsumerIdx].producerFenceValue;

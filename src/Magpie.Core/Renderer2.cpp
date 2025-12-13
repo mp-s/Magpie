@@ -39,13 +39,23 @@ ScalingError Renderer2::Initialize(
 ) noexcept {
 	_hCurMonitor = hMonitor;
 
+#ifdef MP_DEBUG_INFO
+	{
+		auto lk = DEBUG_INFO.lock.lock_exclusive();
+
+		DEBUG_INFO.producerFrameNumber = 1;
+		DEBUG_INFO.consumerFrameNumber = 0;
+		DEBUG_INFO.consumerLatency = DEBUG_INFO.producerFrameNumber - DEBUG_INFO.consumerFrameNumber;
+	}
+#endif
+
 	const ScalingOptions& options = ScalingWindow::Get().Options();
 	if (!_graphicsContext.Initialize(options.graphicsCardId, options.Is3DGameMode() ? 2 : 6, D3D12_COMMAND_LIST_TYPE_DIRECT)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-#ifdef _DEBUG
+#if defined(_DEBUG) && defined(MP_DEBUG_INFO)
 	// 模拟低速 GPU
 	{
 		winrt::com_ptr<ID3D12DebugDevice1> debugDevice;

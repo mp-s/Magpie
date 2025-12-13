@@ -390,6 +390,16 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 
 	_FrameResourceSlot& curSlot = _slots[_curFrameIdx];
 
+#ifdef MP_DEBUG_INFO
+	{
+		auto lk = DEBUG_INFO.lock.lock_exclusive();
+		if (DEBUG_INFO.dtmCaptureQPC == 0) {
+			DEBUG_INFO.dtmCaptureQPC = curSlot.captureFrame.SystemRelativeTime().count();
+			DEBUG_INFO.dtmFrameNumer = DEBUG_INFO.producerFrameNumber;
+		}
+	}
+#endif
+
 	HRESULT hr = GetFrameResourceFromCaptureFrame(
 		curSlot.captureFrame,
 		_bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice(),

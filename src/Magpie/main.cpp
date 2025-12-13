@@ -26,15 +26,16 @@
 #endif
 #include <dxgi1_6.h>
 
-#ifdef _DEBUG
-
 // Debug 配置下使用 Agility SDK 辅助调试
+#ifdef _DEBUG
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
+#endif
 
 // 用于辅助开发和调试
+#ifdef MP_DEBUG_INFO
 static Ignore _ = [] {
-	DEBUG_INFO.enableGPUBasedValidation = false;
+	DEBUG_INFO.enableGPUBasedValidation = true;
 	DEBUG_INFO.gpuSlowDownFactor = 0.0f;
 	return Ignore();
 }();
@@ -73,10 +74,12 @@ static void InitializeDirectX() noexcept {
 		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
 			debugController->EnableDebugLayer();
 			
+#ifdef MP_DEBUG_INFO
 			if (DEBUG_INFO.enableGPUBasedValidation) {
 				// 会产生警告消息，而且有严重内存泄露
 				debugController->SetEnableGPUBasedValidation(TRUE);
 			}
+#endif
 
 			// Win11 开始支持生成默认名字，包含资源的基本属性
 			if (winrt::com_ptr<ID3D12Debug5> debugController5 = debugController.try_as<ID3D12Debug5>()) {

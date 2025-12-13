@@ -963,6 +963,17 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 
 		// 广播停止缩放
 		PostMessage(HWND_BROADCAST, WM_MAGPIE_SCALINGCHANGED, 0, 0);
+
+#ifdef MP_DEBUG_INFO
+		{
+			auto lk = DEBUG_INFO.lock.lock_exclusive();
+
+			DEBUG_INFO.dtmCaptureQPC = 0;
+			DEBUG_INFO.dtmFrameNumer = 0;
+			DEBUG_INFO.dtmSwapChainRefreshCount = 0;
+			DEBUG_INFO.dwmToMagpieLatency = 0;
+		}
+#endif
 		break;
 	}
 	}

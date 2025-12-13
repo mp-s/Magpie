@@ -184,6 +184,52 @@ static void WaitForDwmComposition() noexcept {
 }
 
 HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
+#ifdef MP_DEBUG_INFO
+	if (DEBUG_INFO.dtmCaptureQPC != 0) {
+		auto lk = DEBUG_INFO.lock.lock_exclusive();
+
+		bool restartMeasure = false;
+		if (DEBUG_INFO.dtmSwapChainRefreshCount == 0) {
+			if (DEBUG_INFO.dtmFrameNumer == DEBUG_INFO.consumerFrameNumber) {
+				// 追踪的帧将被呈现，记录当前交换链 VSync 计数
+				DXGI_FRAME_STATISTICS statistics;
+				HRESULT hr = _dxgiSwapChain->GetFrameStatistics(&statistics);
+				if (SUCCEEDED(hr)) {
+					DEBUG_INFO.dtmSwapChainRefreshCount = statistics.SyncRefreshCount;
+				} else {
+					restartMeasure = true;
+				}
+			} else if (DEBUG_INFO.dtmFrameNumer < DEBUG_INFO.consumerFrameNumber) {
+				// 追踪的帧被错过，应重新测量
+				restartMeasure = true;
+			}
+		} else {
+			DXGI_FRAME_STATISTICS statistics;
+			HRESULT hr = _dxgiSwapChain->GetFrameStatistics(&statistics);
+			if (SUCCEEDED(hr)) {
+				if (statistics.SyncRefreshCount != DEBUG_INFO.dtmSwapChainRefreshCount) {
+					// 追踪的帧已被呈现
+					LARGE_INTEGER frequency;
+					QueryPerformanceFrequency(&frequency);
+
+					DEBUG_INFO.dwmToMagpieLatency =
+						int32_t((statistics.SyncQPCTime.QuadPart - DEBUG_INFO.dtmCaptureQPC) * 1000000LL / frequency.QuadPart);
+					restartMeasure = true;
+
+					OutputDebugString(fmt::format(L"{}\n", DEBUG_INFO.dwmToMagpieLatency / 1000.0).c_str());
+				}
+			} else {
+				restartMeasure = true;
+			}
+		}
+		if (restartMeasure) {
+			DEBUG_INFO.dtmCaptureQPC = 0;
+			DEBUG_INFO.dtmFrameNumer = 0;
+			DEBUG_INFO.dtmSwapChainRefreshCount = 0;
+		}
+	}
+#endif
+
 	const bool isRecreated = std::exchange(_isRecreated, false);
 	if (isRecreated || waitForGpu) {
 		// 下面两个调用用于减少调整窗口尺寸时的边缘闪烁。
@@ -212,7 +258,13 @@ HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 		WaitForDwmComposition();
 	}
 
-	return _dxgiSwapChain->Present(0, 0);
+	HRESULT hr = _dxgiSwapChain->Present(0, 0);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("IDXGISwapChain::Present", hr);
+		return hr;
+	}
+
+	return S_OK;
 }
 
 HRESULT SwapChainPresenter::OnResized(Size size) noexcept {
