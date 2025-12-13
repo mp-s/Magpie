@@ -2,6 +2,7 @@
 #include "ScalingWindow.h"
 #include "CommonSharedConstants.h"
 #include "CursorManager.h"
+#include "DebugInfo.h"
 #include "ExclModeHelper.h"
 #include "Logger.h"
 #include "Renderer.h"
@@ -968,10 +969,17 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		{
 			auto lk = DEBUG_INFO.lock.lock_exclusive();
 
-			DEBUG_INFO.dtmCaptureQPC = 0;
+			DEBUG_INFO.producerFrameNumber = 1;
+			DEBUG_INFO.consumerFrameNumber = 0;
+			DEBUG_INFO.consumerLatency = DEBUG_INFO.producerFrameNumber - DEBUG_INFO.consumerFrameNumber;
+			DEBUG_INFO.dtmDwmQPC = 0;
 			DEBUG_INFO.dtmFrameNumer = 0;
 			DEBUG_INFO.dtmSwapChainRefreshCount = 0;
 			DEBUG_INFO.dwmToMagpieLatency = 0;
+			DEBUG_INFO.ctpCaptureQPC = 0;
+			DEBUG_INFO.ctpCapturedFrame = nullptr;
+			DEBUG_INFO.ctpFrameNumer = 0;
+			DEBUG_INFO.captureToPresentLatency = 0;
 		}
 #endif
 		break;

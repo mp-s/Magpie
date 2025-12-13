@@ -17,6 +17,7 @@
 #include "pch.h"
 #include "App.h"
 #include "CommonSharedConstants.h"
+#include "DebugInfo.h"
 #include "Logger.h"
 #include "TouchHelper.h"
 #include "Win32Helper.h"
@@ -30,15 +31,6 @@
 #ifdef _DEBUG
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
-#endif
-
-// 用于辅助开发和调试
-#ifdef MP_DEBUG_INFO
-static Ignore _ = [] {
-	DEBUG_INFO.enableGPUBasedValidation = true;
-	DEBUG_INFO.gpuSlowDownFactor = 0.0f;
-	return Ignore();
-}();
 #endif
 
 using namespace Magpie;

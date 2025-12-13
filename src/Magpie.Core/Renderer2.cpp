@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Renderer2.h"
 #include "CommonSharedConstants.h"
+#include "DebugInfo.h"
 #include "FrameProducer.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
@@ -38,16 +39,6 @@ ScalingError Renderer2::Initialize(
 	OverlayOptions& /*overlayOptions*/
 ) noexcept {
 	_hCurMonitor = hMonitor;
-
-#ifdef MP_DEBUG_INFO
-	{
-		auto lk = DEBUG_INFO.lock.lock_exclusive();
-
-		DEBUG_INFO.producerFrameNumber = 1;
-		DEBUG_INFO.consumerFrameNumber = 0;
-		DEBUG_INFO.consumerLatency = DEBUG_INFO.producerFrameNumber - DEBUG_INFO.consumerFrameNumber;
-	}
-#endif
 
 	const ScalingOptions& options = ScalingWindow::Get().Options();
 	if (!_graphicsContext.Initialize(options.graphicsCardId, options.Is3DGameMode() ? 2 : 6, D3D12_COMMAND_LIST_TYPE_DIRECT)) {

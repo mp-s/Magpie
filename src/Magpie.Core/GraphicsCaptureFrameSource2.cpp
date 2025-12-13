@@ -6,6 +6,7 @@
 #include "ScalingWindow.h"
 #include "ColorInfo.h"
 #include "DirectXHelper.h"
+#include "DebugInfo.h"
 #include <dwmapi.h>
 #include <Windows.Graphics.Capture.Interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
@@ -393,9 +394,19 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 #ifdef MP_DEBUG_INFO
 	{
 		auto lk = DEBUG_INFO.lock.lock_exclusive();
-		if (DEBUG_INFO.dtmCaptureQPC == 0) {
-			DEBUG_INFO.dtmCaptureQPC = curSlot.captureFrame.SystemRelativeTime().count();
+
+		if (DEBUG_INFO.dtmFrameNumer == 0) {
+			DEBUG_INFO.dtmDwmQPC = curSlot.captureFrame.SystemRelativeTime().count();
 			DEBUG_INFO.dtmFrameNumer = DEBUG_INFO.producerFrameNumber;
+		}
+
+		if (DEBUG_INFO.ctpCapturedFrame && DEBUG_INFO.ctpFrameNumer == 0) {
+			if (winrt::get_abi(curSlot.captureFrame) == DEBUG_INFO.ctpCapturedFrame) {
+				DEBUG_INFO.ctpFrameNumer = DEBUG_INFO.producerFrameNumber;
+			} else {
+				// 追踪的捕获帧被错过，需要重新测量
+				DEBUG_INFO.ctpCapturedFrame = nullptr;
+			}
 		}
 	}
 #endif
@@ -736,6 +747,20 @@ void GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived(
 	{
 		auto lk = _latestFrameLock.lock_exclusive();
 		_latestFrame = std::move(frame);
+
+#ifdef MP_DEBUG_INFO
+		{
+			auto debugLock = DEBUG_INFO.lock.lock_exclusive();
+
+			if (!DEBUG_INFO.ctpCapturedFrame) {
+				LARGE_INTEGER counter;
+				QueryPerformanceCounter(&counter);
+				DEBUG_INFO.ctpCaptureQPC = counter.QuadPart;
+
+				DEBUG_INFO.ctpCapturedFrame = winrt::get_abi(_latestFrame);
+			}
+		}
+#endif
 	}
 
 	// 唤起生产者线程

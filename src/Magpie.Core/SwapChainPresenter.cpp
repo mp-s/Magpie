@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "SwapChainPresenter.h"
 #include "ColorInfo.h"
+#include "DebugInfo.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "Win32Helper.h"
@@ -185,47 +186,48 @@ static void WaitForDwmComposition() noexcept {
 
 HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 #ifdef MP_DEBUG_INFO
-	if (DEBUG_INFO.dtmCaptureQPC != 0) {
+	{
 		auto lk = DEBUG_INFO.lock.lock_exclusive();
 
-		bool restartMeasure = false;
-		if (DEBUG_INFO.dtmSwapChainRefreshCount == 0) {
-			if (DEBUG_INFO.dtmFrameNumer == DEBUG_INFO.consumerFrameNumber) {
-				// 追踪的帧将被呈现，记录当前交换链 VSync 计数
+		if (DEBUG_INFO.dtmFrameNumer != 0) {
+			bool restartMeasure = false;
+
+			if (DEBUG_INFO.dtmSwapChainRefreshCount == 0) {
+				if (DEBUG_INFO.dtmFrameNumer == DEBUG_INFO.consumerFrameNumber) {
+					// 追踪的帧将被呈现，记录当前交换链 VSync 计数
+					DXGI_FRAME_STATISTICS statistics;
+					HRESULT hr = _dxgiSwapChain->GetFrameStatistics(&statistics);
+					if (SUCCEEDED(hr)) {
+						DEBUG_INFO.dtmSwapChainRefreshCount = statistics.SyncRefreshCount;
+					} else {
+						restartMeasure = true;
+					}
+				} else if (DEBUG_INFO.dtmFrameNumer < DEBUG_INFO.consumerFrameNumber) {
+					// 追踪的帧被错过，应重新测量
+					restartMeasure = true;
+				}
+			} else {
 				DXGI_FRAME_STATISTICS statistics;
 				HRESULT hr = _dxgiSwapChain->GetFrameStatistics(&statistics);
 				if (SUCCEEDED(hr)) {
-					DEBUG_INFO.dtmSwapChainRefreshCount = statistics.SyncRefreshCount;
+					if (statistics.SyncRefreshCount != DEBUG_INFO.dtmSwapChainRefreshCount) {
+						// 追踪的帧已被呈现
+						LARGE_INTEGER frequency;
+						QueryPerformanceFrequency(&frequency);
+
+						DEBUG_INFO.dwmToMagpieLatency =
+							int32_t((statistics.SyncQPCTime.QuadPart - DEBUG_INFO.dtmDwmQPC) * 1000000LL / frequency.QuadPart);
+						restartMeasure = true;
+					}
 				} else {
 					restartMeasure = true;
 				}
-			} else if (DEBUG_INFO.dtmFrameNumer < DEBUG_INFO.consumerFrameNumber) {
-				// 追踪的帧被错过，应重新测量
-				restartMeasure = true;
 			}
-		} else {
-			DXGI_FRAME_STATISTICS statistics;
-			HRESULT hr = _dxgiSwapChain->GetFrameStatistics(&statistics);
-			if (SUCCEEDED(hr)) {
-				if (statistics.SyncRefreshCount != DEBUG_INFO.dtmSwapChainRefreshCount) {
-					// 追踪的帧已被呈现
-					LARGE_INTEGER frequency;
-					QueryPerformanceFrequency(&frequency);
 
-					DEBUG_INFO.dwmToMagpieLatency =
-						int32_t((statistics.SyncQPCTime.QuadPart - DEBUG_INFO.dtmCaptureQPC) * 1000000LL / frequency.QuadPart);
-					restartMeasure = true;
-
-					OutputDebugString(fmt::format(L"{}\n", DEBUG_INFO.dwmToMagpieLatency / 1000.0).c_str());
-				}
-			} else {
-				restartMeasure = true;
+			if (restartMeasure) {
+				DEBUG_INFO.dtmFrameNumer = 0;
+				DEBUG_INFO.dtmSwapChainRefreshCount = 0;
 			}
-		}
-		if (restartMeasure) {
-			DEBUG_INFO.dtmCaptureQPC = 0;
-			DEBUG_INFO.dtmFrameNumer = 0;
-			DEBUG_INFO.dtmSwapChainRefreshCount = 0;
 		}
 	}
 #endif
@@ -263,6 +265,29 @@ HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 		Logger::Get().ComError("IDXGISwapChain::Present", hr);
 		return hr;
 	}
+
+#ifdef MP_DEBUG_INFO
+	{
+		auto lk = DEBUG_INFO.lock.lock_exclusive();
+
+		if (DEBUG_INFO.ctpFrameNumer != 0 && DEBUG_INFO.ctpFrameNumer <= DEBUG_INFO.consumerFrameNumber) {
+			// 如果 ctpFrameNumer < consumerFrameNumber 那么追踪的帧被错过，应重新测量
+			if (DEBUG_INFO.ctpFrameNumer == DEBUG_INFO.consumerFrameNumber) {
+				LARGE_INTEGER counter;
+				QueryPerformanceCounter(&counter);
+
+				LARGE_INTEGER frequency;
+				QueryPerformanceFrequency(&frequency);
+
+				DEBUG_INFO.captureToPresentLatency =
+					uint32_t((counter.QuadPart - DEBUG_INFO.ctpCaptureQPC) * 1000000LL / frequency.QuadPart);
+			}
+
+			DEBUG_INFO.ctpCapturedFrame = 0;
+			DEBUG_INFO.ctpFrameNumer = 0;
+		}
+	}
+#endif
 
 	return S_OK;
 }

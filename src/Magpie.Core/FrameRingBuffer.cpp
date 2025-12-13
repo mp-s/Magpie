@@ -2,6 +2,7 @@
 #include "FrameRingBuffer.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
+#include "DebugInfo.h"
 
 namespace Magpie {
 
