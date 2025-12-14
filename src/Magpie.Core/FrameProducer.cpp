@@ -301,7 +301,13 @@ bool FrameProducer::_Initialize(
 	}
 
 	const uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	if (!_graphicsContext.Initialize(device, maxInFlightFrameCount, D3D12_COMMAND_LIST_TYPE_COMPUTE, true)) {
+	if (!_graphicsContext.Initialize(
+		device,
+		maxInFlightFrameCount,
+		D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
+		D3D12_COMMAND_LIST_TYPE_COMPUTE,
+		true
+	)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return false;
 	}

@@ -9,6 +9,7 @@ namespace Magpie {
 bool GraphicsContext::Initialize(
 	const GraphicsCardId& graphicsCardId,
 	uint32_t maxInFlightFrameCount,
+	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
 	bool disableFrameFenceTracking
 ) noexcept {
@@ -23,7 +24,7 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 
-	if (!_InitializeDeviceResources(maxInFlightFrameCount, commandListType, disableFrameFenceTracking)) {
+	if (!_InitializeDeviceResources(maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");
 		return false;
 	}
@@ -34,6 +35,7 @@ bool GraphicsContext::Initialize(
 bool GraphicsContext::Initialize(
 	ID3D12Device5* device,
 	uint32_t maxInFlightFrameCount,
+	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
 	bool disableFrameFenceTracking
 ) noexcept {
@@ -50,7 +52,7 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 	
-	if (!_InitializeDeviceResources(maxInFlightFrameCount, commandListType, disableFrameFenceTracking)) {
+	if (!_InitializeDeviceResources(maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");
 		return false;
 	}
@@ -161,6 +163,7 @@ HRESULT GraphicsContext::_CreateDXGIFactory() noexcept {
 
 bool GraphicsContext::_InitializeDeviceResources(
 	uint32_t maxInFlightFrameCount,
+	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
 	bool disableFrameFenceTracking
 ) noexcept {
@@ -178,6 +181,7 @@ bool GraphicsContext::_InitializeDeviceResources(
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc = {
 			.Type = commandListType,
+			.Priority = priority,
 			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
 		};
 		HRESULT hr = _device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_commandQueue));

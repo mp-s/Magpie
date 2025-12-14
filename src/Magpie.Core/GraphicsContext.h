@@ -12,6 +12,7 @@ public:
 	bool Initialize(
 		const GraphicsCardId& graphicsCardId,
 		uint32_t maxInFlightFrameCount,
+		D3D12_COMMAND_QUEUE_PRIORITY priority,
 		D3D12_COMMAND_LIST_TYPE commandListType,
 		bool disableFrameFenceTracking = false
 	) noexcept;
@@ -19,6 +20,7 @@ public:
 	bool Initialize(
 		ID3D12Device5* device,
 		uint32_t maxInFlightFrameCount,
+		D3D12_COMMAND_QUEUE_PRIORITY priority,
 		D3D12_COMMAND_LIST_TYPE commandListType,
 		bool disableFrameTracking = false
 	) noexcept;
@@ -73,6 +75,7 @@ private:
 
 	bool _InitializeDeviceResources(
 		uint32_t maxInFlightFrameCount,
+		D3D12_COMMAND_QUEUE_PRIORITY priority,
 		D3D12_COMMAND_LIST_TYPE commandListType,
 		bool disableFrameFenceTracking
 	) noexcept;

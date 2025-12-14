@@ -41,7 +41,12 @@ ScalingError Renderer2::Initialize(
 	_hCurMonitor = hMonitor;
 
 	const ScalingOptions& options = ScalingWindow::Get().Options();
-	if (!_graphicsContext.Initialize(options.graphicsCardId, options.Is3DGameMode() ? 2 : 6, D3D12_COMMAND_LIST_TYPE_DIRECT)) {
+	if (!_graphicsContext.Initialize(
+		options.graphicsCardId,
+		options.Is3DGameMode() ? 2 : 6,
+		D3D12_COMMAND_QUEUE_PRIORITY_HIGH,
+		D3D12_COMMAND_LIST_TYPE_DIRECT
+	)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
