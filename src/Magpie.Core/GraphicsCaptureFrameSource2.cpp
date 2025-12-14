@@ -191,44 +191,8 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		}
 	}
 
-	IDXGIAdapter1* dxgiAdapter = graphicsContext.GetDXGIAdapter();
-	// 查找源窗口所在屏幕连接的适配器
-	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
-		FindAdapterOfMonitor(graphicsContext.GetDXGIFactoryForEnumingAdapters(), hMonSrc);
-
-	if (srcMonAdapter) {
-		DXGI_ADAPTER_DESC desc;
-		hr = srcMonAdapter->GetDesc(&desc);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("IDXGIAdapter1::GetDesc 失败", hr);
-			return false;
-		}
-
-		const LUID renderAdapterLUID = device->GetAdapterLuid();
-
-		if (desc.AdapterLuid != renderAdapterLUID) {
-			// 跨适配器捕获
-			if (!_CreateBridgeDeviceResources(srcMonAdapter.get())) {
-				// 失败则使用渲染设备捕获，WGC 内部使用内存中转
-				srcMonAdapter.copy_from(dxgiAdapter);
-
-				// 清理跨适配器资源
-				_bridgeDevice = nullptr;
-				_bridgeCopyCommandQueue = nullptr;
-				_bridgeCopyCommandList = nullptr;
-				_sharedHeap = nullptr;
-				_bridgeHeap = nullptr;
-				_sharedFence = nullptr;
-				_bridgeFence = nullptr;
-				_crossAdapterSlots.clear();
-			}
-		}
-	} else {
-		// 找不到源窗口所在屏幕的适配器则使用渲染设备
-		srcMonAdapter.copy_from(dxgiAdapter);
-	}
-
-	if (!_CreateD3D11Device(srcMonAdapter.get())) {
+	if (!_CreateCaptureDevice(hMonSrc)) {
+		Logger::Get().ComError("_CreateCaptureDevice 失败", hr);
 		return false;
 	}
 
@@ -527,7 +491,36 @@ static bool IsDebugLayersAvailable() noexcept {
 #endif
 }
 
-bool GraphicsCaptureFrameSource2::_CreateD3D11Device(IDXGIAdapter1* dxgiAdapter) noexcept {
+bool GraphicsCaptureFrameSource2::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept {
+	// 查找源窗口所在屏幕连接的适配器
+	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
+		FindAdapterOfMonitor(_graphicsContext->GetDXGIFactoryForEnumingAdapters(), hMonSrc);
+	if (srcMonAdapter) {
+		DXGI_ADAPTER_DESC desc;
+		HRESULT hr = srcMonAdapter->GetDesc(&desc);
+		if (SUCCEEDED(hr)) {
+			if (desc.AdapterLuid != _graphicsContext->GetDevice()->GetAdapterLuid()) {
+				// 跨适配器捕获
+				if (!_CreateBridgeDeviceResources(srcMonAdapter.get())) {
+					// 失败则使用渲染设备捕获，交给 WGC 中转
+					srcMonAdapter = nullptr;
+
+					// 清理跨适配器资源
+					_bridgeDevice = nullptr;
+					_bridgeCopyCommandQueue = nullptr;
+					_bridgeCopyCommandList = nullptr;
+					_sharedHeap = nullptr;
+					_bridgeHeap = nullptr;
+					_sharedFence = nullptr;
+					_bridgeFence = nullptr;
+					_crossAdapterSlots.clear();
+				}
+			}
+		} else {
+			Logger::Get().ComError("IDXGIAdapter1::GetDesc 失败", hr);
+		}
+	}
+
 	D3D_FEATURE_LEVEL featureLevels[] = {
 		D3D_FEATURE_LEVEL_11_1,
 		D3D_FEATURE_LEVEL_11_0
@@ -543,7 +536,7 @@ bool GraphicsCaptureFrameSource2::_CreateD3D11Device(IDXGIAdapter1* dxgiAdapter)
 	winrt::com_ptr<ID3D11DeviceContext> d3dDC;
 	D3D_FEATURE_LEVEL featureLevel;
 	HRESULT hr = D3D11CreateDevice(
-		dxgiAdapter,
+		srcMonAdapter ? srcMonAdapter.get() : _graphicsContext->GetDXGIAdapter(),
 		D3D_DRIVER_TYPE_UNKNOWN,
 		nullptr,
 		createDeviceFlags,
@@ -598,6 +591,21 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 	}
 
 	Logger::Get().Info("已创建 D3D12 设备");
+
+	// 不应使用集成显卡捕获，集成显卡没有高速的专用显存，捕获延迟很高
+	{
+		D3D12_FEATURE_DATA_ARCHITECTURE1 value{};
+		hr = _bridgeDevice->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &value, sizeof(value));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			return false;
+		}
+
+		if (value.UMA) {
+			Logger::Get().Info("不使用集成显卡捕获");
+			return false;
+		}
+	}
 
 	ID3D12Device5* device = _graphicsContext->GetDevice();
 	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;

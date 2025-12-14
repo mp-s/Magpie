@@ -42,7 +42,7 @@ public:
 	HRESULT Update(uint32_t& outputIdx) noexcept;
 
 private:
-	bool _CreateD3D11Device(IDXGIAdapter1* dxgiAdapter) noexcept;
+	bool _CreateCaptureDevice(HMONITOR hMonSrc) noexcept;
 
 	bool _CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept;
 
