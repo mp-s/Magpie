@@ -1,13 +1,14 @@
 #include "pch.h"
 #include "FrameRingBuffer.h"
+#include "GraphicsContext.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "DebugInfo.h"
 
 namespace Magpie {
 
-bool FrameRingBuffer::Initialize(ID3D12Device5* device, Size size, const ColorInfo& colorInfo) noexcept {
-	_device = device;
+bool FrameRingBuffer::Initialize(GraphicsContext& graphicsContext, Size size, const ColorInfo& colorInfo) noexcept {
+	_graphicsContext = &graphicsContext;
 	_size = size;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
@@ -16,6 +17,8 @@ bool FrameRingBuffer::Initialize(ID3D12Device5* device, Size size, const ColorIn
 
 	// 消费者应落后于生产者
 	_curConsumerIdx = slotCount - 1;
+
+	ID3D12Device5* device = graphicsContext.GetDevice();
 
 	HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_consumerFence));
 	if (FAILED(hr)) {
@@ -218,9 +221,11 @@ HRESULT FrameRingBuffer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept
 }
 
 HRESULT FrameRingBuffer::_LoadBufferResources() noexcept {
-	auto lk = _lock.lock_exclusive();
+	ID3D12Device5* device = _graphicsContext->GetDevice();
 
 	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+	D3D12_HEAP_FLAGS heapFlag = _graphicsContext->IsHeapFlagCreateNotZeroedSupported() ?
+		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
 		_size.width,
@@ -228,9 +233,11 @@ HRESULT FrameRingBuffer::_LoadBufferResources() noexcept {
 		1, 1, 1, 0,
 		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
 	);
+	
+	auto lk = _lock.lock_exclusive();
 
 	for (_FrameResourceSlot& slot : _slots) {
-		HRESULT hr = _device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+		HRESULT hr = device->CreateCommittedResource(&heapProperties, heapFlag,
 			&texDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&slot.resource));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateCommittedResource 失败", hr);

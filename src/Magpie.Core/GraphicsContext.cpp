@@ -178,6 +178,10 @@ bool GraphicsContext::_InitializeDeviceResources(
 		_rootSignatureVersion = featureData.HighestVersion;
 	}
 
+	// 检查是否支持 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED
+	// https://devblogs.microsoft.com/directx/coming-to-directx-12-more-control-over-memory-allocation/
+	_isHeapFlagCreateNotZeroedSupported = (bool)_device.try_as<ID3D12Device8>();
+
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc = {
 			.Type = commandListType,

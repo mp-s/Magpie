@@ -51,6 +51,10 @@ public:
 		return _rootSignatureVersion;
 	}
 
+	bool IsHeapFlagCreateNotZeroedSupported() const noexcept {
+		return _isHeapFlagCreateNotZeroedSupported;
+	}
+
 	uint32_t GetMaxInFlightFrameCount() const noexcept {
 		return (uint32_t)_commandAllocators.size();
 	}
@@ -101,6 +105,7 @@ private:
 	uint32_t _curFrameIndex = 0;
 
 	D3D_ROOT_SIGNATURE_VERSION _rootSignatureVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+	bool _isHeapFlagCreateNotZeroedSupported = false;
 };
 
 }

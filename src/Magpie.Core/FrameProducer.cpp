@@ -349,7 +349,7 @@ bool FrameProducer::_Initialize(
 		return false;
 	}
 
-	if (!_frameRingBuffer.Initialize(device, _outputSize, colorInfo)) {
+	if (!_frameRingBuffer.Initialize(_graphicsContext, _outputSize, colorInfo)) {
 		Logger::Get().Error("初始化 FrameRingBuffer 失败");
 		return false;
 	}

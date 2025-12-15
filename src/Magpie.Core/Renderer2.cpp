@@ -51,11 +51,22 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-#if defined(_DEBUG) && defined(MP_DEBUG_INFO)
-	// 模拟低速 GPU
+#ifdef MP_DEBUG_INFO
 	{
+		ID3D12Device5* device = _graphicsContext.GetDevice();
+
+		// 禁用动态时钟频率调整
+		if (DEBUG_INFO.enableStablePower) {
+			HRESULT hr = device->SetStablePowerState(TRUE);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("SetStablePowerState 失败", hr);
+			}
+		}
+
+#ifdef _DEBUG
+		// 模拟低速 GPU
 		winrt::com_ptr<ID3D12DebugDevice1> debugDevice;
-		HRESULT hr = _graphicsContext.GetDevice()->QueryInterface<ID3D12DebugDevice1>(debugDevice.put());
+		HRESULT hr = device->QueryInterface<ID3D12DebugDevice1>(debugDevice.put());
 		if (SUCCEEDED(hr)) {
 			D3D12_DEBUG_DEVICE_GPU_SLOWDOWN_PERFORMANCE_FACTOR value = {
 				.SlowdownFactor = DEBUG_INFO.gpuSlowDownFactor
@@ -68,6 +79,7 @@ ScalingError Renderer2::Initialize(
 		} else {
 			Logger::Get().ComError("获取 ID3D12DebugDevice1 失败", hr);
 		}
+#endif
 	}
 #endif
 

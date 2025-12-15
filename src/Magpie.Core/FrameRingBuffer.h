@@ -11,7 +11,7 @@ public:
 	FrameRingBuffer(const FrameRingBuffer&) = delete;
 	FrameRingBuffer(FrameRingBuffer&&) = delete;
 
-	bool Initialize(ID3D12Device5* device, Size size, const ColorInfo& colorInfo) noexcept;
+	bool Initialize(GraphicsContext& graphicsContext, Size size, const ColorInfo& colorInfo) noexcept;
 
 	ID3D12Resource* GetBuffer(uint32_t index) noexcept;
 
@@ -37,7 +37,8 @@ public:
 private:
 	HRESULT _LoadBufferResources() noexcept;
 
-	ID3D12Device5* _device = nullptr;
+	// 只在生产者线程访问
+	GraphicsContext* _graphicsContext = nullptr;
 
 	wil::srwlock _lock;
 

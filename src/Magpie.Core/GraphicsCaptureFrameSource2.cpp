@@ -166,6 +166,8 @@ bool GraphicsCaptureFrameSource2::Initialize(
 
 	{
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+		D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
+			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
 		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 			_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
 			UINT64(_frameBox.right - _frameBox.left),
@@ -182,7 +184,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 				return false;
 			}
 
-			hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+			hr = device->CreateCommittedResource(&heapProperties, heapFlag,
 				&texDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&slot.output));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateCommittedResource 失败", hr);
@@ -637,16 +639,18 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 		D3D12_TEXTURE_LAYOUT_ROW_MAJOR
 	);
 
-	D3D12_RESOURCE_ALLOCATION_INFO textureInfo = device->GetResourceAllocationInfo(0, 1, &textureDesc);
+	D3D12_RESOURCE_ALLOCATION_INFO textureInfo = _bridgeDevice->GetResourceAllocationInfo(0, 1, &textureDesc);
 
 	// 创建跨适配器共享堆。应遵循“写入者创建”的原则，否则可能无法正确同步，Intel 集显作为
 	// 捕获设备时存在这个问题。
 	{
+		const bool isCreateNotZeroedSupported = (bool)_bridgeDevice.try_as<ID3D12Device8>();
 		CD3DX12_HEAP_DESC heapDesc(
 			textureInfo.SizeInBytes * frameCount,
 			D3D12_HEAP_TYPE_DEFAULT,
 			0,
-			D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER
+			D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER |
+				(isCreateNotZeroedSupported ? D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE)
 		);
 		hr = _bridgeDevice->CreateHeap(&heapDesc, IID_PPV_ARGS(&_bridgeHeap));
 		if (FAILED(hr)) {

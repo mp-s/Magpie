@@ -5,10 +5,12 @@
 
 // 不要定义成匿名类，和 inline 冲突
 struct DebugInfo {
-	// 启用 GPU-based validation
-	bool enableGPUBasedValidation = false;
 	// 模拟低速 GPU
 	float gpuSlowDownFactor = 0.0f;
+	// 启用 GPU-based validation
+	bool enableGPUBasedValidation = false;
+	// 禁用 GPU 的动态时钟频率调整
+	bool enableStablePower = false;
 
 	// 用于同步对下面成员的访问
 	wil::srwlock lock;
