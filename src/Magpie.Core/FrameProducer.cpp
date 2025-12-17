@@ -31,16 +31,17 @@ FrameProducer::~FrameProducer() noexcept {
 }
 
 void FrameProducer::InitializeAsync(
-	ID3D12Device5* device,
+	const GraphicsContext& graphicsContext,
 	const RECT& srcRect,
 	Size rendererSize,
 	HMONITOR hMonSrc,
 	const ColorInfo& colorInfo
 ) noexcept {
+	_graphicsContext.CopyDevice(graphicsContext);
+
 	_producerThread = std::thread(
 		&FrameProducer::_ProducerThreadProc,
 		this,
-		device,
 		srcRect,
 		rendererSize,
 		hMonSrc,
@@ -175,17 +176,16 @@ HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 }
 
 void FrameProducer::_ProducerThreadProc(
-	ID3D12Device5* device,
 	RECT srcRect,
 	Size rendererSize,
 	HMONITOR hMonSrc,
-	ColorInfo colorInfo
+	const ColorInfo& colorInfo
 ) noexcept {
 #ifdef _DEBUG
 	SetThreadDescription(GetCurrentThread(), L"Magpie-缩放生产者线程");
 #endif
 
-	if (_Initialize(device, srcRect, rendererSize, hMonSrc, colorInfo)) {
+	if (_Initialize(srcRect, rendererSize, hMonSrc, colorInfo)) {
 		_state.store(ComponentState::NoError, std::memory_order_release);
 		_state.notify_one();
 	} else {
@@ -274,7 +274,6 @@ void FrameProducer::_ProducerThreadProc(
 }
 
 bool FrameProducer::_Initialize(
-	ID3D12Device5* device,
 	const RECT& srcRect,
 	Size rendererSize,
 	HMONITOR hMonSrc,
@@ -301,8 +300,7 @@ bool FrameProducer::_Initialize(
 	}
 
 	const uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	if (!_graphicsContext.Initialize(
-		device,
+	if (!_graphicsContext.InitializeAfterCopyDevice(
 		maxInFlightFrameCount,
 		D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
 		D3D12_COMMAND_LIST_TYPE_COMPUTE,
@@ -311,6 +309,8 @@ bool FrameProducer::_Initialize(
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return false;
 	}
+
+	ID3D12Device5* device = _graphicsContext.GetDevice();
 
 	// 检查半精度浮点支持
 	{
@@ -330,6 +330,38 @@ bool FrameProducer::_Initialize(
 	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
 		Logger::Get().Error("初始化 GraphicsCaptureFrameSource2 失败");
 		return false;
+	}
+
+	{
+		std::optional<float> maxFrameRate;
+		if (!_frameSource->ShouldWaitMessageForNewFrame()) {
+			// 某些捕获方式不会限制捕获帧率，因此将捕获帧率限制为屏幕刷新率
+			const HMONITOR hMon = hMonSrc;
+
+			MONITORINFOEX mi{ { sizeof(MONITORINFOEX) } };
+			GetMonitorInfo(hMon, &mi);
+
+			DEVMODE dm{ .dmSize = sizeof(DEVMODE) };
+			EnumDisplaySettings(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm);
+
+			if (dm.dmDisplayFrequency > 0) {
+				Logger::Get().Info(fmt::format("屏幕刷新率: {}", dm.dmDisplayFrequency));
+				maxFrameRate = float(dm.dmDisplayFrequency);
+			}
+		}
+
+		const ScalingOptions& options = ScalingWindow::Get().Options();
+		if (options.maxFrameRate) {
+			if (!maxFrameRate || *options.maxFrameRate < *maxFrameRate) {
+				maxFrameRate = options.maxFrameRate;
+			}
+		}
+
+		// 测试着色器性能时最小帧率应设为无限大，但由于 /fp:fast 下无限大不可靠，因此改为使用 max()，
+		// 和无限大效果相同。
+		const float minFrameRate = options.IsBenchmarkMode()
+			? std::numeric_limits<float>::max() : options.minFrameRate;
+		_stepTimer.Initialize(minFrameRate, maxFrameRate);
 	}
 
 	_inputSize.width = srcRect.right - srcRect.left;
@@ -391,35 +423,40 @@ bool FrameProducer::_Initialize(
 	}
 
 	{
-		std::optional<float> maxFrameRate;
-		if (!_frameSource->ShouldWaitMessageForNewFrame()) {
-			// 某些捕获方式不会限制捕获帧率，因此将捕获帧率限制为屏幕刷新率
-			const HMONITOR hMon = hMonSrc;
+		// 每帧两个时间戳
+		const uint32_t timestampCount = 2 * maxInFlightFrameCount;
 
-			MONITORINFOEX mi{ { sizeof(MONITORINFOEX) } };
-			GetMonitorInfo(hMon, &mi);
-
-			DEVMODE dm{ .dmSize = sizeof(DEVMODE) };
-			EnumDisplaySettings(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm);
-
-			if (dm.dmDisplayFrequency > 0) {
-				Logger::Get().Info(fmt::format("屏幕刷新率: {}", dm.dmDisplayFrequency));
-				maxFrameRate = float(dm.dmDisplayFrequency);
-			}
+		D3D12_QUERY_HEAP_DESC queryHeapDesc = {
+			.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
+			.Count = timestampCount
+		};
+		hr = device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&_queryHeap));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateQueryHeap 失败", hr);
+			return false;
 		}
 
-		const ScalingOptions& options = ScalingWindow::Get().Options();
-		if (options.maxFrameRate) {
-			if (!maxFrameRate || *options.maxFrameRate < *maxFrameRate) {
-				maxFrameRate = options.maxFrameRate;
-			}
+		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_READBACK);
+		CD3DX12_RESOURCE_DESC bufferDesc =
+			CD3DX12_RESOURCE_DESC::Buffer(timestampCount * sizeof(UINT64));
+		hr = device->CreateCommittedResource(
+			&heapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&bufferDesc,
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS(&_queryResultBuffer)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return false;
 		}
 
-		// 测试着色器性能时最小帧率应设为无限大，但由于 /fp:fast 下无限大不可靠，因此改为使用 max()，
-		// 和无限大效果相同。
-		const float minFrameRate = options.IsBenchmarkMode()
-			? std::numeric_limits<float>::max() : options.minFrameRate;
-		_stepTimer.Initialize(minFrameRate, maxFrameRate);
+		hr = _graphicsContext.GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("ID3D12CommandQueue::GetTimestampFrequency 失败", hr);
+			return false;
+		}
 	}
 
 	_monitorThread = std::thread(&FrameProducer::_MonitorThreadProc, this);
@@ -441,6 +478,37 @@ HRESULT FrameProducer::_Render() noexcept {
 	if (FAILED(hr)) {
 		Logger::Get().ComError("GraphicsContext::BeginFrame 失败", hr);
 		return hr;
+	}
+	
+	// 获取渲染时间
+	const uint32_t queryHeapIndex = 2 * frameIndex;
+	{
+		CD3DX12_RANGE range(queryHeapIndex * sizeof(UINT64), (queryHeapIndex + 2) * sizeof(UINT64));
+
+		void* pData;
+		hr = _queryResultBuffer->Map(0, nullptr, &pData);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
+			return hr;
+		}
+
+		UINT64* timestampes = (UINT64*)pData + queryHeapIndex;
+		static std::vector<UINT64> deltas;
+		deltas.push_back(timestampes[1] - timestampes[0]);
+		if (deltas.size() == 1000) {
+			std::sort(deltas.begin(), deltas.end());
+			auto begin = deltas.begin() + 50;
+			auto end = deltas.end() - 50;
+			UINT64 total = 0;
+			for (auto it = begin; it != end; ++it) {
+				total += *it;
+			}
+			double result = total * 1000 / (double)_timestampFrequency / deltas.size();
+			OutputDebugString(fmt::format(L"{:.6f}ms\n", result).c_str());
+		}
+
+		range = {};
+		_queryResultBuffer->Unmap(0, &range);
 	}
 
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
@@ -481,8 +549,14 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->SetDescriptorHeaps(1, &t);
 	}
 
+	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
+
 	_catumullRomEffectDrawer.Draw(frameSourceOutputIdx, frameRingBufferIdx);
 
+	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
+	commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,
+		_queryResultBuffer.get(), queryHeapIndex * sizeof(UINT64));
+	
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(

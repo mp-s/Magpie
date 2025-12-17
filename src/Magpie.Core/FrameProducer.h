@@ -18,7 +18,7 @@ public:
 	~FrameProducer() noexcept;
 
 	void InitializeAsync(
-		ID3D12Device5* device,
+		const GraphicsContext& graphicsContext,
 		const RECT& srcRect,
 		Size rendererSize,
 		HMONITOR hMonSrc,
@@ -42,15 +42,13 @@ public:
 
 private:
 	void _ProducerThreadProc(
-		ID3D12Device5* device,
 		RECT srcRect,
 		Size rendererSize,
 		HMONITOR hMonSrc,
-		ColorInfo colorInfo
+		const ColorInfo& colorInfo
 	) noexcept;
 
 	bool _Initialize(
-		ID3D12Device5* device,
 		const RECT& srcRect,
 		Size rendererSize,
 		HMONITOR hMonSrc,
@@ -77,6 +75,10 @@ private:
 	uint32_t _descriptorSize = 0;
 
 	CatumullRomEffectDrawer _catumullRomEffectDrawer;
+
+	winrt::com_ptr<ID3D12QueryHeap> _queryHeap;
+	winrt::com_ptr<ID3D12Resource> _queryResultBuffer;
+	UINT64 _timestampFrequency = 0;
 	
 	Size _inputSize{};
 	Size _outputSize{};

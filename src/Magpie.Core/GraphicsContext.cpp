@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "GraphicsContext.h"
+#include "DebugInfo.h"
 #include "Logger.h"
 #include "DirectXHelper.h"
 #include "StrHelper.h"
@@ -24,6 +25,21 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 
+	// 检查根签名版本
+	{
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
+		hr = _device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			return false;
+		}
+		_rootSignatureVersion = featureData.HighestVersion;
+	}
+
+	// 检查是否支持 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED
+	// https://devblogs.microsoft.com/directx/coming-to-directx-12-more-control-over-memory-allocation/
+	_isHeapFlagCreateNotZeroedSupported = (bool)_device.try_as<ID3D12Device8>();
+
 	if (!_InitializeDeviceResources(maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");
 		return false;
@@ -32,15 +48,18 @@ bool GraphicsContext::Initialize(
 	return true;
 }
 
-bool GraphicsContext::Initialize(
-	ID3D12Device5* device,
+void GraphicsContext::CopyDevice(const GraphicsContext& other) {
+	_device = other._device;
+	_rootSignatureVersion = other._rootSignatureVersion;
+	_isHeapFlagCreateNotZeroedSupported = other._isHeapFlagCreateNotZeroedSupported;
+}
+
+bool GraphicsContext::InitializeAfterCopyDevice(
 	uint32_t maxInFlightFrameCount,
 	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
 	bool disableFrameFenceTracking
 ) noexcept {
-	_device.copy_from(device);
-
 	HRESULT hr = _CreateDXGIFactory();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("_CreateDXGIFactory 失败", hr);
@@ -167,21 +186,6 @@ bool GraphicsContext::_InitializeDeviceResources(
 	D3D12_COMMAND_LIST_TYPE commandListType,
 	bool disableFrameFenceTracking
 ) noexcept {
-	// 检查根签名版本
-	{
-		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
-		HRESULT hr = _device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
-		}
-		_rootSignatureVersion = featureData.HighestVersion;
-	}
-
-	// 检查是否支持 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED
-	// https://devblogs.microsoft.com/directx/coming-to-directx-12-more-control-over-memory-allocation/
-	_isHeapFlagCreateNotZeroedSupported = (bool)_device.try_as<ID3D12Device8>();
-
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc = {
 			.Type = commandListType,
@@ -227,82 +231,89 @@ bool GraphicsContext::_InitializeDeviceResources(
 
 bool GraphicsContext::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId) noexcept {
 	winrt::com_ptr<IDXGIAdapter1> adapter;
-	// 记录不支持 D3D12 的显卡索引，防止重复尝试
-	int failedIdx = -1;
 
-	if (graphicsCardId.idx >= 0) {
-		assert(graphicsCardId.vendorId != 0 && graphicsCardId.deviceId != 0);
+#ifdef MP_DEBUG_INFO
+	if (!DEBUG_INFO.useWarp) {
+#endif
+		// 记录不支持 D3D12 的显卡索引，防止重复尝试
+		int failedIdx = -1;
 
-		// 先使用索引
-		HRESULT hr = _dxgiFactory->EnumAdapters1(graphicsCardId.idx, adapter.put());
-		if (SUCCEEDED(hr)) {
-			DXGI_ADAPTER_DESC1 desc;
-			hr = adapter->GetDesc1(&desc);
+		if (graphicsCardId.idx >= 0) {
+			assert(graphicsCardId.vendorId != 0 && graphicsCardId.deviceId != 0);
+
+			// 先使用索引
+			HRESULT hr = _dxgiFactory->EnumAdapters1(graphicsCardId.idx, adapter.put());
 			if (SUCCEEDED(hr)) {
-				if (desc.VendorId == graphicsCardId.vendorId && desc.DeviceId == graphicsCardId.deviceId) {
-					if (_TryCreateD3DDevice(adapter, desc)) {
-						return true;
-					}
-
-					failedIdx = graphicsCardId.idx;
-					Logger::Get().Warn("用户指定的显示卡不支持 D3D12");
-				} else {
-					Logger::Get().Warn("显卡配置已变化");
-				}
-			}
-		}
-
-		// 如果已确认该显卡不支持 D3D12，不再重复尝试
-		if (failedIdx == -1) {
-			// 枚举查找 vendorId 和 deviceId 匹配的显卡
-			for (UINT adapterIdx = 0;
-				SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
-				++adapterIdx
-			) {
-				if ((int)adapterIdx == graphicsCardId.idx) {
-					// 已经检查了 graphicsCardId.idx
-					continue;
-				}
-
 				DXGI_ADAPTER_DESC1 desc;
 				hr = adapter->GetDesc1(&desc);
-				if (FAILED(hr)) {
-					continue;
-				}
+				if (SUCCEEDED(hr)) {
+					if (desc.VendorId == graphicsCardId.vendorId && desc.DeviceId == graphicsCardId.deviceId) {
+						if (_TryCreateD3DDevice(adapter, desc)) {
+							return true;
+						}
 
-				if (desc.VendorId == graphicsCardId.vendorId && desc.DeviceId == graphicsCardId.deviceId) {
-					if (_TryCreateD3DDevice(adapter, desc)) {
-						return true;
+						failedIdx = graphicsCardId.idx;
+						Logger::Get().Warn("用户指定的显示卡不支持 D3D12");
+					} else {
+						Logger::Get().Warn("显卡配置已变化");
+					}
+				}
+			}
+
+			// 如果已确认该显卡不支持 D3D12，不再重复尝试
+			if (failedIdx == -1) {
+				// 枚举查找 vendorId 和 deviceId 匹配的显卡
+				for (UINT adapterIdx = 0;
+					SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
+					++adapterIdx
+				) {
+					if ((int)adapterIdx == graphicsCardId.idx) {
+						// 已经检查了 graphicsCardId.idx
+						continue;
 					}
 
-					failedIdx = (int)adapterIdx;
-					Logger::Get().Warn("用户指定的显示卡不支持 D3D12");
-					break;
+					DXGI_ADAPTER_DESC1 desc;
+					hr = adapter->GetDesc1(&desc);
+					if (FAILED(hr)) {
+						continue;
+					}
+
+					if (desc.VendorId == graphicsCardId.vendorId && desc.DeviceId == graphicsCardId.deviceId) {
+						if (_TryCreateD3DDevice(adapter, desc)) {
+							return true;
+						}
+
+						failedIdx = (int)adapterIdx;
+						Logger::Get().Warn("用户指定的显示卡不支持 D3D12");
+						break;
+					}
 				}
 			}
 		}
+
+		// 枚举查找第一个支持 D3D12 的显卡
+		for (UINT adapterIdx = 0;
+			SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
+			++adapterIdx
+		) {
+			if ((int)adapterIdx == failedIdx) {
+				// 无需再次尝试
+				continue;
+			}
+
+			DXGI_ADAPTER_DESC1 desc;
+			HRESULT hr = adapter->GetDesc1(&desc);
+			if (FAILED(hr) || DirectXHelper::IsWARP(desc)) {
+				continue;
+			}
+
+			if (_TryCreateD3DDevice(adapter, desc)) {
+				return true;
+			}
+		}
+#ifdef MP_DEBUG_INFO
 	}
-
-	// 枚举查找第一个支持 D3D12 的显卡
-	for (UINT adapterIdx = 0;
-		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
-		++adapterIdx
-	) {
-		if ((int)adapterIdx == failedIdx) {
-			// 无需再次尝试
-			continue;
-		}
-
-		DXGI_ADAPTER_DESC1 desc;
-		HRESULT hr = adapter->GetDesc1(&desc);
-		if (FAILED(hr) || DirectXHelper::IsWARP(desc)) {
-			continue;
-		}
-
-		if (_TryCreateD3DDevice(adapter, desc)) {
-			return true;
-		}
-	}
+#endif
 
 	// 作为最后手段，回落到 CPU 渲染 (WARP)
 	// https://docs.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp

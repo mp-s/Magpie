@@ -17,8 +17,9 @@ public:
 		bool disableFrameFenceTracking = false
 	) noexcept;
 
-	bool Initialize(
-		ID3D12Device5* device,
+	void CopyDevice(const GraphicsContext& other);
+
+	bool InitializeAfterCopyDevice(
 		uint32_t maxInFlightFrameCount,
 		D3D12_COMMAND_QUEUE_PRIORITY priority,
 		D3D12_COMMAND_LIST_TYPE commandListType,

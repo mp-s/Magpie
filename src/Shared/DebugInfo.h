@@ -11,6 +11,8 @@ struct DebugInfo {
 	bool enableGPUBasedValidation = false;
 	// 禁用 GPU 的动态时钟频率调整
 	bool enableStablePower = false;
+	// 使用 CPU 渲染
+	bool useWarp = false;
 
 	// 用于同步对下面成员的访问
 	wil::srwlock lock;
