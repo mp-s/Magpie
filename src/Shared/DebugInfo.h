@@ -9,7 +9,7 @@ struct DebugInfo {
 	float gpuSlowDownFactor = 0.0f;
 	// 启用 GPU-based validation
 	bool enableGPUBasedValidation = false;
-	// 禁用 GPU 的动态时钟频率调整
+	// 禁用 GPU 的动态时钟频率调整，需要启用开发人员模式
 	bool enableStablePower = false;
 	// 使用 CPU 渲染
 	bool useWarp = false;

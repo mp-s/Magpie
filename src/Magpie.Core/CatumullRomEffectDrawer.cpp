@@ -195,10 +195,10 @@ void CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) noex
 	commandList->SetComputeRootDescriptorTable(
 		2, CD3DX12_GPU_DESCRIPTOR_HANDLE(_outputDescriptorBase, outputSlot, _descriptorSize));
 
-	constexpr uint32_t BLOCK_SIZE = 16;
+	constexpr std::pair<uint32_t, uint32_t> BLOCK_SIZE = { 16, 8 };
 	commandList->Dispatch(
-		(_outputSize.width + BLOCK_SIZE - 1) / BLOCK_SIZE,
-		(_outputSize.height + BLOCK_SIZE - 1) / BLOCK_SIZE,
+		(_outputSize.width + BLOCK_SIZE.first - 1) / BLOCK_SIZE.first,
+		(_outputSize.height + BLOCK_SIZE.second - 1) / BLOCK_SIZE.second,
 		1
 	);
 }
