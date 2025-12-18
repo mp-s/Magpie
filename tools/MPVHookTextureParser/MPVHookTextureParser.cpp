@@ -1,14 +1,9 @@
-// MPVHookTextureParser.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
-//
-
-#define NOMINMAX
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <DirectXTex.h>
 #include <DirectXPackedVector.h>
+#include <DirectXTex.h>
+#include <fstream>
+#include <iostream>
 #include <string_view>
-
+#include <vector>
 
 static std::wstring UTF8ToUTF16(std::string_view str) noexcept {
 	int convertResult = MultiByteToWideChar(CP_ACP, 0, str.data(), (int)str.size(), nullptr, 0);
@@ -36,7 +31,6 @@ static BYTE ResolveHex(char c) noexcept {
 		return 0;
 	}
 }
-
 
 int main(int argc, char* argv[]) {
 	SetConsoleOutputCP(CP_UTF8);
