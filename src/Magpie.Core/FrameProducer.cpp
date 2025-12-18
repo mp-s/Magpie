@@ -492,20 +492,7 @@ HRESULT FrameProducer::_Render() noexcept {
 			return hr;
 		}
 
-		UINT64* timestampes = (UINT64*)pData + queryHeapIndex;
-		static std::vector<UINT64> deltas;
-		deltas.push_back(timestampes[1] - timestampes[0]);
-		if (deltas.size() == 1000) {
-			std::sort(deltas.begin(), deltas.end());
-			auto begin = deltas.begin() + 50;
-			auto end = deltas.end() - 50;
-			UINT64 total = 0;
-			for (auto it = begin; it != end; ++it) {
-				total += *it;
-			}
-			double result = total * 1000 / (double)_timestampFrequency / deltas.size();
-			OutputDebugString(fmt::format(L"{:.6f}ms\n", result).c_str());
-		}
+		// UINT64* timestampes = (UINT64*)pData + queryHeapIndex;
 
 		range = {};
 		_queryResultBuffer->Unmap(0, &range);

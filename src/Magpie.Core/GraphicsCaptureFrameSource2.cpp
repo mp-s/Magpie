@@ -1,12 +1,12 @@
 #include "pch.h"
 #include "GraphicsCaptureFrameSource2.h"
+#include "ColorInfo.h"
+#include "DebugInfo.h"
+#include "DirectXHelper.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
-#include "Win32Helper.h"
 #include "ScalingWindow.h"
-#include "ColorInfo.h"
-#include "DirectXHelper.h"
-#include "DebugInfo.h"
+#include "Win32Helper.h"
 #include <dwmapi.h>
 #include <Windows.Graphics.Capture.Interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
@@ -22,6 +22,26 @@ namespace Magpie {
 
 GraphicsCaptureFrameSource2::~GraphicsCaptureFrameSource2() noexcept {
 	_StopCapture();
+
+	const HWND hwndSrc = ScalingWindow::Get().SrcTracker().Handle();
+
+	// 还原源窗口样式
+	if (_isSrcStyleChanged) {
+		const DWORD srcExStyle = GetWindowExStyle(hwndSrc);
+		SetWindowLongPtr(hwndSrc, GWL_EXSTYLE, srcExStyle & ~WS_EX_APPWINDOW);
+	}
+
+	// 还原 Kirikiri 窗口
+	if (_taskbarList) {
+		_taskbarList->DeleteTab(hwndSrc);
+		_taskbarList->AddTab(GetWindowOwner(hwndSrc));
+
+		// 修正任务栏焦点窗口和 Alt+Tab 切换顺序
+		if (GetForegroundWindow() == hwndSrc) {
+			SetForegroundWindow(GetDesktopWindow());
+			SetForegroundWindow(hwndSrc);
+		}
+	}
 }
 
 static winrt::com_ptr<IDXGIAdapter1> FindAdapterOfMonitor(IDXGIFactory7* dxgiFactory, HMONITOR hMon) noexcept {
@@ -198,34 +218,8 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
-	winrt::com_ptr<IDXGIDevice> dxgiDevice;
-	hr = _d3d11Device->QueryInterface<IDXGIDevice>(dxgiDevice.put());
-	if (FAILED(hr)) {
-		Logger::Get().ComError("获取 IDXGIDevice 失败", hr);
-		return false;
-	}
-
-	hr = CreateDirect3D11DeviceFromDXGIDevice(
-		dxgiDevice.get(), (IInspectable**)winrt::put_abi(_wrappedDevice));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateDirect3D11DeviceFromDXGIDevice 失败", hr);
-		return false;
-	}
-
-	winrt::com_ptr<IGraphicsCaptureItemInterop> interop =
-		winrt::try_get_activation_factory<winrt::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
-	if (!interop) {
-		Logger::Get().Error("获取 IGraphicsCaptureItemInterop 失败");
-		return false;
-	}
-
-	hr = interop->CreateForWindow(
-		ScalingWindow::Get().SrcHandle(),
-		winrt::guid_of<winrt::GraphicsCaptureItem>(),
-		winrt::put_abi(_captureItem)
-	);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("IGraphicsCaptureItemInterop::CreateForWindow 失败", hr);
+	if (!_InitializeCapture()) {
+		Logger::Get().Error("_InitializeCapture 失败");
 		return false;
 	}
 
@@ -732,6 +726,130 @@ bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dx
 	hr = device->OpenSharedHandle(hSharedFence.get(), IID_PPV_ARGS(&_sharedFence));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("OpenSharedHandle 失败", hr);
+		return false;
+	}
+
+	return true;
+}
+
+// 部分使用 Kirikiri 引擎的游戏有着这样的架构: 游戏窗口并非顶级窗口，而是被一个零尺寸
+// 的窗口所有。此时 Alt+Tab 列表中的窗口和任务栏图标实际上是所有者窗口，这会导致 WGC
+// 捕获失败。我们特殊处理这类窗口。
+static bool IsKirikiriWindow(HWND hwndSrc) noexcept {
+	const HWND hwndOwner = GetWindowOwner(hwndSrc);
+	if (!hwndOwner) {
+		return false;
+	}
+
+	RECT ownerRect;
+	if (!GetWindowRect(hwndOwner, &ownerRect)) {
+		Logger::Get().Win32Error("GetWindowRect 失败");
+		return false;
+	}
+
+	// 所有者窗口尺寸为零，而且是顶级窗口
+	return ownerRect.left == ownerRect.right && ownerRect.top == ownerRect.bottom &&
+		!GetWindowOwner(hwndOwner);
+}
+
+bool GraphicsCaptureFrameSource2::_InitializeCapture() noexcept {
+	winrt::com_ptr<IDXGIDevice> dxgiDevice;
+	HRESULT hr = _d3d11Device->QueryInterface<IDXGIDevice>(dxgiDevice.put());
+	if (FAILED(hr)) {
+		Logger::Get().ComError("获取 IDXGIDevice 失败", hr);
+		return false;
+	}
+
+	hr = CreateDirect3D11DeviceFromDXGIDevice(
+		dxgiDevice.get(), (IInspectable**)winrt::put_abi(_wrappedDevice));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateDirect3D11DeviceFromDXGIDevice 失败", hr);
+		return false;
+	}
+
+	winrt::com_ptr<IGraphicsCaptureItemInterop> interop =
+		winrt::try_get_activation_factory<winrt::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+	if (!interop) {
+		Logger::Get().Error("获取 IGraphicsCaptureItemInterop 失败");
+		return false;
+	}
+
+	const HWND hwndSrc = ScalingWindow::Get().SrcHandle();
+
+	const DWORD srcExStyle = GetWindowExStyle(hwndSrc);
+	// WS_EX_APPWINDOW 样式使窗口始终在 Alt+Tab 列表中显示
+	if (srcExStyle & WS_EX_APPWINDOW) {
+		hr = interop->CreateForWindow(
+			hwndSrc, winrt::guid_of<winrt::GraphicsCaptureItem>(), winrt::put_abi(_captureItem));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("IGraphicsCaptureItemInterop::CreateForWindow 失败", hr);
+			return false;
+		}
+
+		return true;
+	}
+
+	// 第一次尝试捕获。Kirikiri 窗口必定失败，无需尝试
+	const bool isSrcKirikiri = IsKirikiriWindow(hwndSrc);
+	if (isSrcKirikiri) {
+		Logger::Get().Info("源窗口有零尺寸的所有者窗口");
+	} else {
+		hr = interop->CreateForWindow(
+			hwndSrc, winrt::guid_of<winrt::GraphicsCaptureItem>(), winrt::put_abi(_captureItem));
+		if (SUCCEEDED(hr)) {
+			return true;
+		} else {
+			Logger::Get().ComError("IGraphicsCaptureItemInterop::CreateForWindow 失败", hr);
+		}
+	}
+
+	// 添加 WS_EX_APPWINDOW 样式
+	if (!SetWindowLongPtr(hwndSrc, GWL_EXSTYLE, srcExStyle | WS_EX_APPWINDOW)) {
+		Logger::Get().Win32Error("SetWindowLongPtr 失败");
+		return false;
+	}
+
+	Logger::Get().Info("已改变源窗口样式");
+	_isSrcStyleChanged = true;
+
+	// Kirikiri 窗口改变样式后所有者窗口和游戏窗口将同时出现在 Alt+Tab 列表和任务栏中。
+	// 虽然所有窗口都会如此，但 Kirikiri 的特殊之处在于两个窗口的图标和标题相同，为了不
+	// 引起困惑应隐藏所有者窗口的图标。
+	if (isSrcKirikiri) {
+		_taskbarList = winrt::try_create_instance<ITaskbarList>(CLSID_TaskbarList);
+		if (_taskbarList) {
+			hr = _taskbarList->HrInit();
+			if (SUCCEEDED(hr)) {
+				// 修正任务栏图标
+				_taskbarList->DeleteTab(GetWindowOwner(hwndSrc));
+				_taskbarList->AddTab(hwndSrc);
+
+				// 修正 Alt+Tab 切换顺序
+				if (GetForegroundWindow() == hwndSrc) {
+					SetForegroundWindow(GetDesktopWindow());
+					SetForegroundWindow(hwndSrc);
+				}
+			} else {
+				Logger::Get().ComError("ITaskbarList::HrInit 失败", hr);
+				_taskbarList = nullptr;
+			}
+		} else {
+			Logger::Get().Error("创建 ITaskbarList 失败");
+		}
+	}
+
+	// 再次尝试捕获
+	hr = interop->CreateForWindow(
+		hwndSrc, winrt::guid_of<winrt::GraphicsCaptureItem>(), winrt::put_abi(_captureItem));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("IGraphicsCaptureItemInterop::CreateForWindow 失败", hr);
+
+		if (_isSrcStyleChanged) {
+			// 恢复源窗口样式
+			SetWindowLongPtr(hwndSrc, GWL_EXSTYLE, srcExStyle);
+			_isSrcStyleChanged = false;
+		}
+
 		return false;
 	}
 

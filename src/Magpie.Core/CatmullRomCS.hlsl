@@ -95,11 +95,10 @@ uint2 Rmp8x8(uint a) {
 void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 	uint2 gxy = (gid.xy << uint2(4, 3)) + Rmp8x8(tid.x);
 	float2 pos = (gxy + 0.5f) * outputPt;
-	float2 step = 8 * outputPt;
 
 	output[gxy] = CatmullRom(pos);
 
 	gxy.x += 8u;
-	pos.x += step.x;
+    pos.x += 8 * outputPt.x;
 	output[gxy] = CatmullRom(pos);
 }

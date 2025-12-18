@@ -1,5 +1,6 @@
 #pragma once
 #include "ColorInfo.h"
+#include <ShlObj.h>
 #include <winrt/Windows.Graphics.Capture.h>
 
 namespace Magpie {
@@ -46,6 +47,8 @@ private:
 
 	bool _CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept;
 
+	bool _InitializeCapture() noexcept;
+
 	void _Direct3D11CaptureFramePool_FrameArrived(
 		const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& pool,
 		const winrt::IInspectable&
@@ -83,7 +86,8 @@ private:
 	winrt::Windows::Graphics::Capture::GraphicsCaptureItem _captureItem{ nullptr };
 	winrt::Windows::Graphics::Capture::GraphicsCaptureSession _captureSession{ nullptr };
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool _captureFramePool{ nullptr };
-
+	winrt::com_ptr<ITaskbarList> _taskbarList;
+	
 	wil::srwlock _latestFrameLock;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _latestFrame{ nullptr };
 
@@ -101,7 +105,9 @@ private:
 	uint32_t _curFrameIdx = 0;
 	
 	D3D12_BOX _frameBox{};
+
 	bool _isUsingScRGB = false;
+	bool _isSrcStyleChanged = false;
 };
 
 }
