@@ -25,6 +25,18 @@ GraphicsCaptureFrameSource2::~GraphicsCaptureFrameSource2() noexcept {
 
 	const HWND hwndSrc = ScalingWindow::Get().SrcTracker().Handle();
 
+	// 还原源窗口圆角
+	if (_isRoundCornerDisabled) {
+		int value = DWMWCP_DEFAULT;
+		HRESULT hr = DwmSetWindowAttribute(
+			hwndSrc, DWMWA_WINDOW_CORNER_PREFERENCE, &value, sizeof(value));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("取消禁用窗口圆角失败", hr);
+		} else {
+			Logger::Get().Info("已取消禁用窗口圆角");
+		}
+	}
+
 	// 还原源窗口样式
 	if (_isSrcStyleChanged) {
 		const DWORD srcExStyle = GetWindowExStyle(hwndSrc);
@@ -227,8 +239,11 @@ bool GraphicsCaptureFrameSource2::Initialize(
 }
 
 bool GraphicsCaptureFrameSource2::Start() noexcept {
-	if (_captureSession) {
-		return true;
+	assert(!_captureSession);
+
+	// 尽可能推迟禁用源窗口圆角
+	if (!_isRoundCornerDisabled) {
+		_DisableRoundCornerInWin11();
 	}
 
 	try {
@@ -895,6 +910,24 @@ void GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived(
 
 	// 唤起生产者线程
 	PostThreadMessage(_producerThreadId.load(std::memory_order_relaxed), WM_NULL, 0, 0);
+}
+
+void GraphicsCaptureFrameSource2::_DisableRoundCornerInWin11() noexcept {
+	if (Win32Helper::GetOSVersion().IsWin10()) {
+		return;
+	}
+
+	const HWND hwndSrc = ScalingWindow::Get().SrcHandle();
+
+	int value = DWMWCP_DONOTROUND;
+	HRESULT hr = DwmSetWindowAttribute(
+		hwndSrc, DWMWA_WINDOW_CORNER_PREFERENCE, &value, sizeof(value));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("禁用窗口圆角失败", hr);
+		return;
+	}
+
+	_isRoundCornerDisabled = true;
 }
 
 void GraphicsCaptureFrameSource2::_StopCapture() noexcept {

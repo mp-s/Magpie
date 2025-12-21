@@ -54,6 +54,8 @@ private:
 		const winrt::IInspectable&
 	);
 
+	void _DisableRoundCornerInWin11() noexcept;
+
 	void _StopCapture() noexcept;
 
 	GraphicsContext* _graphicsContext = nullptr;
@@ -108,6 +110,7 @@ private:
 
 	bool _isUsingScRGB = false;
 	bool _isSrcStyleChanged = false;
+	bool _isRoundCornerDisabled = false;
 };
 
 }
