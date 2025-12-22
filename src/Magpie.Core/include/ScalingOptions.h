@@ -216,21 +216,7 @@ struct ScalingOptions {
 	void (*showError)(HWND hwndTarget, ScalingError error) noexcept = nullptr;
 	void (*save)(const ScalingOptions& options, HWND hwndScaling) noexcept = nullptr;
 
-	void Log() const noexcept;
-
-	bool RealIsCaptureTitleBar() const noexcept {
-		// GDI 和 DwmSharedSurface 不支持捕获标题栏
-		return IsCaptureTitleBar() &&
-			captureMethod != CaptureMethod::GDI && captureMethod != CaptureMethod::DwmSharedSurface;
-	}
-
-	bool RealIsAllowScalingMaximized() const noexcept {
-		return IsAllowScalingMaximized() && !IsWindowedMode();
-	}
-
-	bool RealIsSimulateExclusiveFullscreen() const noexcept {
-		return IsSimulateExclusiveFullscreen() && !IsWindowedMode();
-	}
+	void Prepare() noexcept;
 };
 
 }

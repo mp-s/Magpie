@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "FrameProducer.h"
 #include "CommonSharedConstants.h"
-#include "GraphicsCaptureFrameSource2.h"
+#include "GraphicsCaptureFrameSource.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "StrHelper.h"
@@ -84,9 +84,14 @@ HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {
 
 	_dispatcher.TryEnqueue([&] {
 		[&] {
+			ComponentState state = _state.load(std::memory_order_relaxed);
+			if (state != ComponentState::NoError) {
+				hr = state == ComponentState::DeviceLost ? DXGI_ERROR_DEVICE_REMOVED : E_FAIL;
+				return;
+			}
+
 			hr = _graphicsContext.WaitForGpu();
-			if (FAILED(hr)) {
-				Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
 				return;
 			}
 
@@ -94,8 +99,7 @@ HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {
 			outputSize = _outputSize;
 
 			hr = _frameRingBuffer.OnResized(_outputSize);
-			if (FAILED(hr)) {
-				Logger::Get().ComError("FrameRingBuffer::OnResized 失败", hr);
+			if (!_CheckResult(hr, "FrameRingBuffer::OnResized 失败")) {
 				return;
 			}
 
@@ -126,15 +130,13 @@ HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {
 			}
 
 			hr = _Render();
-			if (FAILED(hr)) {
-				Logger::Get().ComError("_Render 失败", hr);
+			if (!_CheckResult(hr, "_Render 失败")) {
 				return;
 			}
 
 			// 等待渲染完成
 			hr = _graphicsContext.WaitForGpu();
-			if (FAILED(hr)) {
-				Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
 				return;
 			}
 		}();
@@ -153,21 +155,31 @@ HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 
 	_dispatcher.TryEnqueue([&] {
 		[&] {
+			ComponentState state = _state.load(std::memory_order_relaxed);
+			if (state != ComponentState::NoError) {
+				hr = state == ComponentState::DeviceLost ? DXGI_ERROR_DEVICE_REMOVED : E_FAIL;
+				return;
+			}
+
 			hr = _graphicsContext.WaitForGpu();
-			if (FAILED(hr)) {
-				Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
 				return;
 			}
 
 			hr = _frameRingBuffer.OnColorInfoChanged(colorInfo);
-			if (FAILED(hr)) {
-				Logger::Get().ComError("FrameRingBuffer::OnColorInfoChanged 失败", hr);
+			if (!_CheckResult(hr, "FrameRingBuffer::OnColorInfoChanged 失败")) {
 				return;
 			}
 
 			hr = _Render();
-			if (FAILED(hr)) {
-				Logger::Get().ComError("_Render 失败", hr);
+			if (!_CheckResult(hr, "_Render 失败")) {
+				return;
+			}
+
+			// 等待渲染完成
+			hr = _graphicsContext.WaitForGpu();
+			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
+				return;
 			}
 		}();
 		
@@ -186,7 +198,7 @@ void FrameProducer::OnCursorVisibilityChanged(bool isVisible, bool onDestory) no
 		}
 
 		_CheckResult(_frameSource->OnCursorVisibilityChanged(isVisible, onDestory),
-			"GraphicsCaptureFrameSource2::OnCursorVisibilityChanged 失败");
+			"GraphicsCaptureFrameSource::OnCursorVisibilityChanged 失败");
 	});
 }
 
@@ -246,9 +258,14 @@ void FrameProducer::_ProducerThreadProc(
 			continue;
 		}
 
+		bool isNewFrameAvailable;
+		if (!_CheckResult(_frameSource->CheckForNewFrame(isNewFrameAvailable),
+			"GraphicsCaptureFrameSource::CheckForNewFrame 失败")) {
+			break;
+		}
+
 		// 强制等待第一帧
-		if (!_frameSource->IsNewFrameAvailable() &&
-			(isWaitingForFirstFrame || stepTimerStatus != StepTimerStatus::ForceNewFrame)) {
+		if (!isNewFrameAvailable && (isWaitingForFirstFrame || stepTimerStatus != StepTimerStatus::ForceNewFrame)) {
 			continue;
 		}
 		isWaitingForFirstFrame = false;
@@ -335,9 +352,9 @@ bool FrameProducer::_Initialize(
 
 	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-	_frameSource = std::make_unique<GraphicsCaptureFrameSource2>();
+	_frameSource = std::make_unique<GraphicsCaptureFrameSource>();
 	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
-		Logger::Get().Error("初始化 GraphicsCaptureFrameSource2 失败");
+		Logger::Get().Error("初始化 GraphicsCaptureFrameSource 失败");
 		return false;
 	}
 
@@ -472,7 +489,7 @@ bool FrameProducer::_Initialize(
 
 	// 最后启动捕获以尽可能推迟显示黄色边框 (Win10) 或禁用圆角 (Win11)
 	if (!_frameSource->Start()) {
-		Logger::Get().Error("GraphicsCaptureFrameSource2::Start 失败");
+		Logger::Get().Error("GraphicsCaptureFrameSource::Start 失败");
 		return false;
 	}
 
@@ -519,7 +536,7 @@ HRESULT FrameProducer::_Render() noexcept {
 	uint32_t frameSourceOutputIdx;
 	hr = _frameSource->Update(frameSourceOutputIdx);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("GraphicsCaptureFrameSource2::Update 失败", hr);
+		Logger::Get().ComError("GraphicsCaptureFrameSource::Update 失败", hr);
 		return hr;
 	}
 

@@ -6,7 +6,7 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "SwapChainPresenter.h"
-#include "GraphicsCaptureFrameSource2.h"
+#include "GraphicsCaptureFrameSource.h"
 #include <d3dkmthk.h>
 #include <windows.graphics.display.interop.h>
 
@@ -338,7 +338,7 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 		return S_OK;
 	}
 
-	// 等待 GPU 完成然后改变交换链格式
+	// 会等待 GPU
 	HRESULT hr = _presenter->OnColorInfoChanged(_colorInfo);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("SwapChainPresenter::OnColorInfoChanged 失败", hr);

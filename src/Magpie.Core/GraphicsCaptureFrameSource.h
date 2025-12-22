@@ -15,13 +15,13 @@ enum class FrameSourceState {
 
 // 使用 Windows.Graphics.Capture 接口捕获窗口，见
 // https://docs.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture
-class GraphicsCaptureFrameSource2 {
+class GraphicsCaptureFrameSource {
 public:
-	GraphicsCaptureFrameSource2() = default;
-	GraphicsCaptureFrameSource2(const GraphicsCaptureFrameSource2&) = delete;
-	GraphicsCaptureFrameSource2(GraphicsCaptureFrameSource2&&) = delete;
+	GraphicsCaptureFrameSource() = default;
+	GraphicsCaptureFrameSource(const GraphicsCaptureFrameSource&) = delete;
+	GraphicsCaptureFrameSource(GraphicsCaptureFrameSource&&) = delete;
 
-	~GraphicsCaptureFrameSource2() noexcept;
+	~GraphicsCaptureFrameSource() noexcept;
 
 	bool Initialize(
 		GraphicsContext& graphicsContext,
@@ -40,7 +40,7 @@ public:
 		return true;
 	}
 
-	bool IsNewFrameAvailable() noexcept;
+	HRESULT CheckForNewFrame(bool& isNewFrameAvailable) noexcept;
 
 	HRESULT Update(uint32_t& outputIdx) noexcept;
 
@@ -81,6 +81,16 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _bridgeFence;
 	winrt::com_ptr<ID3D12Fence1> _sharedFence;
 	uint64_t _curCrossAdapterFenceValue = 0;
+
+	// 用于检查重复帧
+	winrt::com_ptr<ID3D12CommandQueue> _dfCommandQueue;
+	winrt::com_ptr<ID3D12GraphicsCommandList> _dfCommandList;
+	winrt::com_ptr<ID3D12CommandAllocator> _dfCommandAllocator;
+	winrt::com_ptr<ID3D12Resource> _dfResultBuffer;
+	winrt::com_ptr<ID3D12Resource> _dfResultReadbackBuffer;
+	winrt::com_ptr<ID3D12DescriptorHeap> _dfDescriptorHeap;
+	// 用于清空 _dfResultBuffer
+	winrt::com_ptr<ID3D12DescriptorHeap> _dfCpuOnlyDescriptorHeap;
 
 	struct _FrameCrossAdapterResourceSlot {
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;

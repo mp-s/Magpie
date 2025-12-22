@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "GraphicsCaptureFrameSource2.h"
+#include "GraphicsCaptureFrameSource.h"
 #include "ColorInfo.h"
 #include "DebugInfo.h"
 #include "DirectXHelper.h"
@@ -20,7 +20,9 @@ using namespace Windows::Graphics::DirectX::Direct3D11;
 
 namespace Magpie {
 
-GraphicsCaptureFrameSource2::~GraphicsCaptureFrameSource2() noexcept {
+static constexpr uint32_t MAX_DIRTY_RECTS = 8;
+
+GraphicsCaptureFrameSource::~GraphicsCaptureFrameSource() noexcept {
 	if (_captureSession) {
 		_StopCapture();
 	}
@@ -134,7 +136,7 @@ static bool CalcWindowCapturedFrameBounds(HWND hWnd, RECT& rect) noexcept {
 	return true;
 }
 
-bool GraphicsCaptureFrameSource2::Initialize(
+bool GraphicsCaptureFrameSource::Initialize(
 	GraphicsContext& graphicsContext,
 	const RECT& srcRect,
 	HMONITOR hMonSrc,
@@ -194,9 +196,9 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
-	const uint32_t maxInFlightFrames = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	_slots.resize(maxInFlightFrames);
-	_curFrameIdx = maxInFlightFrames - 1;
+	const ScalingOptions& options = ScalingWindow::Get().Options();
+	_slots.resize(options.maxProducerInFlightFrames);
+	_curFrameIdx = options.maxProducerInFlightFrames - 1;
 
 	{
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
@@ -232,6 +234,95 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
+	if (options.duplicateFrameDetectionMode != DuplicateFrameDetectionMode::Never) {
+		ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : device;
+
+		{
+			// 需要快速获取结果，因此使用高优先级
+			D3D12_COMMAND_QUEUE_DESC queueDesc = {
+				.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
+				.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH
+			};
+			hr = dfDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_dfCommandQueue));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommandQueue 失败", hr);
+				return false;
+			}
+		}
+
+		hr = dfDevice->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
+			D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_dfCommandList));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandList1 失败", hr);
+			return false;
+		}
+
+		hr = dfDevice->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&_dfCommandAllocator));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandAllocator 失败", hr);
+			return false;
+		}
+
+		{
+			CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+			D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
+				D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
+			CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(
+				MAX_DIRTY_RECTS * sizeof(uint64_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+			hr = dfDevice->CreateCommittedResource(&heapProperties, heapFlag,
+				&bufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_dfResultBuffer));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommittedResource 失败", hr);
+				return false;
+			}
+
+			heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
+			bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+			hr = dfDevice->CreateCommittedResource(&heapProperties, heapFlag,
+				&bufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_dfResultReadbackBuffer));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommittedResource 失败", hr);
+				return false;
+			}
+		}
+
+		{
+			D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {
+				.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+				.NumDescriptors = 1,
+				.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
+			};
+			hr = dfDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_dfDescriptorHeap));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
+				return false;
+			}
+
+			srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+			hr = dfDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_dfCpuOnlyDescriptorHeap));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
+				return false;
+			}
+		}
+		
+		// 在 CPU-only 描述符堆上创建 UAV，然后复制到 shader-visible 描述符堆
+		CD3DX12_UNORDERED_ACCESS_VIEW_DESC desc =
+			CD3DX12_UNORDERED_ACCESS_VIEW_DESC::TypedBuffer(DXGI_FORMAT_R32_UINT, MAX_DIRTY_RECTS);
+		CD3DX12_CPU_DESCRIPTOR_HANDLE cpuOnlyCpuHandle(
+			_dfCpuOnlyDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+		dfDevice->CreateUnorderedAccessView(_dfResultBuffer.get(), nullptr, &desc, cpuOnlyCpuHandle);
+
+		dfDevice->CopyDescriptorsSimple(
+			1,
+			_dfDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+			cpuOnlyCpuHandle,
+			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
+		);
+	}
+
 	if (!_InitializeCaptureItem()) {
 		Logger::Get().Error("_InitializeCaptureItem 失败");
 		return false;
@@ -240,7 +331,7 @@ bool GraphicsCaptureFrameSource2::Initialize(
 	return true;
 }
 
-bool GraphicsCaptureFrameSource2::Start() noexcept {
+bool GraphicsCaptureFrameSource::Start() noexcept {
 	assert(!_captureSession);
 
 	// 尽可能推迟禁用源窗口圆角
@@ -255,11 +346,6 @@ bool GraphicsCaptureFrameSource2::Start() noexcept {
 	}
 
 	return true;
-}
-
-bool GraphicsCaptureFrameSource2::IsNewFrameAvailable() noexcept {
-	auto lk = _latestFrameLock.lock_shared();
-	return (bool)_latestFrame;
 }
 
 static HRESULT GetFrameResourceFromCaptureFrame(
@@ -297,7 +383,66 @@ static HRESULT GetFrameResourceFromCaptureFrame(
 	return S_OK;
 }
 
-HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
+HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) noexcept {
+	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame latestFrame{ nullptr };
+	{
+		auto lk = _latestFrameLock.lock_shared();
+		latestFrame = _latestFrame;
+	}
+
+	if (!latestFrame) {
+		isNewFrameAvailable = false;
+		return S_OK;
+	}
+
+	winrt::com_ptr<ID3D12Resource> frameResource;
+	HRESULT hr = GetFrameResourceFromCaptureFrame(
+		latestFrame, _bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice(), frameResource);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	hr = _dfCommandAllocator->Reset();
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	hr = _dfCommandList->Reset(_dfCommandAllocator.get(), nullptr);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	{
+		ID3D12DescriptorHeap* t = _dfDescriptorHeap.get();
+		_dfCommandList->SetDescriptorHeaps(1, &t);
+	}
+	
+	const UINT zeros[4] = {};
+	_dfCommandList->ClearUnorderedAccessViewUint(
+		_dfDescriptorHeap->GetGPUDescriptorHandleForHeapStart(),
+		_dfCpuOnlyDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+		_dfResultBuffer.get(),
+		zeros,
+		0,
+		nullptr
+	);
+
+	hr = _dfCommandList->Close();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
+		return hr;
+	}
+
+	{
+		ID3D12CommandList* t = _dfCommandList.get();
+		_dfCommandQueue->ExecuteCommandLists(1, &t);
+	}
+	
+	isNewFrameAvailable = true;
+	return S_OK;
+}
+
+HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 	{
 		// 不要在持有 _latestFrameLock 时释放 Direct3D11CaptureFrame。WGC 内部使用 Critical Section
 		// 同步，如果此时 _Direct3D11CaptureFramePool_FrameArrived 正在执行会死锁。
@@ -379,7 +524,6 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 			return hr;
 		}
 
-		// D3D11 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
 		{
 			CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
 			CD3DX12_TEXTURE_COPY_LOCATION dest(curCASlot.bridgeResource.get(), 0);
@@ -411,7 +555,6 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 
 		_copyCommandList->CopyResource(curSlot.output.get(), curCASlot.sharedResource.get());
 	} else {
-		// D3D11 共享纹理有 D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS 标志，因此无需屏障
 		CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
 		CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
 		_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
@@ -439,7 +582,7 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 }
 
 // 显示光标时需要重启捕获，否则光标可能不会立刻显示
-HRESULT GraphicsCaptureFrameSource2::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
+HRESULT GraphicsCaptureFrameSource::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
 	if (!isVisible) {
 		return S_OK;
 	}
@@ -487,7 +630,7 @@ static bool IsDebugLayersAvailable() noexcept {
 #endif
 }
 
-bool GraphicsCaptureFrameSource2::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept {
+bool GraphicsCaptureFrameSource::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept {
 	// 查找源窗口所在屏幕连接的适配器
 	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
 		FindAdapterOfMonitor(_graphicsContext->GetDXGIFactoryForEnumingAdapters(), hMonSrc);
@@ -579,7 +722,7 @@ bool GraphicsCaptureFrameSource2::_CreateCaptureDevice(HMONITOR hMonSrc) noexcep
 }
 
 // 通过 D3D12 跨适配器共享机制共享捕获图像
-bool GraphicsCaptureFrameSource2::_CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept {
+bool GraphicsCaptureFrameSource::_CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept {
 	HRESULT hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&_bridgeDevice));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("D3D12CreateDevice 失败", hr);
@@ -752,7 +895,7 @@ static bool IsKirikiriWindow(HWND hwndSrc) noexcept {
 		!GetWindowOwner(hwndOwner);
 }
 
-bool GraphicsCaptureFrameSource2::_InitializeCaptureItem() noexcept {
+bool GraphicsCaptureFrameSource::_InitializeCaptureItem() noexcept {
 	winrt::com_ptr<IDXGIDevice> dxgiDevice;
 	HRESULT hr = _d3d11Device->QueryInterface<IDXGIDevice>(dxgiDevice.put());
 	if (FAILED(hr)) {
@@ -856,7 +999,7 @@ bool GraphicsCaptureFrameSource2::_InitializeCaptureItem() noexcept {
 	return true;
 }
 
-void GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived(
+void GraphicsCaptureFrameSource::_Direct3D11CaptureFramePool_FrameArrived(
 	const winrt::Direct3D11CaptureFramePool& pool,
 	const winrt::IInspectable&
 ) {
@@ -897,7 +1040,7 @@ void GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived(
 	PostThreadMessage(_producerThreadId.load(std::memory_order_relaxed), WM_NULL, 0, 0);
 }
 
-void GraphicsCaptureFrameSource2::_DisableRoundCornerInWin11() noexcept {
+void GraphicsCaptureFrameSource::_DisableRoundCornerInWin11() noexcept {
 	if (Win32Helper::GetOSVersion().IsWin10()) {
 		return;
 	}
@@ -915,7 +1058,7 @@ void GraphicsCaptureFrameSource2::_DisableRoundCornerInWin11() noexcept {
 	_isRoundCornerDisabled = true;
 }
 
-HRESULT GraphicsCaptureFrameSource2::_StartCapture() noexcept {
+HRESULT GraphicsCaptureFrameSource::_StartCapture() noexcept {
 	assert(!_captureFramePool && !_captureSession);
 
 	try {
@@ -928,7 +1071,7 @@ HRESULT GraphicsCaptureFrameSource2::_StartCapture() noexcept {
 		);
 
 		_captureFramePool.FrameArrived(
-			{ this, &GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived });
+			{ this, &GraphicsCaptureFrameSource::_Direct3D11CaptureFramePool_FrameArrived });
 
 		_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
 
@@ -966,7 +1109,7 @@ HRESULT GraphicsCaptureFrameSource2::_StartCapture() noexcept {
 }
 
 // 调用前应等待 GPU 
-void GraphicsCaptureFrameSource2::_StopCapture() noexcept {
+void GraphicsCaptureFrameSource::_StopCapture() noexcept {
 	assert(_captureFramePool && _captureSession);
 
 	_captureSession.Close();

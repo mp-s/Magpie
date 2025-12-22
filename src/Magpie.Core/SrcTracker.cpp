@@ -476,7 +476,7 @@ ScalingError SrcTracker::_CalcSrcRect(
 ) noexcept {
 	if (_windowKind == SrcWindowKind::NoNativeFrame) {
 		if (hasCustomNonclient) {
-			if (options.RealIsCaptureTitleBar()) {
+			if (options.IsCaptureTitleBar()) {
 				// 窗口的非客户区是自绘的，无法模拟，因此启用捕获标题栏时捕获整个窗口
 				_srcRect = _windowRect;
 			} else {
@@ -518,10 +518,9 @@ ScalingError SrcTracker::_CalcSrcRect(
 			_srcRect = _windowRect;
 		}
 	} else {
-		const bool isCaptureTitleBar = options.RealIsCaptureTitleBar();
-		
 		// UWP 窗口都是 NoTitleBar 类型，但可能使用子窗口作为“客户区”
-		if (_windowKind == SrcWindowKind::NoTitleBar && !isCaptureTitleBar && GetClientRectOfUWP(_hWnd, _srcRect)) {
+		if (_windowKind == SrcWindowKind::NoTitleBar &&
+			!options.IsCaptureTitleBar() && GetClientRectOfUWP(_hWnd, _srcRect)) {
 			_srcRect.top = std::max(_srcRect.top, _windowFrameRect.top + borderThicknessInFrame);
 		} else {
 			// 不要使用客户区矩形，它不包含滚动条
@@ -530,7 +529,7 @@ ScalingError SrcTracker::_CalcSrcRect(
 			_srcRect.right = _windowFrameRect.right - borderThicknessInFrame;
 			_srcRect.bottom = _windowFrameRect.bottom - borderThicknessInFrame;
 
-			if (!isCaptureTitleBar || _windowKind == SrcWindowKind::OnlyThickFrame) {
+			if (!options.IsCaptureTitleBar() || _windowKind == SrcWindowKind::OnlyThickFrame) {
 				RECT clientRect;
 				if (!Win32Helper::GetClientScreenRect(_hWnd, clientRect)) {
 					Logger::Get().Error("GetClientScreenRect 失败");

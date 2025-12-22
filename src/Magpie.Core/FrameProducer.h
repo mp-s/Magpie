@@ -7,7 +7,7 @@
 
 namespace Magpie {
 
-class GraphicsCaptureFrameSource2;
+class GraphicsCaptureFrameSource;
 
 class FrameProducer {
 public:
@@ -75,7 +75,7 @@ private:
 	GraphicsContext _graphicsContext;
 	FrameRingBuffer _frameRingBuffer;
 	StepTimer _stepTimer;
-	std::unique_ptr<GraphicsCaptureFrameSource2> _frameSource;
+	std::unique_ptr<GraphicsCaptureFrameSource> _frameSource;
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _descriptorHeap;
 	uint32_t _descriptorSize = 0;

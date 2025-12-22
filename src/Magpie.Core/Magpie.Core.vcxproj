@@ -67,7 +67,7 @@
     <ClInclude Include="FrameProducer.h" />
     <ClInclude Include="FrameSourceBase.h" />
     <ClInclude Include="GDIFrameSource.h" />
-    <ClInclude Include="GraphicsCaptureFrameSource2.h" />
+    <ClInclude Include="GraphicsCaptureFrameSource.h" />
     <ClInclude Include="GraphicsContext.h" />
     <ClInclude Include="ImGuiBackend.h" />
     <ClInclude Include="ImGuiFontsCacheManager.h" />
@@ -116,7 +116,7 @@
     <ClCompile Include="FrameProducer.cpp" />
     <ClCompile Include="FrameSourceBase.cpp" />
     <ClCompile Include="GDIFrameSource.cpp" />
-    <ClCompile Include="GraphicsCaptureFrameSource2.cpp" />
+    <ClCompile Include="GraphicsCaptureFrameSource.cpp" />
     <ClCompile Include="GraphicsContext.cpp" />
     <ClCompile Include="ImGuiBackend.cpp" />
     <ClCompile Include="ImGuiFontsCacheManager.cpp" />

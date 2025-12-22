@@ -113,7 +113,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		if (_options.IsWindowedMode()) {
 			Logger::Get().Info("已最大化的窗口不支持窗口模式缩放");
 			return ScalingError::BannedInWindowedMode;
-		} else if (!_options.RealIsAllowScalingMaximized()) {
+		} else if (!_options.IsAllowScalingMaximized()) {
 			Logger::Get().Info("源窗口已最大化");
 			return ScalingError::Maximized;
 		}
@@ -305,7 +305,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 
 	LogRects(_srcTracker.SrcRect(), _rendererRect, _windowRect);
 
-	if (!_options.RealIsAllowScalingMaximized()) {
+	if (!_options.IsAllowScalingMaximized()) {
 		// 检查源窗口是否是无边框全屏窗口
 		if (srcWindowKind == SrcWindowKind::NoNativeFrame && _srcTracker.WindowRect() == _rendererRect) {
 			Logger::Get().Info("源窗口已全屏");
@@ -348,22 +348,10 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 void ScalingWindow::Start(HWND hwndSrc, ScalingOptions&& options) noexcept {
 	assert(!Handle());
 
-	assert(!options.effects.empty());
-	assert(options.cropping.Left >= 0 && options.cropping.Top >= 0 &&
-		options.cropping.Right >= 0 && options.cropping.Bottom >= 0);
-	assert(options.minFrameRate >= 0);
-	assert(!options.maxFrameRate.has_value() || *options.maxFrameRate > 0);
-	assert(options.cursorScaling >= 0);
-	assert(!options.autoHideCursorDelay.has_value() || *options.autoHideCursorDelay > 0);
-	assert(options.initialWindowedScaleFactor >= 0);
-	assert(!options.screenshotsDir.empty());
-	assert(options.showToast && options.showError && options.save);
-	assert(options.maxProducerInFlightFrames >= 1);
-
-	options.Log();
 	// 缩放结束后失效
 	_options = std::move(options);
-
+	_options.Prepare();
+	
 	ScalingError error = _StartImpl(hwndSrc);
 	if (error != ScalingError::NoError) {
 		_options.showError(hwndSrc, error);
@@ -1344,7 +1332,7 @@ void ScalingWindow::_Show() noexcept {
 	}
 
 	// 模拟独占全屏
-	if (_options.RealIsSimulateExclusiveFullscreen()) {
+	if (_options.IsSimulateExclusiveFullscreen()) {
 		// 延迟 1s 以避免干扰游戏的初始化，见 #495
 		([]()->winrt::fire_and_forget {
 			const uint32_t runId = RunId();
