@@ -1,5 +1,4 @@
 #pragma once
-#include "CommonDefines.h"
 
 #ifdef MP_DEBUG_INFO
 
@@ -7,12 +6,16 @@
 struct DebugInfo {
 	// 模拟低速 GPU
 	float gpuSlowDownFactor = 0.0f;
+	// 缩放窗口的不透明度
+	uint8_t scalingWindowOpacity = 255;
 	// 启用 GPU-based validation
 	bool enableGPUBasedValidation = false;
 	// 禁用 GPU 的动态时钟频率调整，需要启用开发人员模式
 	bool enableStablePower = false;
 	// 使用 CPU 渲染
 	bool useWarp = false;
+	// 窗口模式缩放时把用于调整窗口尺寸的辅助窗口标示出来
+	bool highlightBorder = false;
 
 	// 用于同步对下面成员的访问
 	wil::srwlock lock;

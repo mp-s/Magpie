@@ -8,8 +8,6 @@
     <UseNativeMicroArch>false</UseNativeMicroArch>
     <!-- 编译为打包应用 (暂不支持) -->
     <IsPackaged>false</IsPackaged>
-    <!-- 窗口模式缩放时把用于调整窗口尺寸的辅助窗口标示出来 -->
-    <DebugBorder>false</DebugBorder>
     <!-- 启用调试信息 -->
     <DebugInfo>false</DebugInfo>
     <!-- 使用 composition swapchain 呈现 -->

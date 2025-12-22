@@ -489,8 +489,13 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 
 		_currentDpi = GetDpiForWindow(Handle());
 
-		// 设置窗口不透明。不完全透明时可关闭 DirectFlip
-		if (!SetLayeredWindowAttributes(Handle(), 0, 255, LWA_ALPHA)) {
+		// 设置窗口不透明度
+#ifdef MP_DEBUG_INFO
+		const BYTE alpha = DEBUG_INFO.scalingWindowOpacity;
+#else
+		constexpr BYTE alpha = 255;
+#endif
+		if (!SetLayeredWindowAttributes(Handle(), 0, alpha, LWA_ALPHA)) {
 			Logger::Get().Win32Error("SetLayeredWindowAttributes 失败");
 		}
 
@@ -1611,17 +1616,21 @@ LRESULT ScalingWindow::_BorderHelperWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
 		SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCT*)lParam)->lpCreateParams);
 	} else {
 		switch (msg) {
-#ifdef MP_DEBUG_BORDER
+#ifdef MP_DEBUG_INFO
 		case WM_ERASEBKGND:
 		{
-			// 用颜色标示辅助窗口
-			int side = (int)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-			HBRUSH hBrush = CreateSolidBrush(side % 2 == 0 ? RGB(255, 0, 0) : RGB(0, 0, 255));
-			RECT clientRect;
-			GetClientRect(hWnd, &clientRect);
-			FillRect((HDC)wParam, &clientRect, hBrush);
-			DeleteBrush(hBrush);
-			return TRUE;
+			if (DEBUG_INFO.highlightBorder) {
+				// 用颜色标示辅助窗口
+				int side = (int)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+				HBRUSH hBrush = CreateSolidBrush(side % 2 == 0 ? RGB(255, 0, 0) : RGB(0, 0, 255));
+				RECT clientRect;
+				GetClientRect(hWnd, &clientRect);
+				FillRect((HDC)wParam, &clientRect, hBrush);
+				DeleteBrush(hBrush);
+				return TRUE;
+			} else {
+				break;
+			}
 		}
 #endif
 		case WM_NCHITTEST:
@@ -1727,11 +1736,10 @@ void ScalingWindow::_CreateBorderHelperWindows() noexcept {
 		}
 
 		_hwndResizeHelpers[i].reset(CreateWindowEx(
-#ifdef MP_DEBUG_BORDER
-			WS_EX_NOACTIVATE,
-#else
-			WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+#ifdef MP_DEBUG_INFO
+			DEBUG_INFO.highlightBorder ? WS_EX_NOACTIVATE :
 #endif
+			WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
 			CommonSharedConstants::SCALING_BORDER_HELPER_WINDOW_CLASS_NAME,
 			nullptr,
 			WS_POPUP,
@@ -1753,7 +1761,7 @@ void ScalingWindow::_RepostionBorderHelperWindows() noexcept {
 		resizeHandleLen *= 2;
 	}
 
-	int flags = SWP_NOACTIVATE | SWP_NOCOPYBITS;
+	int flags = SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOREDRAW;
 
 	if (_areResizeHelperWindowsVisible) {
 		flags |= SWP_NOZORDER;
@@ -1770,8 +1778,10 @@ void ScalingWindow::_RepostionBorderHelperWindows() noexcept {
 		}
 	}
 
-#ifndef MP_DEBUG_BORDER
-	flags |= SWP_NOREDRAW;
+#ifdef MP_DEBUG_INFO
+	if (DEBUG_INFO.highlightBorder) {
+		flags &= ~SWP_NOREDRAW;
+	}
 #endif
 
 	// ┌────────────────────┐
