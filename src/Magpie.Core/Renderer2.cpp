@@ -122,6 +122,11 @@ ComponentState Renderer2::Render(bool waitForGpu, bool* waitingForFirstFrame) no
 		return _state;
 	}
 
+	_state = _frameProducer->GetState();
+	if (_state != ComponentState::NoError) {
+		return _state;
+	}
+
 	{
 		uint64_t latestProducerFrameNumber = _frameProducer->GetLatestFrameNumber();
 		if (latestProducerFrameNumber == _lastProducerFrameNumber) {
@@ -191,6 +196,10 @@ void Renderer2::OnMsgDisplayChanged() noexcept {
 	}
 
 	_CheckResult(_UpdateColorSpace(), "_UpdateColorSpace 失败");
+}
+
+void Renderer2::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
+	_frameProducer->OnCursorVisibilityChanged(isVisible, onDestory);
 }
 
 void Renderer2::_TryInitDisplayInfo() noexcept {

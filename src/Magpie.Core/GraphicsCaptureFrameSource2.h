@@ -13,6 +13,8 @@ enum class FrameSourceState {
 	NewFrameAvailable
 };
 
+// 使用 Windows.Graphics.Capture 接口捕获窗口，见
+// https://docs.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture
 class GraphicsCaptureFrameSource2 {
 public:
 	GraphicsCaptureFrameSource2() = default;
@@ -38,16 +40,18 @@ public:
 		return true;
 	}
 
-	FrameSourceState GetState() noexcept;
+	bool IsNewFrameAvailable() noexcept;
 
 	HRESULT Update(uint32_t& outputIdx) noexcept;
+
+	HRESULT OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
 
 private:
 	bool _CreateCaptureDevice(HMONITOR hMonSrc) noexcept;
 
 	bool _CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept;
 
-	bool _InitializeCapture() noexcept;
+	bool _InitializeCaptureItem() noexcept;
 
 	void _Direct3D11CaptureFramePool_FrameArrived(
 		const winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool& pool,
@@ -55,6 +59,8 @@ private:
 	);
 
 	void _DisableRoundCornerInWin11() noexcept;
+
+	HRESULT _StartCapture() noexcept;
 
 	void _StopCapture() noexcept;
 

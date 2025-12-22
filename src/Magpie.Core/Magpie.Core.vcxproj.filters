@@ -37,9 +37,6 @@
     </ClInclude>
     <ClInclude Include="ScalingWindow.h" />
     <ClInclude Include="CursorManager.h" />
-    <ClInclude Include="GraphicsCaptureFrameSource.h">
-      <Filter>Capture</Filter>
-    </ClInclude>
     <ClInclude Include="GDIFrameSource.h">
       <Filter>Capture</Filter>
     </ClInclude>
@@ -181,9 +178,6 @@
     </ClCompile>
     <ClCompile Include="ScalingWindow.cpp" />
     <ClCompile Include="CursorManager.cpp" />
-    <ClCompile Include="GraphicsCaptureFrameSource.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
     <ClCompile Include="GDIFrameSource.cpp">
       <Filter>Capture</Filter>
     </ClCompile>

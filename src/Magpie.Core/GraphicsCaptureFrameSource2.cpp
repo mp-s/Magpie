@@ -21,7 +21,9 @@ using namespace Windows::Graphics::DirectX::Direct3D11;
 namespace Magpie {
 
 GraphicsCaptureFrameSource2::~GraphicsCaptureFrameSource2() noexcept {
-	_StopCapture();
+	if (_captureSession) {
+		_StopCapture();
+	}
 
 	const HWND hwndSrc = ScalingWindow::Get().SrcTracker().Handle();
 
@@ -230,8 +232,8 @@ bool GraphicsCaptureFrameSource2::Initialize(
 		return false;
 	}
 
-	if (!_InitializeCapture()) {
-		Logger::Get().Error("_InitializeCapture 失败");
+	if (!_InitializeCaptureItem()) {
+		Logger::Get().Error("_InitializeCaptureItem 失败");
 		return false;
 	}
 
@@ -246,63 +248,18 @@ bool GraphicsCaptureFrameSource2::Start() noexcept {
 		_DisableRoundCornerInWin11();
 	}
 
-	try {
-		// 创建帧缓冲池。帧的尺寸和 _captureItem.Size() 不同
-		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
-			_wrappedDevice,
-			_isUsingScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
-			ScalingWindow::Get().Options().maxProducerInFlightFrames + 3,
-			{ (int)_frameBox.right, (int)_frameBox.bottom } // 帧的尺寸为包含源窗口的最小尺寸
-		);
-
-		_captureFramePool.FrameArrived(
-			{ this, &GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived });
-
-		_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
-
-		// 禁止捕获光标。从 Win10 v2004 开始支持
-		if (winrt::ApiInformation::IsPropertyPresent(
-			winrt::name_of<winrt::GraphicsCaptureSession>(),
-			L"IsCursorCaptureEnabled"
-		)) {
-			_captureSession.IsCursorCaptureEnabled(false);
-		}
-
-		// 不显示黄色边框，Win32 应用中无需请求权限。从 Win11 开始支持
-		if (winrt::ApiInformation::IsPropertyPresent(
-			winrt::name_of<winrt::GraphicsCaptureSession>(),
-			L"IsBorderRequired"
-		)) {
-			_captureSession.IsBorderRequired(false);
-		}
-
-		// Win11 24H2 中必须设置 MinUpdateInterval 才能使捕获帧率超过 60FPS
-		if (winrt::ApiInformation::IsPropertyPresent(
-			winrt::name_of<winrt::GraphicsCaptureSession>(),
-			L"MinUpdateInterval"
-		)) {
-			_captureSession.MinUpdateInterval(1ms);
-		}
-
-		_captureSession.StartCapture();
-	} catch (const winrt::hresult_error& e) {
-		Logger::Get().Info(StrHelper::Concat("Graphics Capture 失败: ", StrHelper::UTF16ToUTF8(e.message())));
+	HRESULT hr = _StartCapture();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_StartCapture 失败", hr);
 		return false;
 	}
 
 	return true;
 }
 
-FrameSourceState GraphicsCaptureFrameSource2::GetState() noexcept {
-	{
-		auto lk = _latestFrameLock.lock_shared();
-		if (_latestFrame) {
-			return FrameSourceState::NewFrameAvailable;
-		}
-	}
-	
-	return _slots[_curFrameIdx].captureFrame ?
-		FrameSourceState::Waiting : FrameSourceState::WaitingForFirstFrame;
+bool GraphicsCaptureFrameSource2::IsNewFrameAvailable() noexcept {
+	auto lk = _latestFrameLock.lock_shared();
+	return (bool)_latestFrame;
 }
 
 static HRESULT GetFrameResourceFromCaptureFrame(
@@ -478,6 +435,34 @@ HRESULT GraphicsCaptureFrameSource2::Update(uint32_t& outputIdx) noexcept {
 	}
 
 	outputIdx = _curFrameIdx;
+	return S_OK;
+}
+
+// 显示光标时需要重启捕获，否则光标可能不会立刻显示
+HRESULT GraphicsCaptureFrameSource2::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
+	if (!isVisible) {
+		return S_OK;
+	}
+
+	HRESULT hr = _graphicsContext->WaitForGpu();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+		return hr;
+	}
+
+	_StopCapture();
+
+	if (onDestory) {
+		// FIXME: 这里尝试修复拖动窗口时光标不显示的问题，但有些环境下不起作用
+		SystemParametersInfo(SPI_SETCURSORS, 0, nullptr, 0);
+	} else {
+		hr = _StartCapture();
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_StartCapture 失败", hr);
+			return hr;
+		}
+	}
+
 	return S_OK;
 }
 
@@ -767,7 +752,7 @@ static bool IsKirikiriWindow(HWND hwndSrc) noexcept {
 		!GetWindowOwner(hwndOwner);
 }
 
-bool GraphicsCaptureFrameSource2::_InitializeCapture() noexcept {
+bool GraphicsCaptureFrameSource2::_InitializeCaptureItem() noexcept {
 	winrt::com_ptr<IDXGIDevice> dxgiDevice;
 	HRESULT hr = _d3d11Device->QueryInterface<IDXGIDevice>(dxgiDevice.put());
 	if (FAILED(hr)) {
@@ -930,14 +915,76 @@ void GraphicsCaptureFrameSource2::_DisableRoundCornerInWin11() noexcept {
 	_isRoundCornerDisabled = true;
 }
 
-void GraphicsCaptureFrameSource2::_StopCapture() noexcept {
-	if (_captureSession) {
-		_captureSession.Close();
-		_captureSession = nullptr;
+HRESULT GraphicsCaptureFrameSource2::_StartCapture() noexcept {
+	assert(!_captureFramePool && !_captureSession);
+
+	try {
+		// 创建帧缓冲池。帧的尺寸为包含源窗口的最小尺寸
+		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
+			_wrappedDevice,
+			_isUsingScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+			ScalingWindow::Get().Options().maxProducerInFlightFrames + 3,
+			{ (int)_frameBox.right, (int)_frameBox.bottom }
+		);
+
+		_captureFramePool.FrameArrived(
+			{ this, &GraphicsCaptureFrameSource2::_Direct3D11CaptureFramePool_FrameArrived });
+
+		_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
+
+		// 禁止捕获光标。从 Win10 v2004 开始支持
+		if (winrt::ApiInformation::IsPropertyPresent(
+			winrt::name_of<winrt::GraphicsCaptureSession>(),
+			L"IsCursorCaptureEnabled"
+		)) {
+			_captureSession.IsCursorCaptureEnabled(false);
+		}
+
+		// 不显示黄色边框，Win32 应用中无需请求权限。从 Win11 开始支持
+		if (winrt::ApiInformation::IsPropertyPresent(
+			winrt::name_of<winrt::GraphicsCaptureSession>(),
+			L"IsBorderRequired"
+		)) {
+			_captureSession.IsBorderRequired(false);
+		}
+
+		// Win11 24H2 中必须设置 MinUpdateInterval 才能使捕获帧率超过 60FPS
+		if (winrt::ApiInformation::IsPropertyPresent(
+			winrt::name_of<winrt::GraphicsCaptureSession>(),
+			L"MinUpdateInterval"
+		)) {
+			_captureSession.MinUpdateInterval(1ms);
+		}
+
+		_captureSession.StartCapture();
+	} catch (const winrt::hresult_error& e) {
+		Logger::Get().ComInfo(StrHelper::Concat("启动捕获失败: ", StrHelper::UTF16ToUTF8(e.message())), e.code());
+		return e.code();
 	}
-	if (_captureFramePool) {
-		_captureFramePool.Close();
-		_captureFramePool = nullptr;
+
+	return S_OK;
+}
+
+// 调用前应等待 GPU 
+void GraphicsCaptureFrameSource2::_StopCapture() noexcept {
+	assert(_captureFramePool && _captureSession);
+
+	_captureSession.Close();
+	_captureSession = nullptr;
+
+	_captureFramePool.Close();
+	_captureFramePool = nullptr;
+
+	// 可以直接释放，因为不会再触发 FrameArrived
+	{
+		auto lk = _latestFrameLock.lock_exclusive();
+		_latestFrame = nullptr;
+	}
+	
+	for (_FrameResourceSlot& slot : _slots) {
+		// output 将继续使用，直到重启捕获
+		slot.captureFrame = nullptr;
+		slot.frameResource = nullptr;
 	}
 }
 

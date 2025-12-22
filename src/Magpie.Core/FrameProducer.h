@@ -27,6 +27,8 @@ public:
 
 	bool WaitForInitialize(Size& outputSize) const noexcept;
 
+	ComponentState GetState() const noexcept;
+
 	uint64_t GetLatestFrameNumber() const noexcept;
 
 	bool ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept;
@@ -39,6 +41,8 @@ public:
 	HRESULT OnResized(Size rendererSize, Size& outputSize) noexcept;
 
 	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+
+	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
 
 private:
 	void _ProducerThreadProc(
@@ -58,6 +62,8 @@ private:
 	HRESULT _Render() noexcept;
 
 	void _MonitorThreadProc() noexcept;
+
+	bool _CheckResult(HRESULT hr, std::string_view errorMsg) noexcept;
 
 	std::atomic<ComponentState> _state = ComponentState::Initializing;
 

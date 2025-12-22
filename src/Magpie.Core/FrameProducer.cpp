@@ -59,6 +59,10 @@ bool FrameProducer::WaitForInitialize(Size& outputSize) const noexcept {
 	}
 }
 
+ComponentState FrameProducer::GetState() const noexcept {
+	return _state.load(std::memory_order_relaxed);
+}
+
 uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
 	return _frameRingBuffer.GetLatestFrameNumber();
 }
@@ -175,6 +179,17 @@ HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 	return hr;
 }
 
+void FrameProducer::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
+	_dispatcher.TryEnqueue([this, isVisible, onDestory] {
+		if (_state.load(std::memory_order_relaxed) != ComponentState::NoError) {
+			return;
+		}
+
+		_CheckResult(_frameSource->OnCursorVisibilityChanged(isVisible, onDestory),
+			"GraphicsCaptureFrameSource2::OnCursorVisibilityChanged 失败");
+	});
+}
+
 void FrameProducer::_ProducerThreadProc(
 	RECT srcRect,
 	Size rendererSize,
@@ -196,6 +211,7 @@ void FrameProducer::_ProducerThreadProc(
 
 	StepTimerStatus stepTimerStatus = StepTimerStatus::WaitingForNewFrame;
 	const bool waitMsgForNewFrame = _frameSource->ShouldWaitMessageForNewFrame();
+	bool isWaitingForFirstFrame = true;
 
 	MSG msg;
 	while (true) {
@@ -220,7 +236,9 @@ void FrameProducer::_ProducerThreadProc(
 			DispatchMessage(&msg);
 		}
 
-		if (msg.message == WM_QUIT) {
+		// 异步检查回调是否出错
+		if (msg.message == WM_QUIT ||
+			_state.load(std::memory_order_relaxed) != ComponentState::NoError) {
 			break;
 		}
 
@@ -228,23 +246,14 @@ void FrameProducer::_ProducerThreadProc(
 			continue;
 		}
 
-		const FrameSourceState frameSourceState = _frameSource->GetState();
-		if (frameSourceState == FrameSourceState::WaitingForFirstFrame ||
-			(frameSourceState == FrameSourceState::Waiting &&
-				stepTimerStatus != StepTimerStatus::ForceNewFrame)) {
+		// 强制等待第一帧
+		if (!_frameSource->IsNewFrameAvailable() &&
+			(isWaitingForFirstFrame || stepTimerStatus != StepTimerStatus::ForceNewFrame)) {
 			continue;
 		}
+		isWaitingForFirstFrame = false;
 
-		HRESULT hr = _Render();
-		if (FAILED(hr)) {
-			Logger::Get().ComError("_Render 失败", hr);
-
-			if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-				_state.store(ComponentState::DeviceLost, std::memory_order_relaxed);
-			} else {
-				_state.store(ComponentState::Error, std::memory_order_relaxed);
-			}
-
+		if (!_CheckResult(_Render(), "_Render 失败")) {
 			break;
 		}
 	}
@@ -616,6 +625,23 @@ void FrameProducer::_MonitorThreadProc() noexcept {
 			}
 		}
 	}
+}
+
+bool FrameProducer::_CheckResult(HRESULT hr, std::string_view errorMsg) noexcept {
+	assert(_state.load(std::memory_order_relaxed) == ComponentState::NoError);
+
+	if (SUCCEEDED(hr)) {
+		return true;
+	}
+
+	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+		_state.store(ComponentState::DeviceLost, std::memory_order_relaxed);
+	} else {
+		_state.store(ComponentState::Error, std::memory_order_relaxed);
+	}
+
+	Logger::Get().ComError(errorMsg, hr);
+	return false;
 }
 
 }

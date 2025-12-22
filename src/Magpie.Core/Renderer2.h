@@ -40,6 +40,8 @@ public:
 
 	void OnMsgDisplayChanged() noexcept;
 
+	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
+
 private:
 	void _TryInitDisplayInfo() noexcept;
 

@@ -455,6 +455,10 @@ void ScalingWindow::Render() noexcept {
 	}
 }
 
+void ScalingWindow::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
+	_renderer->OnCursorVisibilityChanged(isVisible, onDestory);
+}
+
 void ScalingWindow::RestartAfterSrcRepositioned() noexcept {
 	Start(_srcTracker.Handle(), std::move(_options));
 }

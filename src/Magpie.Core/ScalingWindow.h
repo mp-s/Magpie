@@ -76,6 +76,8 @@ public:
 		return *_cursorManager;
 	}
 
+	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
+
 	bool IsSrcRepositioning() const noexcept {
 		return _isSrcRepositioning;
 	}

@@ -217,7 +217,7 @@ POINT CursorManager::_ScalingToSrc(POINT pt, _RoundMethod roundType) const noexc
 	return result;
 }
 
-void CursorManager::_ShowSystemCursor(bool show, bool /*onDestory*/) {
+void CursorManager::_ShowSystemCursor(bool show, bool onDestory) {
 	if (ScalingWindow::Get().Options().IsDebugMode()) {
 		return;
 	}
@@ -249,8 +249,7 @@ void CursorManager::_ShowSystemCursor(bool show, bool /*onDestory*/) {
 		}
 	}
 
-	// TODO
-	// ScalingWindow::Get().Renderer().OnCursorVisibilityChanged(show, onDestory);
+	ScalingWindow::Get().OnCursorVisibilityChanged(show, onDestory);
 }
 
 void CursorManager::_AdjustCursorSpeed() noexcept {

@@ -8,7 +8,6 @@
 #include "EffectDrawer.h"
 #include "EffectsProfiler.h"
 #include "GDIFrameSource.h"
-#include "GraphicsCaptureFrameSource.h"
 #include "Logger.h"
 #include "OverlayDrawer.h"
 #include "Renderer.h"
@@ -396,9 +395,6 @@ const RECT& Renderer::SrcRect() const noexcept {
 
 bool Renderer::_InitFrameSource() noexcept {
 	switch (ScalingWindow::Get().Options().captureMethod) {
-	case CaptureMethod::GraphicsCapture:
-		_frameSource = std::make_unique<GraphicsCaptureFrameSource>();
-		break;
 	case CaptureMethod::DesktopDuplication:
 		_frameSource = std::make_unique<DesktopDuplicationFrameSource>();
 		break;
