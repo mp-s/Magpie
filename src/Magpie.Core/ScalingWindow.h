@@ -162,7 +162,7 @@ private:
 
 	void _UpdateFrameMargins() const noexcept;
 
-	void _UpdateFocusState() const noexcept;
+	winrt::fire_and_forget _UpdateFocusStateAsync() const noexcept;
 
 	bool _CalcTopmostState() const noexcept;
 

@@ -1328,7 +1328,7 @@ void ScalingWindow::_Show() noexcept {
 
 	// 如果源窗口位于前台则将缩放窗口置顶
 	if (_srcTracker.IsFocused()) {
-		_UpdateFocusState();
+		_UpdateFocusStateAsync();
 	}
 
 	if (_options.IsTouchSupportEnabled()) {
@@ -1471,7 +1471,7 @@ bool ScalingWindow::_UpdateSrcState(bool& isSrcRepositioning) noexcept {
 	if (srcFocusedChanged) {
 		_cursorManager->OnSrcFocusChanged(_srcTracker.IsFocused());
 
-		_UpdateFocusState();
+		_UpdateFocusStateAsync();
 	}
 
 	if (srcMonitorChanged) {
@@ -1998,7 +1998,7 @@ void ScalingWindow::_UpdateFrameMargins() const noexcept {
 	DwmExtendFrameIntoClientArea(Handle(), &margins);
 }
 
-void ScalingWindow::_UpdateFocusState() const noexcept {
+winrt::fire_and_forget ScalingWindow::_UpdateFocusStateAsync() const noexcept {
 	if (_options.IsWindowedMode()) {
 		// 根据源窗口状态绘制非客户区，我们必须自己控制非客户区是绘制成焦点状态还是非焦点
 		// 状态，因为缩放窗口实际上永远不会得到焦点。
@@ -2009,44 +2009,102 @@ void ScalingWindow::_UpdateFocusState() const noexcept {
 		if (Win32Helper::IsWindowHung(_srcTracker.Handle())) {
 			Logger::Get().Error("源窗口已挂起");
 			_DelayedStop();
-			return;
+			co_return;
 		}
+
+		// 这里搞得很复杂，是我反复实验得到的，若要修改应测试下列情形：
+		// 1. 缩放 WindowCase 中的 TopmostWindow 和 PopupHostWindow
+		// 2. 缩放常规窗口然后切换到管理员身份的窗口。测试这一条时应直接运行，不要调试，因
+		// 为调试状态下 SetWindowPos 的行为有变化
+		// 3. 缩放时将任意窗口最小化然后还原
+		// 4. 缩放时拖动任意窗口
 
 		const bool oldTopmost = IsTopmostWindow(Handle());
 		const bool newTopmost = _CalcTopmostState();
 		if (oldTopmost != newTopmost) {
-			// 由于同步问题可能需要尝试多次
-			for (int i = 0; i < 10; ++i) {
-				// 切换到其他窗口时不要改变源窗口 Z 顺序，当前台窗口权限更高时需要依赖源窗口位置
-				SetWindowPos(Handle(), newTopmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-					SWP_NO_ACTIVATE_MOVE_SIZE | (_srcTracker.IsFocused() ? 0 : SWP_NOOWNERZORDER));
+			if (newTopmost) {
+				for (int i = 0; i < 10; ++i) {
+					SetWindowPos(Handle(), HWND_TOPMOST, 0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
 
-				if (IsTopmostWindow(Handle()) == newTopmost) {
-					break;
+					if (IsTopmostWindow(Handle()) == newTopmost) {
+						break;
+					}
 				}
-			}
-		}
 
-		if (_srcTracker.IsFocused()) {
-			// 全屏模式缩放时确保缩放窗口在所有置顶窗口之上，这使不支持 MPO 的显卡更容易激
-			// 活 DirectFlip。
-			if (!_options.IsWindowedMode() && newTopmost) {
-				SetWindowPos(Handle(), HWND_TOP, 0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
-			}
-		} else if (oldTopmost && !newTopmost) {
-			// 如果缩放窗口之前是置顶的，此时会在前台窗口之上，应将前台窗口置于顶部
-			if (const HWND hwndFore = GetForegroundWindow()) {
-				if (!SetWindowPos(hwndFore, HWND_TOP, 0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE)) {
-					// 如果前台窗口权限更高，SetWindowPos 会失败。这时用其他方法将缩放窗口放到
-					// 前台窗口之后，缺点是偶尔会有一瞬间源窗口出现在缩放窗口前。
-					HDWP hDwp = BeginDeferWindowPos(2);
-					if (hDwp) {
+				// 全屏模式缩放时确保缩放窗口在所有置顶窗口之上，这使不支持 MPO 的显卡更容易激
+				// 活 DirectFlip。
+				if (!_options.IsWindowedMode()) {
+					SetWindowPos(Handle(), HWND_TOP, 0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
+				}
+			} else {
+				const uint32_t runId = ScalingWindow::RunId();
+				bool isInBackground = false;
+
+				HWND hwndFore = GetForegroundWindow();
+				if (!hwndFore) {
+					// 切换窗口时有一个瞬间无前台窗口，这里等待切换完成
+					co_await winrt::resume_after(1ms);
+					isInBackground = true;
+					hwndFore = GetForegroundWindow();
+				}
+				
+				bool isForeMovable = true;
+				if (hwndFore) {
+					DWORD windowIL;
+					isForeMovable = Win32Helper::GetWindowIntegrityLevel(hwndFore, windowIL) &&
+						windowIL <= Win32Helper::GetCurrentProcessIntegrityLevel();
+				}
+				
+				if (!isForeMovable) {
+					if (!isInBackground) {
+						co_await winrt::resume_background();
+						isInBackground = true;
+					}
+
+					// 等待 DWM 开始合成新帧以避免显示中间状态
+					Win32Helper::WaitForDwmComposition();
+				}
+
+				if (isInBackground) {
+					co_await ScalingWindow::Get().Dispatcher();
+
+					// 等待时源窗口重新回到前台了应放弃后续操作
+					if (runId != ScalingWindow::RunId() || _srcTracker.IsFocused()) {
+						co_return;
+					}
+				}
+
+				for (int i = 0; i < 10; ++i) {
+					HDWP hDwp = BeginDeferWindowPos(isForeMovable ? 2 : 3);
+
+					// 改变置顶状态
+					hDwp = DeferWindowPos(hDwp, Handle(), HWND_NOTOPMOST,
+						0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
+
+					// 将缩放窗口恰好置于源窗口前
+					if (isForeMovable) {
+						// 这个方式没有中间状态，但会导致源窗口遮挡前台窗口，之后会手动将前台窗口移到顶部
+						hDwp = DeferWindowPos(hDwp, Handle(), _srcTracker.Handle(),
+							0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
+					} else {
+						// 这个方式不会移动源窗口，但有中间状态。如果前台窗口 IL 更高，这是唯一的办法
 						hDwp = DeferWindowPos(hDwp, Handle(), _srcTracker.Handle(),
 							0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE | SWP_NOOWNERZORDER);
 						hDwp = DeferWindowPos(hDwp, _srcTracker.Handle(), Handle(),
 							0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE | SWP_NOOWNERZORDER);
-						EndDeferWindowPos(hDwp);
 					}
+
+					EndDeferWindowPos(hDwp);
+
+					// 确保缩放窗口刚好在源窗口前
+					if (IsTopmostWindow(Handle()) == newTopmost &&
+						GetWindow(_srcTracker.Handle(), GW_HWNDPREV) == Handle()) {
+						break;
+					}
+				}
+
+				if (isForeMovable && hwndFore && GetForegroundWindow() == hwndFore) {
+					SetWindowPos(hwndFore, HWND_TOP, 0, 0, 0, 0, SWP_NO_ACTIVATE_MOVE_SIZE);
 				}
 			}
 		}
@@ -2061,10 +2119,18 @@ void ScalingWindow::_UpdateFocusState() const noexcept {
 }
 
 bool ScalingWindow::_CalcTopmostState() const noexcept {
-	// 源窗口位于前台时应将缩放窗口置顶，这是为了防止有些窗口突破 OS 维护的所有者关系顺
-	// 序，如 GH#1232；如果源窗口不在前台则取消置顶（除非源窗口是置顶的）。
-	return (_srcTracker.IsFocused() && !_options.IsTopmostDisabled()) ||
-		IsTopmostWindow(_srcTracker.Handle());
+	// 源窗口置顶时缩放窗口必须置顶
+	if (IsTopmostWindow(_srcTracker.Handle())) {
+		return true;
+	}
+
+	// 源窗口位于前台时一般将缩放窗口置顶，这是为了防止有些窗口突破 OS 维护的所有者关系
+	// 顺序，如 GH#1232。一个例外是源窗口有弹窗时缩放窗口应在弹窗下方，除了常规弹窗，还
+	// 应检查模拟模态弹窗（见 ScalingService.cpp 的 IsPopupWindow）。
+	return !_options.IsTopmostDisabled() &&
+		_srcTracker.IsFocused() &&
+		!GetWindow(_srcTracker.Handle(), GW_ENABLEDPOPUP) &&
+		IsWindowEnabled(_srcTracker.Handle());
 }
 
 bool ScalingWindow::_IsBorderless() const noexcept {
