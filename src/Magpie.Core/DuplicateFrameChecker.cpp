@@ -223,7 +223,8 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 	_commandList->SetComputeRootDescriptorTable(
 		2, _descriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-	for (uint32_t i = 0; i < dirtyRects.size(); ++i) {
+	const uint32_t dirtyRectCount = (uint32_t)dirtyRects.size();
+	for (uint32_t i = 0; i < dirtyRectCount; ++i) {
 		const Rect& dirtyRect = dirtyRects[i];
 
 		if (i == 0) {
@@ -259,10 +260,9 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 			_resultBuffer.get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
 		_commandList->ResourceBarrier(1, &barrier);
 	}
-
-	// TODO: 只复制需要的
-	_commandList->CopyBufferRegion(
-		_resultReadbackBuffer.get(), 0, _resultBuffer.get(), 0, sizeof(uint32_t));
+	
+	_commandList->CopyBufferRegion(_resultReadbackBuffer.get(), 0,
+		_resultBuffer.get(), 0, dirtyRectCount * sizeof(uint32_t));
 
 	hr = _commandList->Close();
 	if (FAILED(hr)) {
@@ -289,7 +289,7 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 
 	// 读取结果
 	{
-		CD3DX12_RANGE range(0, sizeof(uint32_t));
+		CD3DX12_RANGE range(0, dirtyRectCount * sizeof(uint32_t));
 
 		void* pData;
 		hr = _resultReadbackBuffer->Map(0, nullptr, &pData);
@@ -298,9 +298,13 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 			return hr;
 		}
 
-		uint32_t* results = (uint32_t*)pData;
-		isDuplicate = results[0] != _curTargetValue;
-
+		isDuplicate = true;
+		for (uint32_t i = 0; i < dirtyRectCount; ++i) {
+			if (((uint32_t*)pData)[i] == _curTargetValue) {
+				isDuplicate = false;
+			}
+		}
+		
 		range = {};
 		_resultReadbackBuffer->Unmap(0, &range);
 	}
