@@ -1,5 +1,4 @@
 #pragma once
-#include "ColorInfo.h"
 #include "GraphicsContext.h"
 #include "FrameRingBuffer.h"
 #include "StepTimer.h"

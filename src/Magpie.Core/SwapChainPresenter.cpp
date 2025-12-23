@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "SwapChainPresenter.h"
-#include "ColorInfo.h"
 #include "DebugInfo.h"
 #include "GraphicsContext.h"
 #include "Logger.h"

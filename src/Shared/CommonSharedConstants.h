@@ -42,9 +42,4 @@ struct CommonSharedConstants {
 	static constexpr const wchar_t* APP_RESOURCE_MAP_ID = L"Magpie/Resources";
 
 	static constexpr int LOG_MAX_SIZE = 500000;
-
-	// 自定义 HRESULT 的方法参考自 https://learn.microsoft.com/en-us/windows/win32/com/codes-in-facility-itf
-	static constexpr HRESULT S_RECOVERED = MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_ITF, 0x200);
-
-	static constexpr uint32_t SCENE_REFERRED_SDR_WHITE_LEVEL = 80;
 };

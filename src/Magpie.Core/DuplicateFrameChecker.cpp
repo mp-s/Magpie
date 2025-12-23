@@ -1,0 +1,321 @@
+#include "pch.h"
+#include "DuplicateFrameChecker.h"
+#include "DirectXHelper.h"
+#include "Logger.h"
+#include "ScalingWindow.h"
+#include "shaders/DuplicateFrameCS.h"
+
+namespace Magpie {
+
+bool DuplicateFrameChecker::Initialize(
+	ID3D12Device5* device,
+	uint32_t maxDirtyRects,
+	const ColorInfo& colorInfo,
+	Size frameSize
+) noexcept {
+	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
+		DuplicateFrameDetectionMode::Never);
+
+	_device = device;
+	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+	_frameSize = frameSize;
+
+	{
+		// 需要快速获取结果，因此使用高优先级
+		D3D12_COMMAND_QUEUE_DESC queueDesc = {
+			.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
+			.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH
+		};
+		HRESULT hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_commandQueue));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommandQueue 失败", hr);
+			return false;
+		}
+	}
+
+	HRESULT hr = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
+		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_commandList));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandList1 失败", hr);
+		return false;
+	}
+
+	hr = device->CreateCommandAllocator(
+		D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&_commandAllocator));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateCommandAllocator 失败", hr);
+		return false;
+	}
+
+	{
+		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+		CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(
+			maxDirtyRects * sizeof(uint32_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+		hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+			&desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_resultBuffer));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return false;
+		}
+
+		heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
+		desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+		hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
+			&desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&_resultReadbackBuffer));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return false;
+		}
+	}
+
+	{
+		// 容纳两个 SRV
+		D3D12_DESCRIPTOR_HEAP_DESC desc = {
+			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+			.NumDescriptors = 2,
+			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
+		};
+		hr = device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_descriptorHeap));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
+			return false;
+		}
+	}
+
+	_descriptorSize = device->GetDescriptorHandleIncrementSize(
+		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+	hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateFence 失败", hr);
+		return false;
+	}
+
+	{
+		// 检查根签名版本
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE versionData = {
+			.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1
+		};
+		hr = device->CheckFeatureSupport(
+			D3D12_FEATURE_ROOT_SIGNATURE, &versionData, sizeof(versionData));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			return false;
+		}
+
+		winrt::com_ptr<ID3DBlob> signature;
+
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+
+		D3D12_ROOT_PARAMETER1 rootParams[] = {
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 6
+				}
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV,
+				.Descriptor = {
+					.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE
+				}
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange
+				}
+			}
+		};
+
+		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
+			.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
+			.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+			.ShaderRegister = 0
+		};
+
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc);
+		hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc, versionData.HighestVersion, signature.put(), nullptr);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			return false;
+		}
+
+		hr = device->CreateRootSignature(0, signature->GetBufferPointer(),
+			signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateRootSignature 失败", hr);
+			return false;
+		}
+	}
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _rootSignature.get(),
+		.CS = CD3DX12_SHADER_BYTECODE(DuplicateFrameCS, sizeof(DuplicateFrameCS))
+	};
+	hr = device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+		return false;
+	}
+	
+	return true;
+}
+
+HRESULT DuplicateFrameChecker::CheckFrame(
+	ID3D12Resource* frameResource,
+	const SmallVectorImpl<Rect>& dirtyRects,
+	bool& isDuplicate
+) noexcept {
+	assert(!dirtyRects.empty() && !isDuplicate);
+
+#ifdef _DEBUG
+	{
+		D3D12_RESOURCE_DESC desc = frameResource->GetDesc();
+		assert(desc.Width == _frameSize.width && desc.Height == _frameSize.height);
+
+		desc = _resultBuffer->GetDesc();
+		assert(desc.Width >= dirtyRects.size() * sizeof(uint32_t));
+	}
+#endif
+	
+	{
+		CD3DX12_SHADER_RESOURCE_VIEW_DESC desc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
+			_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM, 1);
+		_device->CreateShaderResourceView(frameResource, &desc, CD3DX12_CPU_DESCRIPTOR_HANDLE(
+			_descriptorHeap->GetCPUDescriptorHandleForHeapStart(), _curDescriptorOffset));
+	}
+
+	if (_isFirstFrame) {
+		isDuplicate = false;
+		return S_OK;
+	}
+
+	HRESULT hr = _commandAllocator->Reset();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandAllocator::Reset 失败", hr);
+		return hr;
+	}
+
+	hr = _commandList->Reset(_commandAllocator.get(), _pipelineState.get());
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12GraphicsCommandList::Reset 失败", hr);
+		return hr;
+	}
+
+	{
+		ID3D12DescriptorHeap* t = _descriptorHeap.get();
+		_commandList->SetDescriptorHeaps(1, &t);
+	}
+
+	_commandList->SetComputeRootSignature(_rootSignature.get());
+
+	_commandList->SetComputeRootUnorderedAccessView(1, _resultBuffer->GetGPUVirtualAddress());
+
+	_commandList->SetComputeRootDescriptorTable(
+		2, _descriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+	for (uint32_t i = 0; i < dirtyRects.size(); ++i) {
+		const Rect& dirtyRect = dirtyRects[i];
+
+		if (i == 0) {
+			DirectXHelper::Constant32 constants[] = {
+				{.floatVal = 1.0f / _frameSize.width},
+				{.floatVal = 1.0f / _frameSize.height},
+				{.uintVal = ++_curTargetValue},
+				{.uintVal = i},
+				{.uintVal = dirtyRect.left},
+				{.uintVal = dirtyRect.top}
+			};
+			_commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+		} else {
+			DirectXHelper::Constant32 constants[] = {
+				{.uintVal = i},
+				{.uintVal = dirtyRect.left},
+				{.uintVal = dirtyRect.top}
+			};
+			_commandList->SetComputeRoot32BitConstants(
+				0, (UINT)std::size(constants), constants, 3 * sizeof(DirectXHelper::Constant32));
+		}
+
+		constexpr uint32_t BLOCK_SIZE = 16;
+		_commandList->Dispatch(
+			(dirtyRect.right - dirtyRect.left + BLOCK_SIZE - 1) / BLOCK_SIZE,
+			(dirtyRect.bottom - dirtyRect.top + BLOCK_SIZE - 1) / BLOCK_SIZE,
+			1
+		);
+	}
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			_resultBuffer.get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
+		_commandList->ResourceBarrier(1, &barrier);
+	}
+
+	// TODO: 只复制需要的
+	_commandList->CopyBufferRegion(
+		_resultReadbackBuffer.get(), 0, _resultBuffer.get(), 0, sizeof(uint32_t));
+
+	hr = _commandList->Close();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
+		return hr;
+	}
+
+	{
+		ID3D12CommandList* t = _commandList.get();
+		_commandQueue->ExecuteCommandLists(1, &t);
+	}
+
+	hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
+		return hr;
+	}
+
+	hr = _fence->SetEventOnCompletion(_curFenceValue, NULL);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12Fence::SetEventOnCompletion 失败", hr);
+		return hr;
+	}
+
+	// 读取结果
+	{
+		CD3DX12_RANGE range(0, sizeof(uint32_t));
+
+		void* pData;
+		hr = _resultReadbackBuffer->Map(0, nullptr, &pData);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
+			return hr;
+		}
+
+		uint32_t* results = (uint32_t*)pData;
+		isDuplicate = results[0] != _curTargetValue;
+
+		range = {};
+		_resultReadbackBuffer->Unmap(0, &range);
+	}
+
+	return S_OK;
+}
+
+void DuplicateFrameChecker::OnFrameAdopted() noexcept {
+	_isFirstFrame = false;
+
+	if (_curDescriptorOffset == 0) {
+		_curDescriptorOffset = _descriptorSize;
+	} else {
+		_curDescriptorOffset = 0;
+	}
+}
+
+}

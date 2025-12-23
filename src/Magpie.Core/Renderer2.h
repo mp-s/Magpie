@@ -1,5 +1,5 @@
 #pragma once
-#include "ColorInfo.h"
+#include "DirectXHelper.h"
 #include "GraphicsContext.h"
 #include "ScalingOptions.h"
 

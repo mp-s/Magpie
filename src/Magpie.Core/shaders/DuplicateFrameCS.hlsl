@@ -1,8 +1,8 @@
 cbuffer RootConstants : register(b0) {
     float2 texPt;
-    uint2 texOffset;
-    uint resultOffest;
     uint target;
+    uint resultOffest;
+    uint2 texOffset;
 };
 
 // 无需同步

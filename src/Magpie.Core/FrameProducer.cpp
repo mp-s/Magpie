@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "FrameProducer.h"
 #include "CommonSharedConstants.h"
+#include "DuplicateFrameChecker.h"
 #include "GraphicsCaptureFrameSource.h"
 #include "Logger.h"
 #include "ScalingWindow.h"

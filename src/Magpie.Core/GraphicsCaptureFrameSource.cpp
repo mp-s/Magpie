@@ -1,13 +1,12 @@
 #include "pch.h"
 #include "GraphicsCaptureFrameSource.h"
-#include "ColorInfo.h"
 #include "DebugInfo.h"
 #include "DirectXHelper.h"
+#include "DuplicateFrameChecker.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "Win32Helper.h"
-#include "shaders/DuplicateFrameCS.h"
 #include <dwmapi.h>
 #include <Windows.Graphics.Capture.Interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
@@ -20,8 +19,6 @@ using namespace Windows::Graphics::DirectX::Direct3D11;
 }
 
 namespace Magpie {
-
-static constexpr uint32_t MAX_DIRTY_RECTS = 8;
 
 GraphicsCaptureFrameSource::~GraphicsCaptureFrameSource() noexcept {
 	if (_captureSession) {
@@ -146,7 +143,7 @@ bool GraphicsCaptureFrameSource::Initialize(
 	assert(hMonSrc);
 
 	_graphicsContext = &graphicsContext;
-	_isUsingScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	if (!winrt::GraphicsCaptureSession::IsSupported()) {
 		Logger::Get().Error("当前无法使用 Graphics Capture");
@@ -206,7 +203,7 @@ bool GraphicsCaptureFrameSource::Initialize(
 		D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
 			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
 		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-			_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
+			_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_TYPELESS,
 			UINT64(_frameBox.right - _frameBox.left),
 			_frameBox.bottom - _frameBox.top,
 			1, 1, 1, 0,
@@ -236,146 +233,15 @@ bool GraphicsCaptureFrameSource::Initialize(
 	}
 
 	if (options.duplicateFrameDetectionMode != DuplicateFrameDetectionMode::Never) {
-		ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : device;
-
-		{
-			// 需要快速获取结果，因此使用高优先级
-			D3D12_COMMAND_QUEUE_DESC queueDesc = {
-				.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
-				.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH
-			};
-			hr = dfDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_dfCommandQueue));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateCommandQueue 失败", hr);
-				return false;
-			}
-		}
-
-		hr = dfDevice->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
-			D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_dfCommandList));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommandList1 失败", hr);
+		_duplicateFrameChecker = std::make_unique<DuplicateFrameChecker>();
+		if (!_duplicateFrameChecker->Initialize(
+			_bridgeDevice ? _bridgeDevice.get() : device,
+			MAX_CAPTURE_DIRTY_RECTS,
+			colorInfo,
+			Size{ _frameBox.right, _frameBox.bottom })
+		) {
+			Logger::Get().Error("DuplicateFrameChecker::Initialize 失败");
 			return false;
-		}
-
-		hr = dfDevice->CreateCommandAllocator(
-			D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&_dfCommandAllocator));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommandAllocator 失败", hr);
-			return false;
-		}
-
-		{
-			CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-			D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
-				D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-			CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(
-				MAX_DIRTY_RECTS * sizeof(uint32_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-
-			hr = dfDevice->CreateCommittedResource(&heapProperties, heapFlag,
-				&desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_dfResultBuffer));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateCommittedResource 失败", hr);
-				return false;
-			}
-
-			heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
-			desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-			hr = dfDevice->CreateCommittedResource(&heapProperties, heapFlag,
-				&desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&_dfResultReadbackBuffer));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateCommittedResource 失败", hr);
-				return false;
-			}
-		}
-
-		{
-			// 容纳两个 SRV
-			D3D12_DESCRIPTOR_HEAP_DESC desc = {
-				.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-				.NumDescriptors = 2,
-				.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
-			};
-			hr = dfDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_dfDescriptorHeap));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
-				return false;
-			}
-		}
-
-		_dfDescriptorSize = dfDevice->GetDescriptorHandleIncrementSize(
-			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-		
-		hr = dfDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_dfFence));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateFence 失败", hr);
-			return false;
-		}
-		
-		{
-			winrt::com_ptr<ID3DBlob> signature;
-
-			CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0,
-				D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-
-			D3D12_ROOT_PARAMETER1 rootParams[] = {
-				{
-					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-					.Constants = {
-						.Num32BitValues = 6
-					}
-				},
-				{
-					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV,
-					.Descriptor = {
-						.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE
-					}
-				},
-				{
-					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-					.DescriptorTable = {
-						.NumDescriptorRanges = 1,
-						.pDescriptorRanges = &srvRange
-					}
-				}
-			};
-
-			D3D12_STATIC_SAMPLER_DESC samplerDesc = {
-				.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
-				.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-				.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-				.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-				.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
-				.ShaderRegister = 0
-			};
-
-			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-				(UINT)std::size(rootParams), rootParams, 1, &samplerDesc);
-			hr = D3DX12SerializeVersionedRootSignature(
-				&rootSignatureDesc, graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
-			if (FAILED(hr)) {
-				Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
-				return false;
-			}
-
-			hr = dfDevice->CreateRootSignature(0, signature->GetBufferPointer(),
-				signature->GetBufferSize(), IID_PPV_ARGS(&_dfRootSignature));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateRootSignature 失败", hr);
-				return false;
-			}
-		}
-
-		{
-			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
-				.pRootSignature = _dfRootSignature.get(),
-				.CS = CD3DX12_SHADER_BYTECODE(DuplicateFrameCS, sizeof(DuplicateFrameCS))
-			};
-			hr = dfDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&_dfPipelineState));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateComputePipelineState 失败", hr);
-				return false;
-			}
 		}
 	}
 
@@ -442,17 +308,16 @@ static HRESULT GetFrameResourceFromCaptureFrame(
 HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) noexcept {
 	{
 		auto lk = _latestFrameLock.lock_shared();
+
 		if (_latestFrame) {
 			_newFrame = std::move(_latestFrame);
 			_latestFrame = nullptr;
+		} else {
+			isNewFrameAvailable = (bool)_newFrame;
+			return S_OK;
 		}
 	}
-
-	if (!_newFrame) {
-		isNewFrameAvailable = false;
-		return S_OK;
-	}
-
+	
 	ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice();
 
 	HRESULT hr = GetFrameResourceFromCaptureFrame(_newFrame, dfDevice, _newFrameResource);
@@ -461,114 +326,27 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 		return hr;
 	}
 
-	CD3DX12_SHADER_RESOURCE_VIEW_DESC desc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
-		_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM, 1);
-	dfDevice->CreateShaderResourceView(_newFrameResource.get(), &desc, CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		_dfDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), _dfCurDescriptorOffset));
-
-	// 第一帧无需检查重复帧
-	if (!_slots[_curFrameIdx].frameResource) {
+	if (!_duplicateFrameChecker) {
 		isNewFrameAvailable = true;
 		return S_OK;
 	}
 
-	hr = _dfCommandAllocator->Reset();
+	bool isDuplicate = false;
+	SmallVector<Rect, 1> dirtyRects = {
+		Rect{_frameBox.left, _frameBox.top, _frameBox.right, _frameBox.bottom}
+	};
+	hr = _duplicateFrameChecker->CheckFrame(_newFrameResource.get(), dirtyRects, isDuplicate);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12CommandAllocator::Reset 失败", hr);
+		Logger::Get().ComError("DuplicateFrameChecker::CheckFrame 失败", hr);
 		return hr;
 	}
 
-	hr = _dfCommandList->Reset(_dfCommandAllocator.get(), _dfPipelineState.get());
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12GraphicsCommandList::Reset 失败", hr);
-		return hr;
+	if (isDuplicate) {
+		_newFrame = nullptr;
+		_newFrameResource = nullptr;
 	}
 
-	{
-		ID3D12DescriptorHeap* t = _dfDescriptorHeap.get();
-		_dfCommandList->SetDescriptorHeaps(1, &t);
-	}
-
-	_dfCommandList->SetComputeRootSignature(_dfRootSignature.get());
-
-	{
-#ifdef _DEBUG
-		D3D12_RESOURCE_DESC texDesc = _newFrameResource->GetDesc();
-		assert(texDesc.Width == _frameBox.right && texDesc.Height == _frameBox.bottom);
-#endif
-		DirectXHelper::Constant32 constants[] = {
-			{.floatVal = 1.0f / _frameBox.right},
-			{.floatVal = 1.0f / _frameBox.bottom},
-			{.uintVal = _frameBox.left},
-			{.uintVal = _frameBox.top},
-			{.uintVal = 0},
-			{.uintVal = ++_dfResultBufferTargetValue}
-		};
-		_dfCommandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
-	}
-
-	_dfCommandList->SetComputeRootUnorderedAccessView(1, _dfResultBuffer->GetGPUVirtualAddress());
-
-	_dfCommandList->SetComputeRootDescriptorTable(
-		2, _dfDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
-	constexpr uint32_t BLOCK_SIZE = 16;
-	_dfCommandList->Dispatch(
-		(_frameBox.right + BLOCK_SIZE - 1) / BLOCK_SIZE,
-		(_frameBox.bottom + BLOCK_SIZE - 1) / BLOCK_SIZE,
-		1
-	);
-	
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			_dfResultBuffer.get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
-		_dfCommandList->ResourceBarrier(1, &barrier);
-	}
-
-	// TODO: 只复制需要的
-	_dfCommandList->CopyBufferRegion(_dfResultReadbackBuffer.get(), 0, _dfResultBuffer.get(), 0, sizeof(uint32_t));
-
-	hr = _dfCommandList->Close();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
-		return hr;
-	}
-
-	{
-		ID3D12CommandList* t = _dfCommandList.get();
-		_dfCommandQueue->ExecuteCommandLists(1, &t);
-	}
-
-	hr = _dfCommandQueue->Signal(_dfFence.get(), ++_dfFenceValue);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
-		return hr;
-	}
-
-	hr = _dfFence->SetEventOnCompletion(_dfFenceValue, NULL);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12Fence::SetEventOnCompletion 失败", hr);
-		return hr;
-	}
-
-	// 读取结果
-	{
-		CD3DX12_RANGE range(0, sizeof(uint32_t));
-
-		void* pData;
-		hr = _dfResultReadbackBuffer->Map(0, nullptr, &pData);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
-			return hr;
-		}
-
-		uint32_t* results = (uint32_t*)pData;
-		isNewFrameAvailable = results[0] == _dfResultBufferTargetValue;
-
-		range = {};
-		_dfResultReadbackBuffer->Unmap(0, &range);
-	}
-
+	isNewFrameAvailable = !isDuplicate;
 	return S_OK;
 }
 
@@ -587,12 +365,10 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 	_newFrame = nullptr;
 	_newFrameResource = nullptr;
 
-	if (_dfCurDescriptorOffset == 0) {
-		_dfCurDescriptorOffset = _dfDescriptorSize;
-	} else {
-		_dfCurDescriptorOffset = 0;
+	if (_duplicateFrameChecker) {
+		_duplicateFrameChecker->OnFrameAdopted();
 	}
-
+	
 #ifdef MP_DEBUG_INFO
 	{
 		auto lk = DEBUG_INFO.lock.lock_exclusive();
@@ -883,7 +659,7 @@ bool GraphicsCaptureFrameSource::_CreateBridgeDeviceResources(IDXGIAdapter1* dxg
 	}
 
 	CD3DX12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM,
+		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM,
 		UINT64(_frameBox.right - _frameBox.left),
 		_frameBox.bottom - _frameBox.top,
 		1, 1, 1, 0,
@@ -1180,7 +956,7 @@ HRESULT GraphicsCaptureFrameSource::_StartCapture() noexcept {
 		// 创建帧缓冲池。帧的尺寸为包含源窗口的最小尺寸
 		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
 			_wrappedDevice,
-			_isUsingScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+			_isScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
 			ScalingWindow::Get().Options().maxProducerInFlightFrames + 3,
 			{ (int)_frameBox.right, (int)_frameBox.bottom }
 		);

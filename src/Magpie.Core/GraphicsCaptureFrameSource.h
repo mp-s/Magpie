@@ -1,17 +1,19 @@
 #pragma once
-#include "ColorInfo.h"
 #include <ShlObj.h>
 #include <winrt/Windows.Graphics.Capture.h>
 
 namespace Magpie {
 
 class GraphicsContext;
+class DuplicateFrameChecker;
 
 enum class FrameSourceState {
 	WaitingForFirstFrame,
 	Waiting,
 	NewFrameAvailable
 };
+
+constexpr inline uint32_t MAX_CAPTURE_DIRTY_RECTS = 8;
 
 // 使用 Windows.Graphics.Capture 接口捕获窗口，见
 // https://docs.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture
@@ -82,21 +84,7 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _sharedFence;
 	uint64_t _curCrossAdapterFenceValue = 0;
 
-	// 用于检查重复帧
-	winrt::com_ptr<ID3D12CommandQueue> _dfCommandQueue;
-	winrt::com_ptr<ID3D12GraphicsCommandList> _dfCommandList;
-	winrt::com_ptr<ID3D12CommandAllocator> _dfCommandAllocator;
-	winrt::com_ptr<ID3D12Resource> _dfResultBuffer;
-	uint32_t _dfResultBufferTargetValue = 0;
-	winrt::com_ptr<ID3D12Resource> _dfResultReadbackBuffer;
-	winrt::com_ptr<ID3D12DescriptorHeap> _dfDescriptorHeap;
-	uint32_t _dfDescriptorSize = 0;
-	uint32_t _dfCurDescriptorOffset = 0;
-	winrt::com_ptr<ID3D12Fence1> _dfFence;
-	uint64_t _dfFenceValue = 0;
-	winrt::com_ptr<ID3D12RootSignature> _dfRootSignature;
-	winrt::com_ptr<ID3D12PipelineState> _dfPipelineState;
-
+	std::unique_ptr<DuplicateFrameChecker> _duplicateFrameChecker;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _newFrame{ nullptr };
 	winrt::com_ptr<ID3D12Resource> _newFrameResource;
 
@@ -132,7 +120,7 @@ private:
 	
 	D3D12_BOX _frameBox{};
 
-	bool _isUsingScRGB = false;
+	bool _isScRGB = false;
 	bool _isSrcStyleChanged = false;
 	bool _isRoundCornerDisabled = false;
 };

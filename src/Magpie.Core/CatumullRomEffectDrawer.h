@@ -1,6 +1,5 @@
 #pragma once
 #include "EffectDrawerBase.h"
-#include "ColorInfo.h"
 #include "SmallVector.h"
 
 namespace Magpie {
