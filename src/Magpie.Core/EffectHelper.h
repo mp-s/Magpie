@@ -36,12 +36,6 @@ struct EffectHelper {
 		{"R8_SNORM", DXGI_FORMAT_R8_SNORM, 1, "MF", "snorm MF"},
 		{"UNKNOWN", DXGI_FORMAT_UNKNOWN, 4, "float4", "float4"}
 	};
-
-	union Constant32 {
-		float floatVal;
-		uint32_t uintVal;
-		int intVal;
-	};
 };
 
 }

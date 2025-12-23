@@ -1,10 +1,10 @@
 #include "pch.h"
 #include "CatumullRomEffectDrawer.h"
+#include "DirectXHelper.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "shaders/CatmullRomCS.h"
 #include "shaders/CatmullRomCS_sRGB.h"
-#include "EffectHelper.h"
 
 namespace Magpie {
 
@@ -35,10 +35,10 @@ HRESULT CatumullRomEffectDrawer::Initialize(
 	{
 		winrt::com_ptr<ID3DBlob> signature;
 
-		CD3DX12_DESCRIPTOR_RANGE1 srvRange(
-			D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-		CD3DX12_DESCRIPTOR_RANGE1 uavRange(
-			D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
 
 		D3D12_ROOT_PARAMETER1 rootParams[] = {
 			{
@@ -177,7 +177,7 @@ void CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) noex
 	commandList->SetComputeRootSignature(_rootSignature.get());
 
 	{
-		EffectHelper::Constant32 constants[] = {
+		DirectXHelper::Constant32 constants[] = {
 			{.uintVal = _inputSize.width},
 			{.uintVal = _inputSize.height},
 			{.uintVal = _outputSize.width},

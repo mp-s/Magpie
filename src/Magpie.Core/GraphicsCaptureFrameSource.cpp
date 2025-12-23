@@ -7,6 +7,7 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "Win32Helper.h"
+#include "shaders/DuplicateFrameCS.h"
 #include <dwmapi.h>
 #include <Windows.Graphics.Capture.Interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
@@ -268,20 +269,20 @@ bool GraphicsCaptureFrameSource::Initialize(
 			CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 			D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
 				D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-			CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(
-				MAX_DIRTY_RECTS * sizeof(uint64_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+			CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(
+				MAX_DIRTY_RECTS * sizeof(uint32_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
 			hr = dfDevice->CreateCommittedResource(&heapProperties, heapFlag,
-				&bufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_dfResultBuffer));
+				&desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_dfResultBuffer));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateCommittedResource 失败", hr);
 				return false;
 			}
 
 			heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
-			bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+			desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 			hr = dfDevice->CreateCommittedResource(&heapProperties, heapFlag,
-				&bufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_dfResultReadbackBuffer));
+				&desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&_dfResultReadbackBuffer));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateCommittedResource 失败", hr);
 				return false;
@@ -289,38 +290,93 @@ bool GraphicsCaptureFrameSource::Initialize(
 		}
 
 		{
-			D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {
+			// 容纳两个 SRV
+			D3D12_DESCRIPTOR_HEAP_DESC desc = {
 				.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-				.NumDescriptors = 1,
+				.NumDescriptors = 2,
 				.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
 			};
-			hr = dfDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_dfDescriptorHeap));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
-				return false;
-			}
-
-			srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-			hr = dfDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_dfCpuOnlyDescriptorHeap));
+			hr = dfDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_dfDescriptorHeap));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
 				return false;
 			}
 		}
-		
-		// 在 CPU-only 描述符堆上创建 UAV，然后复制到 shader-visible 描述符堆
-		CD3DX12_UNORDERED_ACCESS_VIEW_DESC desc =
-			CD3DX12_UNORDERED_ACCESS_VIEW_DESC::TypedBuffer(DXGI_FORMAT_R32_UINT, MAX_DIRTY_RECTS);
-		CD3DX12_CPU_DESCRIPTOR_HANDLE cpuOnlyCpuHandle(
-			_dfCpuOnlyDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-		dfDevice->CreateUnorderedAccessView(_dfResultBuffer.get(), nullptr, &desc, cpuOnlyCpuHandle);
 
-		dfDevice->CopyDescriptorsSimple(
-			1,
-			_dfDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-			cpuOnlyCpuHandle,
-			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-		);
+		_dfDescriptorSize = dfDevice->GetDescriptorHandleIncrementSize(
+			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		
+		hr = dfDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_dfFence));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateFence 失败", hr);
+			return false;
+		}
+		
+		{
+			winrt::com_ptr<ID3DBlob> signature;
+
+			CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0,
+				D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+
+			D3D12_ROOT_PARAMETER1 rootParams[] = {
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+					.Constants = {
+						.Num32BitValues = 6
+					}
+				},
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV,
+					.Descriptor = {
+						.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE
+					}
+				},
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+					.DescriptorTable = {
+						.NumDescriptorRanges = 1,
+						.pDescriptorRanges = &srvRange
+					}
+				}
+			};
+
+			D3D12_STATIC_SAMPLER_DESC samplerDesc = {
+				.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
+				.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+				.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+				.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+				.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+				.ShaderRegister = 0
+			};
+
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+				(UINT)std::size(rootParams), rootParams, 1, &samplerDesc);
+			hr = D3DX12SerializeVersionedRootSignature(
+				&rootSignatureDesc, graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+				return false;
+			}
+
+			hr = dfDevice->CreateRootSignature(0, signature->GetBufferPointer(),
+				signature->GetBufferSize(), IID_PPV_ARGS(&_dfRootSignature));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateRootSignature 失败", hr);
+				return false;
+			}
+		}
+
+		{
+			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
+				.pRootSignature = _dfRootSignature.get(),
+				.CS = CD3DX12_SHADER_BYTECODE(DuplicateFrameCS, sizeof(DuplicateFrameCS))
+			};
+			hr = dfDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&_dfPipelineState));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+				return false;
+			}
+		}
 	}
 
 	if (!_InitializeCaptureItem()) {
@@ -384,31 +440,47 @@ static HRESULT GetFrameResourceFromCaptureFrame(
 }
 
 HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) noexcept {
-	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame latestFrame{ nullptr };
 	{
 		auto lk = _latestFrameLock.lock_shared();
-		latestFrame = _latestFrame;
+		if (_latestFrame) {
+			_newFrame = std::move(_latestFrame);
+			_latestFrame = nullptr;
+		}
 	}
 
-	if (!latestFrame) {
+	if (!_newFrame) {
 		isNewFrameAvailable = false;
 		return S_OK;
 	}
 
-	winrt::com_ptr<ID3D12Resource> frameResource;
-	HRESULT hr = GetFrameResourceFromCaptureFrame(
-		latestFrame, _bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice(), frameResource);
+	ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice();
+
+	HRESULT hr = GetFrameResourceFromCaptureFrame(_newFrame, dfDevice, _newFrameResource);
 	if (FAILED(hr)) {
+		Logger::Get().ComError("GetFrameResourceFromCaptureFrame 失败", hr);
 		return hr;
+	}
+
+	CD3DX12_SHADER_RESOURCE_VIEW_DESC desc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
+		_isUsingScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM, 1);
+	dfDevice->CreateShaderResourceView(_newFrameResource.get(), &desc, CD3DX12_CPU_DESCRIPTOR_HANDLE(
+		_dfDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), _dfCurDescriptorOffset));
+
+	// 第一帧无需检查重复帧
+	if (!_slots[_curFrameIdx].frameResource) {
+		isNewFrameAvailable = true;
+		return S_OK;
 	}
 
 	hr = _dfCommandAllocator->Reset();
 	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandAllocator::Reset 失败", hr);
 		return hr;
 	}
 
-	hr = _dfCommandList->Reset(_dfCommandAllocator.get(), nullptr);
+	hr = _dfCommandList->Reset(_dfCommandAllocator.get(), _dfPipelineState.get());
 	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12GraphicsCommandList::Reset 失败", hr);
 		return hr;
 	}
 
@@ -416,16 +488,45 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 		ID3D12DescriptorHeap* t = _dfDescriptorHeap.get();
 		_dfCommandList->SetDescriptorHeaps(1, &t);
 	}
-	
-	const UINT zeros[4] = {};
-	_dfCommandList->ClearUnorderedAccessViewUint(
-		_dfDescriptorHeap->GetGPUDescriptorHandleForHeapStart(),
-		_dfCpuOnlyDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-		_dfResultBuffer.get(),
-		zeros,
-		0,
-		nullptr
+
+	_dfCommandList->SetComputeRootSignature(_dfRootSignature.get());
+
+	{
+#ifdef _DEBUG
+		D3D12_RESOURCE_DESC texDesc = _newFrameResource->GetDesc();
+		assert(texDesc.Width == _frameBox.right && texDesc.Height == _frameBox.bottom);
+#endif
+		DirectXHelper::Constant32 constants[] = {
+			{.floatVal = 1.0f / _frameBox.right},
+			{.floatVal = 1.0f / _frameBox.bottom},
+			{.uintVal = _frameBox.left},
+			{.uintVal = _frameBox.top},
+			{.uintVal = 0},
+			{.uintVal = ++_dfResultBufferTargetValue}
+		};
+		_dfCommandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+	}
+
+	_dfCommandList->SetComputeRootUnorderedAccessView(1, _dfResultBuffer->GetGPUVirtualAddress());
+
+	_dfCommandList->SetComputeRootDescriptorTable(
+		2, _dfDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+	constexpr uint32_t BLOCK_SIZE = 16;
+	_dfCommandList->Dispatch(
+		(_frameBox.right + BLOCK_SIZE - 1) / BLOCK_SIZE,
+		(_frameBox.bottom + BLOCK_SIZE - 1) / BLOCK_SIZE,
+		1
 	);
+	
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			_dfResultBuffer.get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
+		_dfCommandList->ResourceBarrier(1, &barrier);
+	}
+
+	// TODO: 只复制需要的
+	_dfCommandList->CopyBufferRegion(_dfResultReadbackBuffer.get(), 0, _dfResultBuffer.get(), 0, sizeof(uint32_t));
 
 	hr = _dfCommandList->Close();
 	if (FAILED(hr)) {
@@ -437,36 +538,60 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 		ID3D12CommandList* t = _dfCommandList.get();
 		_dfCommandQueue->ExecuteCommandLists(1, &t);
 	}
-	
-	isNewFrameAvailable = true;
+
+	hr = _dfCommandQueue->Signal(_dfFence.get(), ++_dfFenceValue);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
+		return hr;
+	}
+
+	hr = _dfFence->SetEventOnCompletion(_dfFenceValue, NULL);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D12Fence::SetEventOnCompletion 失败", hr);
+		return hr;
+	}
+
+	// 读取结果
+	{
+		CD3DX12_RANGE range(0, sizeof(uint32_t));
+
+		void* pData;
+		hr = _dfResultReadbackBuffer->Map(0, nullptr, &pData);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
+			return hr;
+		}
+
+		uint32_t* results = (uint32_t*)pData;
+		isNewFrameAvailable = results[0] == _dfResultBufferTargetValue;
+
+		range = {};
+		_dfResultReadbackBuffer->Unmap(0, &range);
+	}
+
 	return S_OK;
 }
 
 HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
-	{
-		// 不要在持有 _latestFrameLock 时释放 Direct3D11CaptureFrame。WGC 内部使用 Critical Section
-		// 同步，如果此时 _Direct3D11CaptureFramePool_FrameArrived 正在执行会死锁。
-		winrt::Direct3D11CaptureFrame latestFrame{ nullptr };
-		{
-			auto lk = _latestFrameLock.lock_exclusive();
-			latestFrame = std::move(_latestFrame);
-			_latestFrame = nullptr;
-		}
-
-		if (!latestFrame) {
-			// 没有新帧
-			outputIdx = _curFrameIdx;
-			return S_OK;
-		}
-
-		_curFrameIdx = (_curFrameIdx + 1) % (uint32_t)_slots.size();
-
-		_FrameResourceSlot& curSlot = _slots[_curFrameIdx];
-		curSlot.frameResource = nullptr;
-		curSlot.captureFrame = std::move(latestFrame);
+	if (!_newFrame) {
+		// 没有新帧
+		outputIdx = _curFrameIdx;
+		return S_OK;
 	}
 
+	_curFrameIdx = (_curFrameIdx + 1) % (uint32_t)_slots.size();
 	_FrameResourceSlot& curSlot = _slots[_curFrameIdx];
+
+	curSlot.captureFrame = std::move(_newFrame);
+	curSlot.frameResource = std::move(_newFrameResource);
+	_newFrame = nullptr;
+	_newFrameResource = nullptr;
+
+	if (_dfCurDescriptorOffset == 0) {
+		_dfCurDescriptorOffset = _dfDescriptorSize;
+	} else {
+		_dfCurDescriptorOffset = 0;
+	}
 
 #ifdef MP_DEBUG_INFO
 	{
@@ -488,20 +613,10 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 	}
 #endif
 
-	HRESULT hr = GetFrameResourceFromCaptureFrame(
-		curSlot.captureFrame,
-		_bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice(),
-		curSlot.frameResource
-	);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("GetFrameResourceFromCaptureFrame 失败", hr);
-		return hr;
-	}
-
 	// 同适配器数据路径: frameResource -> output
 	// 跨适配器数据路径: frameResource -> bridgeResource|sharedResource -> output
 
-	hr = curSlot.commandAllocator->Reset();
+	HRESULT hr = curSlot.commandAllocator->Reset();
 	if (FAILED(hr)) {
 		return hr;
 	}

@@ -417,7 +417,7 @@ bool EffectDrawer::_UpdateConstants(
 ) noexcept {
 	const bool isInlineParams = desc.flags & EffectFlags::InlineParams;
 
-	SmallVector<EffectHelper::Constant32, 32> constants;
+	SmallVector<DirectXHelper::Constant32, 32> constants;
 	
 	// 大小必须为 4 的倍数
 	const size_t builtinConstantCount = 10;
@@ -448,7 +448,7 @@ bool EffectDrawer::_UpdateConstants(
 	constants[9].floatVal = outputSize.cy / (FLOAT)inputSize.cy;
 
 	// PS 样式的通道需要的参数
-	EffectHelper::Constant32* pCurParam = constants.data() + builtinConstantCount;
+	DirectXHelper::Constant32* pCurParam = constants.data() + builtinConstantCount;
 	if (psStylePassParams > 0) {
 		for (UINT i = 0, end = (UINT)desc.passes.size() - 1; i < end; ++i) {
 			if (desc.passes[i].flags & EffectPassFlags::PSStyle) {

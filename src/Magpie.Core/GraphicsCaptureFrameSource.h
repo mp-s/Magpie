@@ -87,10 +87,18 @@ private:
 	winrt::com_ptr<ID3D12GraphicsCommandList> _dfCommandList;
 	winrt::com_ptr<ID3D12CommandAllocator> _dfCommandAllocator;
 	winrt::com_ptr<ID3D12Resource> _dfResultBuffer;
+	uint32_t _dfResultBufferTargetValue = 0;
 	winrt::com_ptr<ID3D12Resource> _dfResultReadbackBuffer;
 	winrt::com_ptr<ID3D12DescriptorHeap> _dfDescriptorHeap;
-	// 用于清空 _dfResultBuffer
-	winrt::com_ptr<ID3D12DescriptorHeap> _dfCpuOnlyDescriptorHeap;
+	uint32_t _dfDescriptorSize = 0;
+	uint32_t _dfCurDescriptorOffset = 0;
+	winrt::com_ptr<ID3D12Fence1> _dfFence;
+	uint64_t _dfFenceValue = 0;
+	winrt::com_ptr<ID3D12RootSignature> _dfRootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _dfPipelineState;
+
+	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _newFrame{ nullptr };
+	winrt::com_ptr<ID3D12Resource> _newFrameResource;
 
 	struct _FrameCrossAdapterResourceSlot {
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
