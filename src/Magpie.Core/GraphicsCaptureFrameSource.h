@@ -14,8 +14,6 @@ enum class FrameSourceState {
 	NewFrameAvailable
 };
 
-constexpr inline uint32_t MAX_CAPTURE_DIRTY_RECTS = 8;
-
 // 使用 Windows.Graphics.Capture 接口捕获窗口，见
 // https://docs.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture
 class GraphicsCaptureFrameSource {

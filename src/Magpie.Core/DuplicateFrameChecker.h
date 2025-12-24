@@ -11,12 +11,7 @@ public:
 
 	~DuplicateFrameChecker() = default;
 
-	bool Initialize(
-		ID3D12Device5* device,
-		uint32_t maxDirtyRects,
-		const ColorInfo& colorInfo,
-		Size frameSize
-	) noexcept;
+	bool Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize) noexcept;
 
 	HRESULT CheckFrame(ID3D12Resource* frameResource, SmallVectorImpl<Rect>& dirtyRects) noexcept;
 

@@ -7,12 +7,7 @@
 
 namespace Magpie {
 
-bool DuplicateFrameChecker::Initialize(
-	ID3D12Device5* device,
-	uint32_t maxDirtyRects,
-	const ColorInfo& colorInfo,
-	Size frameSize
-) noexcept {
+bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize) noexcept {
 	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
 		DuplicateFrameDetectionMode::Never);
 
@@ -50,7 +45,7 @@ bool DuplicateFrameChecker::Initialize(
 	{
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 		CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(
-			maxDirtyRects * sizeof(uint32_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+			MAX_CAPTURE_DIRTY_RECT_COUNT * sizeof(uint32_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
 		hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
 			&desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_resultBuffer));
@@ -174,15 +169,12 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 	ID3D12Resource* frameResource,
 	SmallVectorImpl<Rect>& dirtyRects
 ) noexcept {
-	assert(!dirtyRects.empty());
+	assert(!dirtyRects.empty() && dirtyRects.size() <= MAX_CAPTURE_DIRTY_RECT_COUNT);
 
 #ifdef _DEBUG
 	{
 		D3D12_RESOURCE_DESC desc = frameResource->GetDesc();
 		assert(desc.Width == _frameSize.width && desc.Height == _frameSize.height);
-
-		desc = _resultBuffer->GetDesc();
-		assert(desc.Width >= dirtyRects.size() * sizeof(uint32_t));
 	}
 #endif
 	

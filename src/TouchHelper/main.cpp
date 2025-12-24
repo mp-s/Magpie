@@ -36,7 +36,7 @@ static void InitializeLogger() noexcept {
 	Logger::Get().Initialize(
 		spdlog::level::info,
 		std::move(logPath),
-		CommonSharedConstants::LOG_MAX_SIZE,
+		CommonSharedConstants::MAX_LOG_SIZE,
 		1
 	);
 }

@@ -41,5 +41,5 @@ struct CommonSharedConstants {
 
 	static constexpr const wchar_t* APP_RESOURCE_MAP_ID = L"Magpie/Resources";
 
-	static constexpr int LOG_MAX_SIZE = 500000;
+	static constexpr int MAX_LOG_SIZE = 500000;
 };

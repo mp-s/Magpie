@@ -67,6 +67,8 @@ using namespace Windows::System;
 
 namespace Magpie {
 
+static constexpr uint32_t MAX_CAPTURE_DIRTY_RECT_COUNT = 8;
+
 enum class ComponentState {
 	Initializing,
 	NoError,

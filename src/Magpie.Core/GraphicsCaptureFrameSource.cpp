@@ -239,12 +239,8 @@ bool GraphicsCaptureFrameSource::Initialize(
 
 	if (options.duplicateFrameDetectionMode != DuplicateFrameDetectionMode::Never) {
 		_duplicateFrameChecker = std::make_unique<DuplicateFrameChecker>();
-		if (!_duplicateFrameChecker->Initialize(
-			_bridgeDevice ? _bridgeDevice.get() : device,
-			MAX_CAPTURE_DIRTY_RECTS,
-			colorInfo,
-			Size{ _frameBox.right, _frameBox.bottom })
-		) {
+		if (!_duplicateFrameChecker->Initialize(_bridgeDevice ? _bridgeDevice.get() : device,
+			colorInfo, Size{ _frameBox.right, _frameBox.bottom })) {
 			Logger::Get().Error("DuplicateFrameChecker::Initialize 失败");
 			return false;
 		}
@@ -936,7 +932,7 @@ void GraphicsCaptureFrameSource::_Direct3D11CaptureFramePool_FrameArrived(
 	}
 
 	if (dirtyRects.size() >= 2) {
-		DirtyRectsOptimizer::Execute(dirtyRects, MAX_CAPTURE_DIRTY_RECTS);
+		DirtyRectsOptimizer::Execute(dirtyRects);
 	}
 
 	{

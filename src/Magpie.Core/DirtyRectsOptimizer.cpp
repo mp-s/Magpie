@@ -114,7 +114,7 @@ static void OptimizeDirtyRects(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 	}
 }
 
-void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects, uint32_t dirtyRectCountLimit) noexcept {
+void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 	assert(dirtyRects.size() >= 2);
 
 	OptimizeDirtyRects(dirtyRects);
@@ -130,16 +130,17 @@ void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects, uint32_t di
 		uint32_t minTotalPixels = std::numeric_limits<uint32_t>::max();
 		uint32_t targetRectCount = 0;
 		bool targetCanOptimize = false;
-		uint32_t targetI = 0;
-		uint32_t targetJ = 0;
-		// 遍历所有两两合并的方式找出总像素数最少的
+		uint32_t targetIdx1 = 0;
+		uint32_t targetIdx2 = 0;
+		// 遍历所有的两两合并找出总像素数最少的。复杂度虽然是 n^3，但实际大部分分支被 IsOverlap 过滤，
+		// 而且没有堆分配，可以相当快地循环。
 		for (uint32_t i = 0; i < count; ++i) {
 			for (uint32_t j = i + 1; j < count; ++j) {
 				const Rect& rect1 = dirtyRects[i];
 				const Rect& rect2 = dirtyRects[j];
 
 				// 两个矩形必须相交才有优化的可能，但脏矩形数量过多时需要强制合并
-				if (!RectHelper::IsOverlap(rect1, rect2) && count <= dirtyRectCountLimit) {
+				if (!RectHelper::IsOverlap(rect1, rect2) && count <= MAX_CAPTURE_DIRTY_RECT_COUNT) {
 					continue;
 				}
 
@@ -174,28 +175,29 @@ void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects, uint32_t di
 					minTotalPixels = totalPixels;
 					targetRectCount = rectCount;
 					targetCanOptimize = optimized;
-					targetI = i;
-					targetJ = j;
+					targetIdx1 = i;
+					targetIdx2 = j;
 				}
 			}
 		}
 
 		// 总像素数持平也采用，因为脏矩形数量减少了
-		if (minTotalPixels > originTotalPixels && count <= dirtyRectCountLimit) {
+		if (minTotalPixels > originTotalPixels && count <= MAX_CAPTURE_DIRTY_RECT_COUNT) {
 			return;
 		}
 
-		Rect unionedRect = RectHelper::Union(dirtyRects[targetI], dirtyRects[targetJ]);
-		dirtyRects.erase(dirtyRects.begin() + targetJ);
-		dirtyRects.erase(dirtyRects.begin() + targetI);
+		Rect unionedRect = RectHelper::Union(dirtyRects[targetIdx1], dirtyRects[targetIdx2]);
+		assert(targetIdx2 > targetIdx1);
+		dirtyRects.erase(dirtyRects.begin() + targetIdx2);
+		dirtyRects.erase(dirtyRects.begin() + targetIdx1);
 		dirtyRects.push_back(unionedRect);
 
 		if (targetCanOptimize) {
 			OptimizeDirtyRects(dirtyRects);
+		}
 
-			if (minTotalPixels > originTotalPixels && dirtyRects.size() <= dirtyRectCountLimit) {
-				return;
-			}
+		if (minTotalPixels > originTotalPixels && dirtyRects.size() <= MAX_CAPTURE_DIRTY_RECT_COUNT) {
+			return;
 		}
 	}
 }
