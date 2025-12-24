@@ -162,6 +162,9 @@
       <Filter>Capture</Filter>
     </ClInclude>
     <ClInclude Include="RectHelper.h" />
+    <ClInclude Include="DirtyRectsOptimizer.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -272,6 +275,9 @@
       <Filter>EffectDrawer</Filter>
     </ClCompile>
     <ClCompile Include="DuplicateFrameChecker.cpp">
+      <Filter>Capture</Filter>
+    </ClCompile>
+    <ClCompile Include="DirtyRectsOptimizer.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
   </ItemGroup>
