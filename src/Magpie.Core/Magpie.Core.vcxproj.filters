@@ -143,9 +143,6 @@
     <ClInclude Include="GraphicsContext.h">
       <Filter>Render</Filter>
     </ClInclude>
-    <ClInclude Include="ColorInfo.h">
-      <Filter>Render</Filter>
-    </ClInclude>
     <ClInclude Include="FrameProducer.h">
       <Filter>Render</Filter>
     </ClInclude>
@@ -161,6 +158,10 @@
     <ClInclude Include="CatumullRomEffectDrawer.h">
       <Filter>EffectDrawer</Filter>
     </ClInclude>
+    <ClInclude Include="DuplicateFrameChecker.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
+    <ClInclude Include="RectHelper.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -269,6 +270,9 @@
     </ClCompile>
     <ClCompile Include="CatumullRomEffectDrawer.cpp">
       <Filter>EffectDrawer</Filter>
+    </ClCompile>
+    <ClCompile Include="DuplicateFrameChecker.cpp">
+      <Filter>Capture</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

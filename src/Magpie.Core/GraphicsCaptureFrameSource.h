@@ -1,4 +1,5 @@
 #pragma once
+#include "SmallVector.h"
 #include <ShlObj.h>
 #include <winrt/Windows.Graphics.Capture.h>
 
@@ -86,6 +87,7 @@ private:
 
 	std::unique_ptr<DuplicateFrameChecker> _duplicateFrameChecker;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _newFrame{ nullptr };
+	SmallVector<Rect> _newFrameDirtyRects;
 	winrt::com_ptr<ID3D12Resource> _newFrameResource;
 
 	struct _FrameCrossAdapterResourceSlot {
@@ -104,6 +106,7 @@ private:
 	
 	wil::srwlock _latestFrameLock;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _latestFrame{ nullptr };
+	SmallVector<Rect> _latestFrameDirtyRects;
 
 	std::atomic<DWORD> _producerThreadId;
 
@@ -123,6 +126,7 @@ private:
 	bool _isScRGB = false;
 	bool _isSrcStyleChanged = false;
 	bool _isRoundCornerDisabled = false;
+	bool _isDirtyRegionSupported = false;
 };
 
 }

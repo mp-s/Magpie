@@ -77,6 +77,15 @@ enum class ComponentState {
 struct Size {
 	uint32_t width;
 	uint32_t height;
+
+	bool operator==(const Size& other) const = default;
+};
+
+struct Point {
+	uint32_t x;
+	uint32_t y;
+
+	bool operator==(const Point& other) const = default;
 };
 
 struct Rect {
@@ -84,16 +93,18 @@ struct Rect {
 	uint32_t top;
 	uint32_t right;
 	uint32_t bottom;
+
+	bool operator==(const Rect& other) const = default;
 };
 
 struct ColorInfo {
-	bool operator==(const ColorInfo& other) const = default;
-
 	winrt::AdvancedColorKind kind = winrt::AdvancedColorKind::StandardDynamicRange;
 	// HDR 模式下最大亮度缩放
 	float maxLuminance = 1.0f;
 	// HDR 模式下 SDR 内容亮度缩放
 	float sdrWhiteLevel = 1.0f;
+
+	bool operator==(const ColorInfo& other) const = default;
 };
 
 }

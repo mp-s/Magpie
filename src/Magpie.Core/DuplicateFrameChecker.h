@@ -18,11 +18,7 @@ public:
 		Size frameSize
 	) noexcept;
 
-	HRESULT CheckFrame(
-		ID3D12Resource* frameResource,
-		const SmallVectorImpl<Rect>& dirtyRects,
-		bool& isDuplicate
-	) noexcept;
+	HRESULT CheckFrame(ID3D12Resource* frameResource, SmallVectorImpl<Rect>& dirtyRects) noexcept;
 
 	void OnFrameAdopted() noexcept;
 

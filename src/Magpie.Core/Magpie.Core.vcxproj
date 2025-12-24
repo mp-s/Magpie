@@ -84,6 +84,7 @@
     <ClInclude Include="include\Event.h" />
     <ClInclude Include="OverlayDrawer.h" />
     <ClInclude Include="PresenterBase.h" />
+    <ClInclude Include="RectHelper.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Renderer2.h" />

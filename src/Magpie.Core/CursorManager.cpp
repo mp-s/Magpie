@@ -328,6 +328,10 @@ void CursorManager::_RestoreCursorSpeed() noexcept {
 // 
 // 这个函数使用 ClipCursor 将光标限制在目标位置一段时间，等待系统将输入队列处理完毕。
 void CursorManager::_ReliableSetCursorPos(POINT pos) const noexcept {
+	if (ScalingWindow::Get().Options().IsDebugMode()) {
+		return;
+	}
+
 	RECT originClipRect;
 	GetClipCursor(&originClipRect);
 

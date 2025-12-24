@@ -172,10 +172,9 @@ bool DuplicateFrameChecker::Initialize(
 
 HRESULT DuplicateFrameChecker::CheckFrame(
 	ID3D12Resource* frameResource,
-	const SmallVectorImpl<Rect>& dirtyRects,
-	bool& isDuplicate
+	SmallVectorImpl<Rect>& dirtyRects
 ) noexcept {
-	assert(!dirtyRects.empty() && !isDuplicate);
+	assert(!dirtyRects.empty());
 
 #ifdef _DEBUG
 	{
@@ -195,7 +194,6 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 	}
 
 	if (_isFirstFrame) {
-		isDuplicate = false;
 		return S_OK;
 	}
 
@@ -243,8 +241,7 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 				{.uintVal = dirtyRect.left},
 				{.uintVal = dirtyRect.top}
 			};
-			_commandList->SetComputeRoot32BitConstants(
-				0, (UINT)std::size(constants), constants, 3 * sizeof(DirectXHelper::Constant32));
+			_commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 3);
 		}
 
 		constexpr uint32_t BLOCK_SIZE = 16;
@@ -288,6 +285,7 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 	}
 
 	// 读取结果
+	SmallVector<uint32_t, 4> removeList;
 	{
 		CD3DX12_RANGE range(0, dirtyRectCount * sizeof(uint32_t));
 
@@ -298,15 +296,23 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 			return hr;
 		}
 
-		isDuplicate = true;
 		for (uint32_t i = 0; i < dirtyRectCount; ++i) {
-			if (((uint32_t*)pData)[i] == _curTargetValue) {
-				isDuplicate = false;
+			if (((uint32_t*)pData)[i] != _curTargetValue) {
+				// 此矩形内画面无变化
+				removeList.push_back(i);
 			}
 		}
 		
 		range = {};
 		_resultReadbackBuffer->Unmap(0, &range);
+	}
+
+	if (!removeList.empty()) {
+		// 从后向前删除
+		std::sort(removeList.begin(), removeList.end(), std::greater<uint32_t>());
+		for (uint32_t idx : removeList) {
+			dirtyRects.erase(dirtyRects.begin() + idx);
+		}
 	}
 
 	return S_OK;
