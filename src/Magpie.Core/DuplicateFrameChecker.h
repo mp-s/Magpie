@@ -5,7 +5,7 @@ namespace Magpie {
 
 class DuplicateFrameChecker {
 public:
-	DuplicateFrameChecker() = default;
+	DuplicateFrameChecker() noexcept;
 	DuplicateFrameChecker(const DuplicateFrameChecker&) = delete;
 	DuplicateFrameChecker(DuplicateFrameChecker&&) = delete;
 

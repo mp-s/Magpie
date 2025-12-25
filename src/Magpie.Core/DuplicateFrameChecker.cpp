@@ -11,6 +11,9 @@ static constexpr uint16_t INITIAL_CHECK_COUNT = 16;
 static constexpr uint16_t INITIAL_SKIP_COUNT = 1;
 static constexpr uint16_t MAX_SKIP_COUNT = 16;
 
+DuplicateFrameChecker::DuplicateFrameChecker() noexcept :
+	_nextSkipCount(INITIAL_SKIP_COUNT), _framesLeft(INITIAL_CHECK_COUNT) {}
+
 bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize) noexcept {
 	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
 		DuplicateFrameDetectionMode::Never);

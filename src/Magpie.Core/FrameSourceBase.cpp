@@ -4,7 +4,6 @@
 #include "DeviceResources.h"
 #include "DirectXHelper.h"
 #include "Logger.h"
-#include "ScalingOptions.h"
 #include "ScalingWindow.h"
 #include "shaders/DuplicateFrameCS.h"
 #include "Win32Helper.h"
@@ -14,7 +13,6 @@ namespace Magpie {
 
 static constexpr uint16_t INITIAL_CHECK_COUNT = 16;
 static constexpr uint16_t INITIAL_SKIP_COUNT = 1;
-static constexpr uint16_t MAX_SKIP_COUNT = 16;
 
 FrameSourceBase::FrameSourceBase() noexcept :
 	_nextSkipCount(INITIAL_SKIP_COUNT), _framesLeft(INITIAL_CHECK_COUNT) {}
