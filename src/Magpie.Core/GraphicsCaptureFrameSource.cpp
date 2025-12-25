@@ -135,6 +135,11 @@ static bool CalcWindowCapturedFrameBounds(HWND hWnd, RECT& rect) noexcept {
 	return true;
 }
 
+static uint32_t CalcFrameCount() noexcept {
+	// maxProducerInFlightFrames(_slots)+1(_latestFrame)+1(_newFrame)+2(备用)
+	return ScalingWindow::Get().Options().maxProducerInFlightFrames + 4;
+}
+
 bool GraphicsCaptureFrameSource::Initialize(
 	GraphicsContext& graphicsContext,
 	const RECT& srcRect,
@@ -237,10 +242,13 @@ bool GraphicsCaptureFrameSource::Initialize(
 		return false;
 	}
 
+	const uint32_t frameCount = CalcFrameCount();
+	_captureFrameResourceTable.reserve(frameCount);
+
 	if (options.duplicateFrameDetectionMode != DuplicateFrameDetectionMode::Never) {
 		_duplicateFrameChecker = std::make_unique<DuplicateFrameChecker>();
 		if (!_duplicateFrameChecker->Initialize(_bridgeDevice ? _bridgeDevice.get() : device,
-			colorInfo, Size{ _frameBox.right, _frameBox.bottom })) {
+			colorInfo, Size{ _frameBox.right, _frameBox.bottom }, frameCount)) {
 			Logger::Get().Error("DuplicateFrameChecker::Initialize 失败");
 			return false;
 		}
@@ -271,49 +279,21 @@ bool GraphicsCaptureFrameSource::Start() noexcept {
 	return true;
 }
 
-static HRESULT GetFrameResourceFromCaptureFrame(
-	const winrt::Direct3D11CaptureFrame& captureFrame,
-	ID3D12Device5* device,
-	winrt::com_ptr<ID3D12Resource>& frameResource
-) noexcept {
-	winrt::IDirect3DSurface d3dSurface = captureFrame.Surface();
-
-	auto dxgiInterfaceAccess =
-		d3dSurface.try_as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-
-	winrt::com_ptr<ID3D11Texture2D> d3d11Texture;
-	HRESULT hr = dxgiInterfaceAccess->GetInterface(IID_PPV_ARGS(&d3d11Texture));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("IDirect3DDxgiInterfaceAccess::GetInterface 失败", hr);
-		return hr;
-	}
-
-	auto dxgiResource = d3d11Texture.try_as<IDXGIResource1>();
-
-	wil::unique_handle hSharedResource;
-	hr = dxgiResource->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, hSharedResource.put());
-	if (FAILED(hr)) {
-		Logger::Get().ComError("IDXGIResource1::CreateSharedHandle 失败", hr);
-		return hr;
-	}
-
-	hr = device->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&frameResource));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("OpenSharedHandle 失败", hr);
-		return hr;
-	}
-
-	return S_OK;
-}
-
 HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) noexcept {
 	{
 		auto lk = _latestFrameLock.lock_shared();
 
 		if (_latestFrame) {
 			_newFrame = std::move(_latestFrame);
-			_newFrameDirtyRects = std::move(_latestFrameDirtyRects);
 			_latestFrame = nullptr;
+
+			// 累积脏矩形
+			if (_newFrameDirtyRects.empty()) {
+				_newFrameDirtyRects = std::move(_latestFrameDirtyRects);
+			} else {
+				_newFrameDirtyRects.insert(_newFrameDirtyRects.end(),
+					_latestFrameDirtyRects.begin(), _latestFrameDirtyRects.end());
+			}
 		} else {
 			isNewFrameAvailable = (bool)_newFrame;
 			return S_OK;
@@ -322,10 +302,60 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 	
 	ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice();
 
-	HRESULT hr = GetFrameResourceFromCaptureFrame(_newFrame, dfDevice, _newFrameResource);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("GetFrameResourceFromCaptureFrame 失败", hr);
-		return hr;
+	{
+		winrt::IDirect3DSurface d3dSurface = _newFrame.Surface();
+
+		auto dxgiInterfaceAccess =
+			d3dSurface.try_as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+
+		winrt::com_ptr<ID3D11Texture2D> d3d11Texture;
+		HRESULT hr = dxgiInterfaceAccess->GetInterface(IID_PPV_ARGS(&d3d11Texture));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("IDirect3DDxgiInterfaceAccess::GetInterface 失败", hr);
+			return hr;
+		}
+
+		// 目前 WGC 帧池不会变化，因此可以缓存，需要采取保护措施防止内部实现变化
+		auto it = std::find_if(
+			_captureFrameResourceTable.begin(),
+			_captureFrameResourceTable.end(),
+			[&](const std::pair<ID3D11Texture2D*, winrt::com_ptr<ID3D12Resource>>& elem) {
+				return elem.first == d3d11Texture.get();
+			}
+		);
+		if (it == _captureFrameResourceTable.end()) {
+			// 如果帧池有变化应清空缓存
+			if (_captureFrameResourceTable.size() == CalcFrameCount()) {
+				assert(false);
+				_captureFrameResourceTable.clear();
+
+				// 使描述符失效
+				if (_duplicateFrameChecker) {
+					_duplicateFrameChecker->OnCaptureRestarted();
+				}
+			}
+
+			auto dxgiResource = d3d11Texture.try_as<IDXGIResource1>();
+
+			wil::unique_handle hSharedResource;
+			hr = dxgiResource->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, hSharedResource.put());
+			if (FAILED(hr)) {
+				Logger::Get().ComError("IDXGIResource1::CreateSharedHandle 失败", hr);
+				return hr;
+			}
+
+			winrt::com_ptr<ID3D12Resource> frameResource;
+			hr = dfDevice->OpenSharedHandle(hSharedResource.get(), IID_PPV_ARGS(&frameResource));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("OpenSharedHandle 失败", hr);
+				return hr;
+			}
+
+			_captureFrameResourceTable.emplace_back(d3d11Texture.get(), std::move(frameResource));
+			_newCaptureFrameResourceIdx = (uint32_t)_captureFrameResourceTable.size() - 1;
+		} else {
+			_newCaptureFrameResourceIdx = uint32_t(it - _captureFrameResourceTable.begin());
+		}
 	}
 
 	if (!_duplicateFrameChecker) {
@@ -338,16 +368,20 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 		_newFrameDirtyRects.emplace_back(_frameBox.left, _frameBox.top, _frameBox.right, _frameBox.bottom);
 	}
 
-	hr = _duplicateFrameChecker->CheckFrame(_newFrameResource.get(), _newFrameDirtyRects);
+	HRESULT hr = _duplicateFrameChecker->CheckFrame(
+		_captureFrameResourceTable[_newCaptureFrameResourceIdx].second.get(),
+		_newCaptureFrameResourceIdx,
+		_newFrameDirtyRects
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("DuplicateFrameChecker::CheckFrame 失败", hr);
 		return hr;
 	}
 
+	// 脏矩形被清空则为重复帧
 	isNewFrameAvailable = !_newFrameDirtyRects.empty();
 	if (!isNewFrameAvailable) {
 		_newFrame = nullptr;
-		_newFrameResource = nullptr;
 	}
 
 	return S_OK;
@@ -364,12 +398,15 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 	_FrameResourceSlot& curSlot = _slots[_curFrameIdx];
 
 	curSlot.captureFrame = std::move(_newFrame);
-	curSlot.frameResource = std::move(_newFrameResource);
+	curSlot.captureFrameResourceIdx = _newCaptureFrameResourceIdx;
 	_newFrame = nullptr;
-	_newFrameResource = nullptr;
+	_newFrameDirtyRects.clear();
+
+	ID3D12Resource* curFrameResource =
+		_captureFrameResourceTable[_newCaptureFrameResourceIdx].second.get();
 
 	if (_duplicateFrameChecker) {
-		_duplicateFrameChecker->OnFrameAdopted();
+		_duplicateFrameChecker->OnFrameAdopted(_newCaptureFrameResourceIdx);
 	}
 	
 #ifdef MP_DEBUG_INFO
@@ -419,7 +456,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 		}
 
 		{
-			CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
+			CD3DX12_TEXTURE_COPY_LOCATION src(curFrameResource, 0);
 			CD3DX12_TEXTURE_COPY_LOCATION dest(curCASlot.bridgeResource.get(), 0);
 			_bridgeCopyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
 		}
@@ -449,7 +486,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 
 		_copyCommandList->CopyResource(curSlot.output.get(), curCASlot.sharedResource.get());
 	} else {
-		CD3DX12_TEXTURE_COPY_LOCATION src(curSlot.frameResource.get(), 0);
+		CD3DX12_TEXTURE_COPY_LOCATION src(curFrameResource, 0);
 		CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
 		_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
 	}
@@ -989,7 +1026,7 @@ HRESULT GraphicsCaptureFrameSource::_StartCapture() noexcept {
 		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
 			_wrappedDevice,
 			_isScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
-			ScalingWindow::Get().Options().maxProducerInFlightFrames + 3,
+			CalcFrameCount(),
 			{ (int)_frameBox.right, (int)_frameBox.bottom }
 		);
 
@@ -1046,11 +1083,12 @@ void GraphicsCaptureFrameSource::_StopCapture() noexcept {
 		auto lk = _latestFrameLock.lock_exclusive();
 		_latestFrame = nullptr;
 	}
+
+	_captureFrameResourceTable.clear();
 	
 	for (_FrameResourceSlot& slot : _slots) {
 		// output 将继续使用，直到重启捕获
 		slot.captureFrame = nullptr;
-		slot.frameResource = nullptr;
 	}
 }
 

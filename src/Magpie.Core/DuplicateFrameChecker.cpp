@@ -14,7 +14,7 @@ static constexpr uint16_t MAX_SKIP_COUNT = 16;
 DuplicateFrameChecker::DuplicateFrameChecker() noexcept :
 	_nextSkipCount(INITIAL_SKIP_COUNT), _framesLeft(INITIAL_CHECK_COUNT) {}
 
-bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize) noexcept {
+bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize, uint32_t frameCount) noexcept {
 	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
 		DuplicateFrameDetectionMode::Never);
 
@@ -72,10 +72,9 @@ bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& c
 	}
 
 	{
-		// 容纳两个 SRV
 		D3D12_DESCRIPTOR_HEAP_DESC desc = {
 			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-			.NumDescriptors = 2,
+			.NumDescriptors = frameCount,
 			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
 		};
 		hr = device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_descriptorHeap));
@@ -84,6 +83,8 @@ bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& c
 			return false;
 		}
 	}
+
+	_descriptorTracker.resize(frameCount);
 
 	_descriptorSize = device->GetDescriptorHandleIncrementSize(
 		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -108,7 +109,9 @@ bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& c
 
 		winrt::com_ptr<ID3DBlob> signature;
 
-		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0,
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange1 = CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange2 = CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0,
 			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
 
 		D3D12_ROOT_PARAMETER1 rootParams[] = {
@@ -128,7 +131,14 @@ bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& c
 				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
 				.DescriptorTable = {
 					.NumDescriptorRanges = 1,
-					.pDescriptorRanges = &srvRange
+					.pDescriptorRanges = &srvRange1
+				}
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange2
 				}
 			}
 		};
@@ -174,6 +184,7 @@ bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& c
 
 HRESULT DuplicateFrameChecker::CheckFrame(
 	ID3D12Resource* frameResource,
+	uint32_t frameIdx,
 	SmallVectorImpl<Rect>& dirtyRects
 ) noexcept {
 	assert(!dirtyRects.empty() && dirtyRects.size() <= MAX_CAPTURE_DIRTY_RECT_COUNT);
@@ -184,20 +195,23 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 		assert(desc.Width == _frameSize.width && desc.Height == _frameSize.height);
 	}
 #endif
-	
-	{
+
+	if (!_descriptorTracker[frameIdx]) {
 		CD3DX12_SHADER_RESOURCE_VIEW_DESC desc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
 			_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM, 1);
 		_device->CreateShaderResourceView(frameResource, &desc, CD3DX12_CPU_DESCRIPTOR_HANDLE(
-			_descriptorHeap->GetCPUDescriptorHandleForHeapStart(), _curDescriptorOffset));
+			_descriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIdx, _descriptorSize));
+
+		_descriptorTracker[frameIdx] = true;
 	}
 
-	if (_isFirstFrame) {
+	// 第一帧无需检查重复帧
+	if (_oldFrameIdx == std::numeric_limits<uint32_t>::max()) {
 		return S_OK;
 	}
 
 	if (ScalingWindow::Get().Options().duplicateFrameDetectionMode == DuplicateFrameDetectionMode::Always) {
-		HRESULT hr = _CheckDirtyRects(dirtyRects);
+		HRESULT hr = _CheckDirtyRects(frameIdx, dirtyRects);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("_CheckDirtyRects 失败", hr);
 			return hr;
@@ -217,7 +231,7 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 			}
 		}
 
-		HRESULT hr = _CheckDirtyRects(dirtyRects);
+		HRESULT hr = _CheckDirtyRects(frameIdx, dirtyRects);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("_CheckDirtyRects 失败", hr);
 			return hr;
@@ -239,21 +253,17 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 	return S_OK;
 }
 
-void DuplicateFrameChecker::OnFrameAdopted() noexcept {
-	_isFirstFrame = false;
-
-	if (_curDescriptorOffset == 0) {
-		_curDescriptorOffset = _descriptorSize;
-	} else {
-		_curDescriptorOffset = 0;
-	}
+void DuplicateFrameChecker::OnFrameAdopted(uint32_t frameIdx) noexcept {
+	_oldFrameIdx = frameIdx;
 }
 
 void DuplicateFrameChecker::OnCaptureRestarted() noexcept {
-	_isFirstFrame = true;
+	_oldFrameIdx = std::numeric_limits<uint32_t>::max();
+	// 使描述符失效
+	std::fill(_descriptorTracker.begin(), _descriptorTracker.end(), false);
 }
 
-HRESULT DuplicateFrameChecker::_CheckDirtyRects(SmallVectorImpl<Rect>& dirtyRects) {
+HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept {
 	HRESULT hr = _commandAllocator->Reset();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12CommandAllocator::Reset 失败", hr);
@@ -275,9 +285,14 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(SmallVectorImpl<Rect>& dirtyRect
 
 	_commandList->SetComputeRootUnorderedAccessView(1, _resultBuffer->GetGPUVirtualAddress());
 
-	_commandList->SetComputeRootDescriptorTable(
-		2, _descriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
+	{
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = _descriptorHeap->GetGPUDescriptorHandleForHeapStart();
+		_commandList->SetComputeRootDescriptorTable(
+			2, CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, _oldFrameIdx, _descriptorSize));
+		_commandList->SetComputeRootDescriptorTable(
+			3, CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, newFrameIdx, _descriptorSize));
+	}
+	
 	const uint32_t dirtyRectCount = (uint32_t)dirtyRects.size();
 	for (uint32_t i = 0; i < dirtyRectCount; ++i) {
 		const Rect& dirtyRect = dirtyRects[i];

@@ -83,10 +83,11 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _sharedFence;
 	uint64_t _curCrossAdapterFenceValue = 0;
 
+	std::vector<std::pair<ID3D11Texture2D*, winrt::com_ptr<ID3D12Resource>>> _captureFrameResourceTable;
 	std::unique_ptr<DuplicateFrameChecker> _duplicateFrameChecker;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _newFrame{ nullptr };
 	SmallVector<Rect> _newFrameDirtyRects;
-	winrt::com_ptr<ID3D12Resource> _newFrameResource;
+	uint32_t _newCaptureFrameResourceIdx = 0;
 
 	struct _FrameCrossAdapterResourceSlot {
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
@@ -112,7 +113,7 @@ private:
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
 		// 保留引用防止 WGC 再次写入
 		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame captureFrame{ nullptr };
-		winrt::com_ptr<ID3D12Resource> frameResource;
+		uint32_t captureFrameResourceIdx = 0;
 		winrt::com_ptr<ID3D12Resource> output;
 	};
 

@@ -11,16 +11,16 @@ public:
 
 	~DuplicateFrameChecker() = default;
 
-	bool Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize) noexcept;
+	bool Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize, uint32_t frameCount) noexcept;
 
-	HRESULT CheckFrame(ID3D12Resource* frameResource, SmallVectorImpl<Rect>& dirtyRects) noexcept;
+	HRESULT CheckFrame(ID3D12Resource* frameResource, uint32_t frameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
 
-	void OnFrameAdopted() noexcept;
+	void OnFrameAdopted(uint32_t frameIdx) noexcept;
 
 	void OnCaptureRestarted() noexcept;
 
 private:
-	HRESULT _CheckDirtyRects(SmallVectorImpl<Rect>& dirtyRects);
+	HRESULT _CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
 
 	ID3D12Device5* _device = nullptr;
 
@@ -38,7 +38,9 @@ private:
 	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
 	winrt::com_ptr<ID3D12PipelineState> _pipelineState;
 
-	uint32_t _curDescriptorOffset = 0;
+	// 记录已经创建的描述符
+	std::vector<bool> _descriptorTracker;
+	uint32_t _oldFrameIdx = std::numeric_limits<uint32_t>::max();
 	uint32_t _curTargetValue = 0;
 
 	// 用于检查重复帧
@@ -46,7 +48,6 @@ private:
 	uint16_t _framesLeft;
 
 	bool _isScRGB = false;
-	bool _isFirstFrame = true;
 	bool _isCheckingForDuplicateFrame = true;
 };
 
