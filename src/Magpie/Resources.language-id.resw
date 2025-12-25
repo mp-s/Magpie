@@ -799,9 +799,6 @@
   <data name="Dialog_SelectLauncher_Title" xml:space="preserve">
     <value>Pilih file yang dapat dieksekusi untuk meluncurkan program</value>
   </data>
-  <data name="Home_Advanced_DeveloperOptions_EnableStatisticsForDynamicDetection.Content" xml:space="preserve">
-    <value>Aktifkan statistik untuk deteksi dinamis</value>
-  </data>
   <data name="Home_Advanced_DeveloperOptions_DisableFP16.Content" xml:space="preserve">
     <value>Nonaktifkan penggunaan FP16 dalam shader</value>
   </data>

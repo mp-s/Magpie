@@ -739,9 +739,6 @@
   <data name="Home_Advanced_DeveloperOptions_DuplicateFrameDetection_Never.Content" xml:space="preserve">
     <value>Never</value>
   </data>
-  <data name="Home_Advanced_DeveloperOptions_EnableStatisticsForDynamicDetection.Content" xml:space="preserve">
-    <value>Enable statistics for dynamic detection</value>
-  </data>
   <data name="Overlay_Profiler_DynamicDetection" xml:space="preserve">
     <value>Dynamic detection</value>
   </data>

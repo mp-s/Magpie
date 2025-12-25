@@ -721,9 +721,6 @@
   <data name="Message_ScalingFailed" xml:space="preserve">
     <value>縮放失敗</value>
   </data>
-  <data name="Home_Advanced_DeveloperOptions_EnableStatisticsForDynamicDetection.Content" xml:space="preserve">
-    <value>啟用動態偵測統計</value>
-  </data>
   <data name="Home_Advanced_MinFrameRate.Header" xml:space="preserve">
     <value>最小幀率</value>
   </data>

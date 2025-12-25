@@ -329,9 +329,6 @@
   <data name="Home_Advanced_DeveloperOptions_DuplicateFrameDetection_Never.Content" xml:space="preserve">
     <value>Nigdy</value>
   </data>
-  <data name="Home_Advanced_DeveloperOptions_EnableStatisticsForDynamicDetection.Content" xml:space="preserve">
-    <value>Włącz statystyki dla wykrywania dynamicznego</value>
-  </data>
   <data name="Overlay_Profiler_FrameRate" xml:space="preserve">
     <value>Kl/s</value>
   </data>
