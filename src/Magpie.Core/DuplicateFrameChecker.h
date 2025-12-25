@@ -17,6 +17,8 @@ public:
 
 	void OnFrameAdopted() noexcept;
 
+	void OnCaptureStopped() noexcept;
+
 private:
 	ID3D12Device5* _device = nullptr;
 

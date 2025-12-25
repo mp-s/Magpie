@@ -1048,6 +1048,10 @@ void GraphicsCaptureFrameSource::_StopCapture() noexcept {
 		slot.captureFrame = nullptr;
 		slot.frameResource = nullptr;
 	}
+
+	if (_duplicateFrameChecker) {
+		_duplicateFrameChecker->OnCaptureStopped();
+	}
 }
 
 }

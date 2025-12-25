@@ -320,4 +320,8 @@ void DuplicateFrameChecker::OnFrameAdopted() noexcept {
 	}
 }
 
+void DuplicateFrameChecker::OnCaptureStopped() noexcept {
+	_isFirstFrame = true;
+}
+
 }
