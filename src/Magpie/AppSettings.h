@@ -74,7 +74,6 @@ struct _AppSettingsData {
 	bool _isMainWindowMaximized = false;
 	bool _isAutoCheckForUpdates = true;
 	bool _isCheckForPreviewUpdates = false;
-	bool _isStatisticsForDynamicDetectionEnabled = false;
 	bool _isFP16Disabled = false;
 };
 
@@ -300,15 +299,6 @@ public:
 
 	void DuplicateFrameDetectionMode(enum DuplicateFrameDetectionMode value) noexcept {
 		_duplicateFrameDetectionMode = value;
-		SaveAsync();
-	}
-
-	bool IsStatisticsForDynamicDetectionEnabled() const noexcept {
-		return _isStatisticsForDynamicDetectionEnabled;
-	}
-
-	void IsStatisticsForDynamicDetectionEnabled(bool value) noexcept {
-		_isStatisticsForDynamicDetectionEnabled = value;
 		SaveAsync();
 	}
 

@@ -159,7 +159,6 @@ struct ScalingFlags {
 	static constexpr uint32_t DisableDirectFlip = 1 << 13;
 	static constexpr uint32_t DisableFontCache = 1 << 14;
 	static constexpr uint32_t AllowScalingMaximized = 1 << 15;
-	static constexpr uint32_t EnableStatisticsForDynamicDetection = 1 << 16;
 	// 只影响缩放行为，Magpie.Core 不负责启动 TouchHelper.exe
 	static constexpr uint32_t TouchSupportEnabled = 1 << 17;
 	static constexpr uint32_t InlineParams = 1 << 18;
@@ -180,7 +179,6 @@ struct ScalingOptions {
 	DEFINE_FLAG_ACCESSOR(IsFontCacheDisabled, ScalingFlags::DisableFontCache, flags)
 	DEFINE_FLAG_ACCESSOR(IsSaveEffectSources, ScalingFlags::SaveEffectSources, flags)
 	DEFINE_FLAG_ACCESSOR(IsWarningsAreErrors, ScalingFlags::WarningsAreErrors, flags)
-	DEFINE_FLAG_ACCESSOR(IsStatisticsForDynamicDetectionEnabled, ScalingFlags::EnableStatisticsForDynamicDetection, flags)
 	DEFINE_FLAG_ACCESSOR(IsInlineParams, ScalingFlags::InlineParams, flags)
 	DEFINE_FLAG_ACCESSOR(IsTouchSupportEnabled, ScalingFlags::TouchSupportEnabled, flags)
 	DEFINE_FLAG_ACCESSOR(IsAllowScalingMaximized, ScalingFlags::AllowScalingMaximized, flags)

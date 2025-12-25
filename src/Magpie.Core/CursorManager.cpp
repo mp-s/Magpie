@@ -133,8 +133,7 @@ void CursorManager::IsCursorOnOverlay(bool value) noexcept {
 	}
 	_isOnOverlay = value;
 	
-	_UpdateCursorState();
-	_UpdateCursorPos();
+	Update();
 }
 
 void CursorManager::IsCursorCapturedOnOverlay(bool value) noexcept {
@@ -143,8 +142,7 @@ void CursorManager::IsCursorCapturedOnOverlay(bool value) noexcept {
 	}
 	_isCapturedOnOverlay = value;
 
-	_UpdateCursorState();
-	_UpdateCursorPos();
+	Update();
 }
 
 // 将源窗口的光标位置映射到缩放后的光标位置。当光标位于源窗口之外，与源窗口的距离不会缩放。
@@ -312,7 +310,7 @@ void CursorManager::_AdjustCursorSpeed() noexcept {
 
 void CursorManager::_RestoreCursorSpeed() noexcept {
 	const ScalingOptions& options = ScalingWindow::Get().Options();
-	if (!options.IsAdjustCursorSpeed() || options.IsDebugMode()) {
+	if (!options.IsAdjustCursorSpeed()) {
 		return;
 	}
 
@@ -377,7 +375,7 @@ winrt::fire_and_forget CursorManager::_SrcHitTestAsync(POINT screenPos) noexcept
 	if (_lastCompletedHitTestResult != area) {
 		_lastCompletedHitTestResult = area;
 		// 命中测试变化则立刻重新计算捕获
-		_UpdateCursorState();
+		Update();
 	}
 }
 
@@ -811,9 +809,6 @@ void CursorManager::_UpdateCursorState() noexcept {
 	if (cursorPos != originCursorPos) {
 		_ReliableSetCursorPos(cursorPos);
 	}
-
-	// 光标位置可能改变，需要更新
-	_UpdateCursorPos();
 }
 
 static BOOL CALLBACK EnumMonitorProc(HMONITOR, HDC, LPRECT monitorRect, LPARAM data) {

@@ -72,7 +72,6 @@ void ScalingOptions::Prepare() noexcept {
 	IsFontCacheDisabled: {}
 	IsSaveEffectSources: {}
 	IsWarningsAreErrors: {}
-	IsStatisticsForDynamicDetectionEnabled: {}
 	IsInlineParams: {}
 	IsTouchSupportEnabled: {}
 	IsAllowScalingMaximized: {}
@@ -106,7 +105,6 @@ void ScalingOptions::Prepare() noexcept {
 		IsFontCacheDisabled(),
 		IsSaveEffectSources(),
 		IsWarningsAreErrors(),
-		IsStatisticsForDynamicDetectionEnabled(),
 		IsInlineParams(),
 		IsTouchSupportEnabled(),
 		IsAllowScalingMaximized(),

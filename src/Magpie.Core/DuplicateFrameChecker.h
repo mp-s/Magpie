@@ -17,9 +17,11 @@ public:
 
 	void OnFrameAdopted() noexcept;
 
-	void OnCaptureStopped() noexcept;
+	void OnCaptureRestarted() noexcept;
 
 private:
+	HRESULT _CheckDirtyRects(SmallVectorImpl<Rect>& dirtyRects);
+
 	ID3D12Device5* _device = nullptr;
 
 	Size _frameSize{};
@@ -39,8 +41,13 @@ private:
 	uint32_t _curDescriptorOffset = 0;
 	uint32_t _curTargetValue = 0;
 
+	// 用于检查重复帧
+	uint16_t _nextSkipCount;
+	uint16_t _framesLeft;
+
 	bool _isScRGB = false;
 	bool _isFirstFrame = true;
+	bool _isCheckingForDuplicateFrame = true;
 };
 
 }

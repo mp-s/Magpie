@@ -49,7 +49,5 @@ namespace Magpie {
 		Boolean IsWarningsAreErrors;
 		Boolean IsFP16Disabled;
 		Int32 DuplicateFrameDetectionMode;
-		Boolean IsDynamicDection { get; };
-		Boolean IsStatisticsForDynamicDetectionEnabled;
 	}
 }

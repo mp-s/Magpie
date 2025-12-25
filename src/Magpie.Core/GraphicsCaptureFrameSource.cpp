@@ -498,6 +498,10 @@ HRESULT GraphicsCaptureFrameSource::OnCursorVisibilityChanged(bool isVisible, bo
 			Logger::Get().ComError("_StartCapture 失败", hr);
 			return hr;
 		}
+
+		if (_duplicateFrameChecker) {
+			_duplicateFrameChecker->OnCaptureRestarted();
+		}
 	}
 
 	return S_OK;
@@ -1047,10 +1051,6 @@ void GraphicsCaptureFrameSource::_StopCapture() noexcept {
 		// output 将继续使用，直到重启捕获
 		slot.captureFrame = nullptr;
 		slot.frameResource = nullptr;
-	}
-
-	if (_duplicateFrameChecker) {
-		_duplicateFrameChecker->OnCaptureStopped();
 	}
 }
 

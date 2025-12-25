@@ -591,33 +591,7 @@ void HomeViewModel::DuplicateFrameDetectionMode(int value) {
 	}
 
 	settings.DuplicateFrameDetectionMode(mode);
-
 	RaisePropertyChanged(L"DuplicateFrameDetectionMode");
-	RaisePropertyChanged(L"IsDynamicDection");
-
-	if (mode != ::Magpie::DuplicateFrameDetectionMode::Dynamic) {
-		settings.IsStatisticsForDynamicDetectionEnabled(false);
-		RaisePropertyChanged(L"IsStatisticsForDynamicDetectionEnabled");
-	}
-}
-
-bool HomeViewModel::IsDynamicDection() const noexcept {
-	return AppSettings::Get().DuplicateFrameDetectionMode() == ::Magpie::DuplicateFrameDetectionMode::Dynamic;
-}
-
-bool HomeViewModel::IsStatisticsForDynamicDetectionEnabled() const noexcept {
-	return AppSettings::Get().IsStatisticsForDynamicDetectionEnabled();
-}
-
-void HomeViewModel::IsStatisticsForDynamicDetectionEnabled(bool value) {
-	AppSettings& settings = AppSettings::Get();
-
-	if (settings.IsStatisticsForDynamicDetectionEnabled() == value) {
-		return;
-	}
-
-	settings.IsStatisticsForDynamicDetectionEnabled(value);
-	RaisePropertyChanged(L"IsStatisticsForDynamicDetectionEnabled");
 }
 
 void HomeViewModel::_ScalingService_IsTimerOnChanged(bool value, bool) {

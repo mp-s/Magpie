@@ -970,17 +970,6 @@ bool OverlayDrawer::_DrawProfiler(const SmallVector<float>& effectTimings, uint3
 	ImGui::TextUnformatted(StrHelper::Concat("GPU: ", _hardwareInfo.gpuName).c_str());
 	const std::string& captureMethodStr = _GetResourceString(L"Overlay_Profiler_CaptureMethod");
 	ImGui::TextUnformatted(StrHelper::Concat(captureMethodStr.c_str(), ": ", renderer.FrameSource().Name()).c_str());
-	if (options.IsStatisticsForDynamicDetectionEnabled() &&
-		options.duplicateFrameDetectionMode == DuplicateFrameDetectionMode::Dynamic) {
-		const std::pair<uint32_t, uint32_t> statistics =
-			renderer.FrameSource().GetStatisticsForDynamicDetection();
-		ImGui::TextUnformatted(StrHelper::Concat(_GetResourceString(L"Overlay_Profiler_DynamicDetection"), ": ").c_str());
-		ImGui::SameLine(0, 0);
-		ImGui::PushFont(_fontMonoNumbers);
-		ImGui::TextUnformatted(fmt::format("{}/{} ({:.1f}%)", statistics.first, statistics.second,
-			statistics.second == 0 ? 0.0f : statistics.first * 100.0f / statistics.second).c_str());
-		ImGui::PopFont();
-	}
 	const std::string& frameRateStr = _GetResourceString(L"Overlay_Profiler_FrameRate");
 	ImGui::TextUnformatted(fmt::format("{}: {} FPS", frameRateStr, fps).c_str());
 	ImGui::PopTextWrapPos();

@@ -329,10 +329,6 @@
 								<ComboBoxItem x:Uid="Home_Advanced_DeveloperOptions_DuplicateFrameDetection_Never" />
 							</ComboBox>
 						</local:SettingsCard>
-						<local:SettingsCard ContentAlignment="Left">
-							<CheckBox x:Uid="Home_Advanced_DeveloperOptions_EnableStatisticsForDynamicDetection"
-							          IsChecked="{x:Bind ViewModel.IsStatisticsForDynamicDetectionEnabled, Mode=TwoWay}" />
-						</local:SettingsCard>
 					</local:SettingsExpander.Items>
 				</local:SettingsExpander>
 			</local:SettingsGroup>

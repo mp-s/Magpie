@@ -374,7 +374,6 @@ void AppSettings::IsDeveloperMode(bool value) noexcept {
 		_isSaveEffectSources = false;
 		_isWarningsAreErrors = false;
 		_duplicateFrameDetectionMode = DuplicateFrameDetectionMode::Dynamic;
-		_isStatisticsForDynamicDetectionEnabled = false;
 		_isFP16Disabled = false;
 	}
 
@@ -621,8 +620,6 @@ bool AppSettings::_Save(const _AppSettingsData& data) noexcept {
 	writer.Int64(data._updateCheckDate.time_since_epoch().count());
 	writer.Key("duplicateFrameDetectionMode");
 	writer.Uint((uint32_t)data._duplicateFrameDetectionMode);
-	writer.Key("enableStatisticsForDynamicDetection");
-	writer.Bool(data._isStatisticsForDynamicDetectionEnabled);
 	writer.Key("minFrameRate");
 	writer.Double(data._minFrameRate);
 	writer.Key("disableFP16");
@@ -825,7 +822,6 @@ void AppSettings::_LoadSettings(const rapidjson::GenericObject<true, rapidjson::
 		}
 		_duplicateFrameDetectionMode = (::Magpie::DuplicateFrameDetectionMode)duplicateFrameDetectionMode;
 	}
-	JsonHelper::ReadBool(root, "enableStatisticsForDynamicDetection", _isStatisticsForDynamicDetectionEnabled);
 	JsonHelper::ReadFloat(root, "minFrameRate", _minFrameRate);
 	JsonHelper::ReadBool(root, "disableFP16", _isFP16Disabled);
 

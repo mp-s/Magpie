@@ -7,6 +7,10 @@
 
 namespace Magpie {
 
+static constexpr uint16_t INITIAL_CHECK_COUNT = 16;
+static constexpr uint16_t INITIAL_SKIP_COUNT = 1;
+static constexpr uint16_t MAX_SKIP_COUNT = 16;
+
 bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize) noexcept {
 	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
 		DuplicateFrameDetectionMode::Never);
@@ -189,6 +193,64 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 		return S_OK;
 	}
 
+	if (ScalingWindow::Get().Options().duplicateFrameDetectionMode == DuplicateFrameDetectionMode::Always) {
+		HRESULT hr = _CheckDirtyRects(dirtyRects);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_CheckDirtyRects 失败", hr);
+			return hr;
+		}
+
+		return S_OK;
+	}
+
+	// 动态检查重复帧，见 #787
+	if (_isCheckingForDuplicateFrame) {
+		if (--_framesLeft == 0) {
+			_isCheckingForDuplicateFrame = false;
+			_framesLeft = _nextSkipCount;
+			if (_nextSkipCount < MAX_SKIP_COUNT) {
+				// 增加下一次连续跳过检查的帧数
+				++_nextSkipCount;
+			}
+		}
+
+		HRESULT hr = _CheckDirtyRects(dirtyRects);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_CheckDirtyRects 失败", hr);
+			return hr;
+		}
+
+		if (dirtyRects.empty()) {
+			_isCheckingForDuplicateFrame = true;
+			_framesLeft = INITIAL_CHECK_COUNT;
+			_nextSkipCount = INITIAL_SKIP_COUNT;
+		}
+	} else {
+		if (--_framesLeft == 0) {
+			_isCheckingForDuplicateFrame = true;
+			// 第 2 次连续检查 10 帧，之后逐渐减少，从第 16 次开始只连续检查 2 帧
+			_framesLeft = uint32_t((-4 * (int)_nextSkipCount + 78) / 7);
+		}
+	}
+
+	return S_OK;
+}
+
+void DuplicateFrameChecker::OnFrameAdopted() noexcept {
+	_isFirstFrame = false;
+
+	if (_curDescriptorOffset == 0) {
+		_curDescriptorOffset = _descriptorSize;
+	} else {
+		_curDescriptorOffset = 0;
+	}
+}
+
+void DuplicateFrameChecker::OnCaptureRestarted() noexcept {
+	_isFirstFrame = true;
+}
+
+HRESULT DuplicateFrameChecker::_CheckDirtyRects(SmallVectorImpl<Rect>& dirtyRects) {
 	HRESULT hr = _commandAllocator->Reset();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12CommandAllocator::Reset 失败", hr);
@@ -308,20 +370,6 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 	}
 
 	return S_OK;
-}
-
-void DuplicateFrameChecker::OnFrameAdopted() noexcept {
-	_isFirstFrame = false;
-
-	if (_curDescriptorOffset == 0) {
-		_curDescriptorOffset = _descriptorSize;
-	} else {
-		_curDescriptorOffset = 0;
-	}
-}
-
-void DuplicateFrameChecker::OnCaptureStopped() noexcept {
-	_isFirstFrame = true;
 }
 
 }

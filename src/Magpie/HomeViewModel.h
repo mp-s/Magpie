@@ -114,11 +114,6 @@ struct HomeViewModel : HomeViewModelT<HomeViewModel>, wil::notify_property_chang
 	int DuplicateFrameDetectionMode() const noexcept;
 	void DuplicateFrameDetectionMode(int value);
 
-	bool IsDynamicDection() const noexcept;
-
-	bool IsStatisticsForDynamicDetectionEnabled() const noexcept;
-	void IsStatisticsForDynamicDetectionEnabled(bool value);
-
 private:
 	void _ScalingService_IsTimerOnChanged(bool value, bool windowedMode);
 
