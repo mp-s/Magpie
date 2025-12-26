@@ -11,11 +11,7 @@
 
 namespace Magpie {
 
-static constexpr uint16_t INITIAL_CHECK_COUNT = 16;
-static constexpr uint16_t INITIAL_SKIP_COUNT = 1;
-
-FrameSourceBase::FrameSourceBase() noexcept :
-	_nextSkipCount(INITIAL_SKIP_COUNT), _framesLeft(INITIAL_CHECK_COUNT) {}
+FrameSourceBase::FrameSourceBase() noexcept {}
 
 FrameSourceBase::~FrameSourceBase() noexcept {
 	const HWND hwndSrc = ScalingWindow::Get().SrcTracker().Handle();

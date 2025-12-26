@@ -67,6 +67,8 @@ private:
 
 	GraphicsContext* _graphicsContext = nullptr;
 
+	std::atomic<DWORD> _producerThreadId;
+
 	winrt::com_ptr<ID3D11Device5> _d3d11Device;
 	winrt::com_ptr<ID3D11DeviceContext4> _d3d11DC;
 
@@ -82,6 +84,10 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _bridgeFence;
 	winrt::com_ptr<ID3D12Fence1> _sharedFence;
 	uint64_t _curCrossAdapterFenceValue = 0;
+
+	wil::srwlock _latestFrameLock;
+	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _latestFrame{ nullptr };
+	SmallVector<Rect> _latestFrameDirtyRects;
 
 	std::vector<std::pair<ID3D11Texture2D*, winrt::com_ptr<ID3D12Resource>>> _captureFrameResourceTable;
 	std::unique_ptr<DuplicateFrameChecker> _duplicateFrameChecker;
@@ -103,12 +109,6 @@ private:
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool _captureFramePool{ nullptr };
 	winrt::com_ptr<ITaskbarList> _taskbarList;
 	
-	wil::srwlock _latestFrameLock;
-	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _latestFrame{ nullptr };
-	SmallVector<Rect> _latestFrameDirtyRects;
-
-	std::atomic<DWORD> _producerThreadId;
-
 	struct _FrameResourceSlot {
 		winrt::com_ptr<ID3D12CommandAllocator> commandAllocator;
 		// 保留引用防止 WGC 再次写入

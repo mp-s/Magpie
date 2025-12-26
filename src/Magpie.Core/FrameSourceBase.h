@@ -83,10 +83,6 @@ private:
 	// 用于检查重复帧
 	winrt::com_ptr<ID3D11Texture2D> _prevFrame;
 	winrt::com_ptr<ID3D11ShaderResourceView> _prevFrameSrv;
-	uint16_t _nextSkipCount;
-	uint16_t _framesLeft;
-	
-	bool _isCheckingForDuplicateFrame = true;
 
 protected:
 	bool _roundCornerDisabled = false;
