@@ -287,12 +287,10 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 			_newFrame = std::move(_latestFrame);
 			_latestFrame = nullptr;
 
-			// 累积脏矩形
-			if (_newFrameDirtyRects.empty()) {
-				_newFrameDirtyRects = std::move(_latestFrameDirtyRects);
-			} else {
-				_newFrameDirtyRects.append(_latestFrameDirtyRects.begin(), _latestFrameDirtyRects.end());
-			}
+			// 如果画面变化接下来会调用 Update，因此 _newFrameDirtyRects 肯定为空
+			assert(_newFrameDirtyRects.empty());
+			// 交换而不是移动以减少堆分配次数
+			std::swap(_newFrameDirtyRects, _latestFrameDirtyRects);
 		} else {
 			isNewFrameAvailable = (bool)_newFrame;
 			return S_OK;
@@ -362,8 +360,11 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 		return S_OK;
 	}
 
-	// 不支持脏矩形时检查整个捕获区域
-	if (!_isDirtyRegionSupported) {
+	
+	if (_isDirtyRegionSupported) {
+		DirtyRectsOptimizer::Execute(_newFrameDirtyRects);
+	} else {
+		// 不支持脏矩形时检查整个捕获区域
 		_newFrameDirtyRects.emplace_back(_frameBox.left, _frameBox.top, _frameBox.right, _frameBox.bottom);
 	}
 
@@ -393,19 +394,41 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 		return S_OK;
 	}
 
+	if (_duplicateFrameChecker) {
+		_duplicateFrameChecker->OnFrameAdopted(_newCaptureFrameResourceIdx);
+	}
+
 	_curFrameIdx = (_curFrameIdx + 1) % (uint32_t)_slots.size();
 	_FrameResourceSlot& curSlot = _slots[_curFrameIdx];
 
 	curSlot.captureFrame = std::move(_newFrame);
-	curSlot.captureFrameResourceIdx = _newCaptureFrameResourceIdx;
 	_newFrame = nullptr;
-	_newFrameDirtyRects.clear();
-
+	curSlot.captureFrameResourceIdx = _newCaptureFrameResourceIdx;
+	if (_isDirtyRegionSupported) {
+		assert(!_newFrameDirtyRects.empty());
+		// 交换而不是移动以减少堆分配次数
+		std::swap(curSlot.dirtyRects, _newFrameDirtyRects);
+		_newFrameDirtyRects.clear();
+	}
+	
 	ID3D12Resource* curFrameResource =
 		_captureFrameResourceTable[_newCaptureFrameResourceIdx].second.get();
 
-	if (_duplicateFrameChecker) {
-		_duplicateFrameChecker->OnFrameAdopted(_newCaptureFrameResourceIdx);
+	// curSlot.output 到 curFrameResource 的脏矩形
+	SmallVector<Rect> allDirtyRects;
+	if (_isDirtyRegionSupported) {
+		for (const _FrameResourceSlot& slot : _slots) {
+			allDirtyRects.append(slot.dirtyRects);
+		}
+		DirtyRectsOptimizer::Execute(allDirtyRects);
+
+#ifdef _DEBUG
+		// 所有脏矩形应在 _frameBox 内
+		for (const Rect& dirtyRect : allDirtyRects) {
+			assert(dirtyRect.left >= _frameBox.left && dirtyRect.top >= _frameBox.top &&
+				dirtyRect.right <= _frameBox.right && dirtyRect.bottom <= _frameBox.bottom);
+		}
+#endif
 	}
 	
 #ifdef MP_DEBUG_INFO
@@ -457,7 +480,22 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 		{
 			CD3DX12_TEXTURE_COPY_LOCATION src(curFrameResource, 0);
 			CD3DX12_TEXTURE_COPY_LOCATION dest(curCASlot.bridgeResource.get(), 0);
-			_bridgeCopyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+
+			if (_isDirtyRegionSupported) {
+				for (const Rect& dirtyRect : allDirtyRects) {
+					D3D12_BOX box = {
+						.left = dirtyRect.left,
+						.top = dirtyRect.top,
+						.right = dirtyRect.right,
+						.bottom = dirtyRect.bottom,
+						.back = 1
+					};
+					_bridgeCopyCommandList->CopyTextureRegion(
+						&dest, dirtyRect.left - _frameBox.left, dirtyRect.top - _frameBox.top, 0, &src, &box);
+				}
+			} else {
+				_bridgeCopyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+			}
 		}
 
 		hr = _bridgeCopyCommandList->Close();
@@ -483,11 +521,57 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 			return hr;
 		}
 
-		_copyCommandList->CopyResource(curSlot.output.get(), curCASlot.sharedResource.get());
+		// 需要复制整个纹理时使用 CopyResource
+		auto canCopyResource = [&] {
+			if (!_isDirtyRegionSupported) {
+				return true;
+			}
+
+			if (allDirtyRects.size() > 1) {
+				return false;
+			}
+
+			const Rect& dirtyRect = allDirtyRects[0];
+			return dirtyRect.left == _frameBox.left && dirtyRect.top == _frameBox.top &&
+				dirtyRect.right == _frameBox.right && dirtyRect.bottom == _frameBox.bottom;
+		};
+
+		if (canCopyResource()) {
+			_copyCommandList->CopyResource(curSlot.output.get(), curCASlot.sharedResource.get());
+		} else {
+			CD3DX12_TEXTURE_COPY_LOCATION src(curCASlot.sharedResource.get(), 0);
+			CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
+
+			for (const Rect& dirtyRect : allDirtyRects) {
+				D3D12_BOX box = {
+					.left = dirtyRect.left - _frameBox.left,
+					.top = dirtyRect.top - _frameBox.top,
+					.right = dirtyRect.right - _frameBox.left,
+					.bottom = dirtyRect.bottom - _frameBox.top,
+					.back = 1
+				};
+				_copyCommandList->CopyTextureRegion(&dest, box.left, box.top, 0, &src, &box);
+			}
+		}
 	} else {
 		CD3DX12_TEXTURE_COPY_LOCATION src(curFrameResource, 0);
 		CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
-		_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+
+		if (_isDirtyRegionSupported) {
+			for (const Rect& dirtyRect : allDirtyRects) {
+				D3D12_BOX box = {
+					.left = dirtyRect.left,
+					.top = dirtyRect.top,
+					.right = dirtyRect.right,
+					.bottom = dirtyRect.bottom,
+					.back = 1
+				};
+				_copyCommandList->CopyTextureRegion(
+					&dest, dirtyRect.left - _frameBox.left, dirtyRect.top - _frameBox.top, 0, &src, &box);
+			}
+		} else {
+			_copyCommandList->CopyTextureRegion(&dest, 0, 0, 0, &src, &_frameBox);
+		}
 	}
 	
 	hr = _copyCommandList->Close();
@@ -971,15 +1055,17 @@ void GraphicsCaptureFrameSource::_Direct3D11CaptureFramePool_FrameArrived(
 		return;
 	}
 
-	if (dirtyRects.size() >= 2) {
-		DirtyRectsOptimizer::Execute(dirtyRects);
-	}
-
 	{
 		auto lk = _latestFrameLock.lock_exclusive();
-		_latestFrame = std::move(frame);
-		_latestFrameDirtyRects = std::move(dirtyRects);
 
+		_latestFrame = std::move(frame);
+		// 累积脏矩形
+		if (_latestFrameDirtyRects.empty()) {
+			_latestFrameDirtyRects = std::move(dirtyRects);
+		} else {
+			_latestFrameDirtyRects.append(dirtyRects);
+		}
+		
 #ifdef MP_DEBUG_INFO
 		{
 			auto debugLock = DEBUG_INFO.lock.lock_exclusive();

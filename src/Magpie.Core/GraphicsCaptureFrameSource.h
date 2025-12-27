@@ -114,6 +114,7 @@ private:
 		// 保留引用防止 WGC 再次写入
 		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame captureFrame{ nullptr };
 		uint32_t captureFrameResourceIdx = 0;
+		SmallVector<Rect> dirtyRects;
 		winrt::com_ptr<ID3D12Resource> output;
 	};
 

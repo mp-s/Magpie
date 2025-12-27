@@ -161,6 +161,7 @@ static uint32_t CalcTotalPixels(const SmallVectorImpl<Rect>& rects) noexcept {
 	return result;
 }
 
+#ifdef MP_DEBUG_INFO
 // 验证优化算法的正确性
 static void ValidateOptimize(const SmallVectorImpl<Rect>& originRects, const SmallVectorImpl<Rect>& newRects) noexcept {
 	if (originRects.empty()) {
@@ -208,16 +209,19 @@ static void ValidateOptimize(const SmallVectorImpl<Rect>& originRects, const Sma
 		}
 	}
 }
+#endif
 
 void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
-	assert(dirtyRects.size() >= 2);
+	uint32_t rectCount = (uint32_t)dirtyRects.size();
+	if (rectCount <= 1) {
+		return;
+	}
 
 #ifdef MP_DEBUG_INFO
 	auto se = wil::scope_exit(std::bind_front(ValidateOptimize, DEBUG_INFO.validateDirtyRectsOptimizer ?
 		SmallVector<Rect>(dirtyRects.begin(), dirtyRects.end()) : SmallVector<Rect>(), std::ref(dirtyRects)));
 #endif
 
-	uint32_t rectCount = (uint32_t)dirtyRects.size();
 	if (rectCount <= MAX_CAPTURE_DIRTY_RECT_COUNT * 4) {
 		BasicOptimize(dirtyRects);
 		rectCount = (uint32_t)dirtyRects.size();
