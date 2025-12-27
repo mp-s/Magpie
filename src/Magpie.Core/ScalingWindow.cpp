@@ -1203,24 +1203,15 @@ ScalingError ScalingWindow::_CalcFullscreenRendererRect(uint32_t& monitorCount) 
 	}
 }
 
-// 全屏模式缩放无需保持比例，但要限制最小和最大尺寸
+// 全屏模式缩放无需保持比例，但要限制最大尺寸
 SIZE ScalingWindow::_AdjustFullscreenWindowSize(SIZE size, uint32_t dpi) const noexcept {
 	if (dpi == 0) {
 		dpi = _currentDpi;
 	}
 
-	const RECT& srcFrameRect = _srcTracker.WindowFrameRect();
-	const LONG spaceAround = lroundf(WINDOWED_MODE_MIN_SPACE_AROUND *
-		dpi / float(USER_DEFAULT_SCREEN_DPI));
-	const LONG minWidth = srcFrameRect.right - srcFrameRect.left + spaceAround;
-	const LONG minHeight = srcFrameRect.bottom - srcFrameRect.top + spaceAround;
 	const LONG maxWidth = GetSystemMetricsForDpi(SM_CXMAXTRACK, dpi);
 	const LONG maxHeight = GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi);
-
-	return SIZE{
-		std::clamp(size.cx, minWidth, maxWidth),
-		std::clamp(size.cy, minHeight, maxHeight)
-	};
+	return SIZE{ std::clamp(size.cx, 1l, maxWidth), std::clamp(size.cy, 1l, maxHeight) };
 }
 
 ScalingError ScalingWindow::_InitialMoveSrcWindowInFullscreen() noexcept {
@@ -2147,7 +2138,8 @@ void ScalingWindow::_UpdateRendererRect() noexcept {
 	const bool resized = Win32Helper::GetSizeOfRect(_rendererRect) !=
 		Win32Helper::GetSizeOfRect(oldRendererRect);
 
-	if (!_isMovingDueToSrcMoved && !_srcTracker.IsMoving()) {
+	// 全屏模式缩放时不移动源窗口，因为我们不限制最小尺寸，而且源窗口可能处于最大化或全屏状态
+	if (_options.IsWindowedMode() && !_isMovingDueToSrcMoved && !_srcTracker.IsMoving()) {
 		// 确保源窗口中心点和缩放窗口中心点相同。应先移动源窗口，因为之后需要调整光标位置
 		const RECT& srcRect = _srcTracker.WindowRect();
 		const int offsetX = (_windowRect.left + _windowRect.right - srcRect.left - srcRect.right) / 2;
