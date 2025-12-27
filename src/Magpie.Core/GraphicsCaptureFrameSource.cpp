@@ -291,8 +291,7 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 			if (_newFrameDirtyRects.empty()) {
 				_newFrameDirtyRects = std::move(_latestFrameDirtyRects);
 			} else {
-				_newFrameDirtyRects.insert(_newFrameDirtyRects.end(),
-					_latestFrameDirtyRects.begin(), _latestFrameDirtyRects.end());
+				_newFrameDirtyRects.append(_latestFrameDirtyRects.begin(), _latestFrameDirtyRects.end());
 			}
 		} else {
 			isNewFrameAvailable = (bool)_newFrame;

@@ -316,10 +316,9 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVecto
 			_commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 3);
 		}
 
-		constexpr uint32_t BLOCK_SIZE = 16;
 		_commandList->Dispatch(
-			(dirtyRect.right - dirtyRect.left + BLOCK_SIZE - 1) / BLOCK_SIZE,
-			(dirtyRect.bottom - dirtyRect.top + BLOCK_SIZE - 1) / BLOCK_SIZE,
+			(dirtyRect.right - dirtyRect.left + DUP_FRAME_DISPATCH_BLOCK_SIZE - 1) / DUP_FRAME_DISPATCH_BLOCK_SIZE,
+			(dirtyRect.bottom - dirtyRect.top + DUP_FRAME_DISPATCH_BLOCK_SIZE - 1) / DUP_FRAME_DISPATCH_BLOCK_SIZE,
 			1
 		);
 	}

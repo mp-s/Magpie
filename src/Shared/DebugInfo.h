@@ -16,6 +16,8 @@ struct DebugInfo {
 	bool useWarp = false;
 	// 窗口模式缩放时把用于调整窗口尺寸的辅助窗口标示出来
 	bool highlightBorder = false;
+	// 验证 DirtyRectsOptimizer 的正确性，特定路径下消耗大量 CPU 时间
+	bool validateDirtyRectsOptimizer = true;
 
 	// 用于同步对下面成员的访问
 	wil::srwlock lock;
