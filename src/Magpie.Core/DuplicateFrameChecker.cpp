@@ -44,8 +44,8 @@ bool DuplicateFrameChecker::Initialize(
 
 	{
 		D3D11_BUFFER_DESC desc = {
-			//.ByteWidth = (frameCount - 1) * 256 + 8 * sizeof(uint32_t),
-			.ByteWidth = frameCount * 256,
+			// CSSetConstantBuffers1 要求偏移量以 256 字节对齐
+			.ByteWidth = (MAX_CAPTURE_DIRTY_RECT_COUNT - 1) * 256 + 8 * sizeof(uint32_t),
 			.Usage = D3D11_USAGE_DYNAMIC,
 			.BindFlags = D3D11_BIND_CONSTANT_BUFFER,
 			.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
@@ -226,15 +226,16 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVecto
 		const Rect& dirtyRect = dirtyRects[i];
 
 		alignas(32) DirectXHelper::Constant32 constants[] = {
-			{.floatVal = 1.0f / _frameSize.width},
-			{.floatVal = 1.0f / _frameSize.height},
-			{.uintVal = _curTargetValue},
-			{.uintVal = i},
 			{.uintVal = dirtyRect.left},
 			{.uintVal = dirtyRect.top},
 			{.uintVal = dirtyRect.right},
-			{.uintVal = dirtyRect.bottom}
+			{.uintVal = dirtyRect.bottom},
+			{.floatVal = 1.0f / _frameSize.width},
+			{.floatVal = 1.0f / _frameSize.height},
+			{.uintVal = _curTargetValue},
+			{.uintVal = i}
 		};
+		// CSSetConstantBuffers1 要求偏移量以 256 字节对齐
 		std::memcpy((uint8_t*)ms.pData + i * 256, constants, sizeof(constants));
 	}
 
