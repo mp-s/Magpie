@@ -118,7 +118,7 @@ bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& c
 			{
 				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
 				.Constants = {
-					.Num32BitValues = 6
+					.Num32BitValues = 8
 				}
 			},
 			{
@@ -304,14 +304,18 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVecto
 				{.uintVal = ++_curTargetValue},
 				{.uintVal = i},
 				{.uintVal = dirtyRect.left},
-				{.uintVal = dirtyRect.top}
+				{.uintVal = dirtyRect.top},
+				{.uintVal = dirtyRect.right},
+				{.uintVal = dirtyRect.bottom}
 			};
 			_commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 		} else {
 			DirectXHelper::Constant32 constants[] = {
 				{.uintVal = i},
 				{.uintVal = dirtyRect.left},
-				{.uintVal = dirtyRect.top}
+				{.uintVal = dirtyRect.top},
+				{.uintVal = dirtyRect.right},
+				{.uintVal = dirtyRect.bottom}
 			};
 			_commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 3);
 		}

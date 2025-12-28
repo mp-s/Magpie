@@ -2,7 +2,7 @@ cbuffer RootConstants : register(b0) {
     float2 texPt;
     uint target;
     uint resultOffest;
-    uint2 texOffset;
+    uint4 dirtyRect;
 };
 
 // 无需同步
@@ -19,7 +19,14 @@ void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 		return;
 	}
 	
-    const int2 gxy = texOffset + (gid.xy << 4) + (tid.xy << 1);
+    const uint2 gxy = dirtyRect.xy + (gid.xy << 4) + (tid.xy << 1);
+	
+	// 基本越界检查。由于每个线程采样 2x2，仍有可能越界一个像素，但影响很小。最坏的情况是把
+	// 不变的脏矩形错误识别为变化，增加一点复制开销，这个几率很小。
+	if (gxy.x >= dirtyRect.z || gxy.y >= dirtyRect.w) {
+		return;
+	}
+	
 	const float2 pos = (gxy + 1) * texPt;
 	
 	if (any(tex1.GatherRed(sam, pos) != tex2.GatherRed(sam, pos))) {

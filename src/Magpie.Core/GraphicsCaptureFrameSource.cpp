@@ -550,6 +550,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 					.bottom = dirtyRect.bottom - _frameBox.top,
 					.back = 1
 				};
+				// AMD 集显有时会少复制最后一行，将复制队列改为计算队列或用 CopyResource 可以规避，似乎是驱动 bug
 				_copyCommandList->CopyTextureRegion(&dest, box.left, box.top, 0, &src, &box);
 			}
 		}
