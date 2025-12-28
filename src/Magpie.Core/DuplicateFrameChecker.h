@@ -11,9 +11,15 @@ public:
 
 	~DuplicateFrameChecker() = default;
 
-	bool Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize, uint32_t frameCount) noexcept;
+	bool Initialize(
+		ID3D11Device5* d3d11Device,
+		ID3D11DeviceContext4* d3d11DC,
+		const ColorInfo& colorInfo,
+		Size frameSize,
+		uint32_t frameCount
+	) noexcept;
 
-	HRESULT CheckFrame(ID3D12Resource* frameResource, uint32_t frameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
+	HRESULT CheckFrame(ID3D11Texture2D* frameResource, uint32_t frameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
 
 	void OnFrameAdopted(uint32_t frameIdx) noexcept;
 
@@ -22,24 +28,19 @@ public:
 private:
 	HRESULT _CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
 
-	ID3D12Device5* _device = nullptr;
+	ID3D11Device5* _device = nullptr;
+	ID3D11DeviceContext4* _deviceContext = nullptr;
 
 	Size _frameSize{};
 
-	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
-	winrt::com_ptr<ID3D12GraphicsCommandList> _commandList;
-	winrt::com_ptr<ID3D12CommandAllocator> _commandAllocator;
-	winrt::com_ptr<ID3D12Resource> _resultBuffer;
-	winrt::com_ptr<ID3D12Resource> _resultReadbackBuffer;
-	winrt::com_ptr<ID3D12DescriptorHeap> _descriptorHeap;
-	uint32_t _descriptorSize = 0;
-	winrt::com_ptr<ID3D12Fence1> _fence;
-	uint64_t _curFenceValue = 0;
-	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
-	winrt::com_ptr<ID3D12PipelineState> _pipelineState;
+	winrt::com_ptr<ID3D11ComputeShader> _dupFrameCS;
+	winrt::com_ptr<ID3D11Buffer> _constantBuffer;
+	winrt::com_ptr<ID3D11Buffer> _resultBuffer;
+	winrt::com_ptr<ID3D11UnorderedAccessView> _resultBufferUav;
+	winrt::com_ptr<ID3D11Buffer> _readBackBuffer;
+	winrt::com_ptr<ID3D11SamplerState> _sampler;
+	std::vector<winrt::com_ptr<ID3D11ShaderResourceView>> _frameSrvs;
 
-	// 记录已经创建的描述符
-	std::vector<bool> _descriptorTracker;
 	uint32_t _oldFrameIdx = std::numeric_limits<uint32_t>::max();
 	uint32_t _curTargetValue = 0;
 

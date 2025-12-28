@@ -20,9 +20,8 @@ Renderer2::~Renderer2() noexcept {
 }
 
 static void SetGpuPriority() noexcept {
+	// 不使用 REALTIME 优先级，它可能造成系统不稳定。
 	// 来自 https://github.com/obsproject/obs-studio/blob/16cb051a57bb357fe866252c1360ce2c38e2deec/libobs-d3d11/d3d11-subsystem.cpp#L429
-	// 不使用 REALTIME 优先级，它会造成系统不稳定，而且可能会导致源窗口卡顿。
-	// OBS 还调用了 SetGPUThreadPriority，但这个接口似乎无用。
 	NTSTATUS status = D3DKMTSetProcessSchedulingPriorityClass(
 		GetCurrentProcess(), D3DKMT_SCHEDULINGPRIORITYCLASS_HIGH);
 	if (status != STATUS_SUCCESS) {
@@ -38,6 +37,8 @@ ScalingError Renderer2::Initialize(
 	OverlayOptions& /*overlayOptions*/
 ) noexcept {
 	_hCurMonitor = hMonitor;
+
+	SetGpuPriority();
 
 	const ScalingOptions& options = ScalingWindow::Get().Options();
 	if (!_graphicsContext.Initialize(
@@ -81,9 +82,6 @@ ScalingError Renderer2::Initialize(
 #endif
 	}
 #endif
-
-	// 每次创建 D3D 设备后尝试提高 GPU 优先级，OBS 也是这么做的
-	SetGpuPriority();
 
 	// 失败则回落到使用传统方法获取颜色显示能力
 	_TryInitDisplayInfo();

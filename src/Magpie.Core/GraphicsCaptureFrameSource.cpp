@@ -11,6 +11,7 @@
 #include <dwmapi.h>
 #include <Windows.Graphics.Capture.Interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <d3dkmthk.h>
 
 namespace winrt {
 using namespace Windows::Graphics;
@@ -247,7 +248,7 @@ bool GraphicsCaptureFrameSource::Initialize(
 
 	if (options.duplicateFrameDetectionMode != DuplicateFrameDetectionMode::Never) {
 		_duplicateFrameChecker = std::make_unique<DuplicateFrameChecker>();
-		if (!_duplicateFrameChecker->Initialize(_bridgeDevice ? _bridgeDevice.get() : device,
+		if (!_duplicateFrameChecker->Initialize(_d3d11Device.get(), _d3d11DC.get(),
 			colorInfo, Size{ _frameBox.right, _frameBox.bottom }, frameCount)) {
 			Logger::Get().Error("DuplicateFrameChecker::Initialize 失败");
 			return false;
@@ -299,13 +300,13 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 	
 	ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice();
 
+	winrt::com_ptr<ID3D11Texture2D> d3d11Texture;
 	{
 		winrt::IDirect3DSurface d3dSurface = _newFrame.Surface();
 
 		auto dxgiInterfaceAccess =
 			d3dSurface.try_as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
 
-		winrt::com_ptr<ID3D11Texture2D> d3d11Texture;
 		HRESULT hr = dxgiInterfaceAccess->GetInterface(IID_PPV_ARGS(&d3d11Texture));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("IDirect3DDxgiInterfaceAccess::GetInterface 失败", hr);
@@ -369,10 +370,7 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 	}
 
 	HRESULT hr = _duplicateFrameChecker->CheckFrame(
-		_captureFrameResourceTable[_newCaptureFrameResourceIdx].second.get(),
-		_newCaptureFrameResourceIdx,
-		_newFrameDirtyRects
-	);
+		d3d11Texture.get(), _newCaptureFrameResourceIdx, _newFrameDirtyRects);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("DuplicateFrameChecker::CheckFrame 失败", hr);
 		return hr;
@@ -735,6 +733,20 @@ bool GraphicsCaptureFrameSource::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept
 	if (!_d3d11DC) {
 		Logger::Get().Error("获取 ID3D11DeviceContext4 失败");
 		return false;
+	}
+
+	winrt::com_ptr<IDXGIDevice> dxgiDevice = _d3d11Device.try_as<IDXGIDevice>();
+	if (!dxgiDevice) {
+		Logger::Get().Error("获取 IDXGIDevice 失败");
+		return false;
+	}
+
+	// 设置优先级为 Soft Realtime，我们希望捕获和检查重复帧尽可能快。如果使用常规优先级，当前台窗口
+	// 执行繁重 GPU 任务时，检查重复帧有时耗时数毫秒，这是不可接受的。很遗憾 D3D12 没有等价接口，这
+	// 是使用 D3D11 检查重复帧的主要原因。
+	hr = dxgiDevice->SetGPUThreadPriority(D3DKMT_SETCONTEXTSCHEDULINGPRIORITY_ABSOLUTE | 29);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("IDXGIDevice::SetGPUThreadPriority 失败", hr);
 	}
 
 	return true;

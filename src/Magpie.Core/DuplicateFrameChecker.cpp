@@ -14,176 +14,116 @@ static constexpr uint16_t MAX_SKIP_COUNT = 16;
 DuplicateFrameChecker::DuplicateFrameChecker() noexcept :
 	_nextSkipCount(INITIAL_SKIP_COUNT), _framesLeft(INITIAL_CHECK_COUNT) {}
 
-bool DuplicateFrameChecker::Initialize(ID3D12Device5* device, const ColorInfo& colorInfo, Size frameSize, uint32_t frameCount) noexcept {
+// 使用 D3D11 而不是 D3D12 检查重复帧。有两个原因：
+// 1. D3D11 支持 IDXGIDevice::SetGPUThreadPriority，可以提高 GPU 优先级，
+// 而 D3D12 没有等价接口。
+// 2. 对于小任务 D3D11 启动渲染的耗时比 D3D12 短，差距可以达到 50us 以上。
+bool DuplicateFrameChecker::Initialize(
+	ID3D11Device5* d3d11Device,
+	ID3D11DeviceContext4* d3d11DC,
+	const ColorInfo& colorInfo,
+	Size frameSize,
+	uint32_t frameCount
+) noexcept {
 	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
 		DuplicateFrameDetectionMode::Never);
 
-	_device = device;
+	_device = d3d11Device;
+	_deviceContext = d3d11DC;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 	_frameSize = frameSize;
 
-	{
-		// 需要快速获取结果，因此使用高优先级
-		D3D12_COMMAND_QUEUE_DESC queueDesc = {
-			.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE,
-			.Priority = D3D12_COMMAND_QUEUE_PRIORITY_HIGH
-		};
-		HRESULT hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_commandQueue));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommandQueue 失败", hr);
-			return false;
-		}
-	}
+	_frameSrvs.resize(frameCount);
 
-	HRESULT hr = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE,
-		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_commandList));
+	HRESULT hr = d3d11Device->CreateComputeShader(
+		DuplicateFrameCS, sizeof(DuplicateFrameCS), nullptr, _dupFrameCS.put());
 	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateCommandList1 失败", hr);
-		return false;
-	}
-
-	hr = device->CreateCommandAllocator(
-		D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&_commandAllocator));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateCommandAllocator 失败", hr);
+		Logger::Get().ComError("CreateComputeShader 失败", hr);
 		return false;
 	}
 
 	{
-		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-		CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(
-			MAX_CAPTURE_DIRTY_RECT_COUNT * sizeof(uint32_t), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-
-		hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
-			&desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_resultBuffer));
+		D3D11_BUFFER_DESC desc = {
+			//.ByteWidth = (frameCount - 1) * 256 + 8 * sizeof(uint32_t),
+			.ByteWidth = frameCount * 256,
+			.Usage = D3D11_USAGE_DYNAMIC,
+			.BindFlags = D3D11_BIND_CONSTANT_BUFFER,
+			.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
+			.StructureByteStride = desc.ByteWidth
+		};
+		hr = d3d11Device->CreateBuffer(&desc, nullptr, _constantBuffer.put());
 		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			Logger::Get().ComError("CreateBuffer 失败", hr);
 			return false;
 		}
 
-		heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
-		desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-		hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE,
-			&desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&_resultReadbackBuffer));
+		desc.ByteWidth = MAX_CAPTURE_DIRTY_RECT_COUNT * sizeof(uint32_t);
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+		desc.StructureByteStride = desc.ByteWidth;
+		hr = d3d11Device->CreateBuffer(&desc, nullptr, _resultBuffer.put());
 		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			Logger::Get().ComError("CreateBuffer 失败", hr);
+			return false;
+		}
+
+		desc.Usage = D3D11_USAGE_STAGING;
+		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		desc.BindFlags = 0;
+		hr = d3d11Device->CreateBuffer(&desc, nullptr, _readBackBuffer.put());
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateBuffer 失败", hr);
 			return false;
 		}
 	}
 
 	{
-		D3D12_DESCRIPTOR_HEAP_DESC desc = {
-			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-			.NumDescriptors = frameCount,
-			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
-		};
-		hr = device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_descriptorHeap));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
-			return false;
-		}
-	}
-
-	_descriptorTracker.resize(frameCount);
-
-	_descriptorSize = device->GetDescriptorHandleIncrementSize(
-		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-	hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateFence 失败", hr);
-		return false;
-	}
-
-	{
-		// 检查根签名版本
-		D3D12_FEATURE_DATA_ROOT_SIGNATURE versionData = {
-			.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1
-		};
-		hr = device->CheckFeatureSupport(
-			D3D12_FEATURE_ROOT_SIGNATURE, &versionData, sizeof(versionData));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
-		}
-
-		winrt::com_ptr<ID3DBlob> signature;
-
-		CD3DX12_DESCRIPTOR_RANGE1 srvRange1 = CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
-			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-		CD3DX12_DESCRIPTOR_RANGE1 srvRange2 = CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0,
-			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-
-		D3D12_ROOT_PARAMETER1 rootParams[] = {
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-				.Constants = {
-					.Num32BitValues = 8
-				}
-			},
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV,
-				.Descriptor = {
-					.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE
-				}
-			},
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-				.DescriptorTable = {
-					.NumDescriptorRanges = 1,
-					.pDescriptorRanges = &srvRange1
-				}
-			},
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-				.DescriptorTable = {
-					.NumDescriptorRanges = 1,
-					.pDescriptorRanges = &srvRange2
-				}
+		D3D11_UNORDERED_ACCESS_VIEW_DESC desc = {
+			.Format = DXGI_FORMAT_R32_UINT,
+			.ViewDimension = D3D11_UAV_DIMENSION_BUFFER,
+			.Buffer = {
+				.NumElements = MAX_CAPTURE_DIRTY_RECT_COUNT
 			}
 		};
+		hr = d3d11Device->CreateUnorderedAccessView(_resultBuffer.get(), &desc, _resultBufferUav.put());
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateUnorderedAccessView 失败", hr);
+			return false;
+		}
+	}
 
-		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
-			.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
-			.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
-			.ShaderRegister = 0
+	{
+		D3D11_SAMPLER_DESC desc{
+			.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
+			.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP,
+			.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP,
+			.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP,
+			.ComparisonFunc = D3D11_COMPARISON_NEVER
 		};
-
-		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc);
-		hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, versionData.HighestVersion, signature.put(), nullptr);
+		hr = d3d11Device->CreateSamplerState(&desc, _sampler.put());
 		if (FAILED(hr)) {
-			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
-			return false;
-		}
-
-		hr = device->CreateRootSignature(0, signature->GetBufferPointer(),
-			signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateRootSignature 失败", hr);
+			Logger::Get().ComError("CreateSamplerState 失败", hr);
 			return false;
 		}
 	}
 
-	D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
-		.pRootSignature = _rootSignature.get(),
-		.CS = CD3DX12_SHADER_BYTECODE(DuplicateFrameCS, sizeof(DuplicateFrameCS))
-	};
-	hr = device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateComputePipelineState 失败", hr);
-		return false;
+	_deviceContext->CSSetShader(_dupFrameCS.get(), nullptr, 0);
+
+	{
+		ID3D11UnorderedAccessView* uav = _resultBufferUav.get();
+		_deviceContext->CSSetUnorderedAccessViews(0, 1, &uav, nullptr);
 	}
-	
+
+	{
+		ID3D11SamplerState* t = _sampler.get();
+		_deviceContext->CSSetSamplers(0, 1, &t);
+	}
+
 	return true;
 }
 
 HRESULT DuplicateFrameChecker::CheckFrame(
-	ID3D12Resource* frameResource,
+	ID3D11Texture2D* frameResource,
 	uint32_t frameIdx,
 	SmallVectorImpl<Rect>& dirtyRects
 ) noexcept {
@@ -191,18 +131,18 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 
 #ifdef _DEBUG
 	{
-		D3D12_RESOURCE_DESC desc = frameResource->GetDesc();
+		D3D11_TEXTURE2D_DESC desc;
+		frameResource->GetDesc(&desc);
 		assert(desc.Width == _frameSize.width && desc.Height == _frameSize.height);
 	}
 #endif
 
-	if (!_descriptorTracker[frameIdx]) {
-		CD3DX12_SHADER_RESOURCE_VIEW_DESC desc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
-			_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM, 1);
-		_device->CreateShaderResourceView(frameResource, &desc, CD3DX12_CPU_DESCRIPTOR_HANDLE(
-			_descriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIdx, _descriptorSize));
-
-		_descriptorTracker[frameIdx] = true;
+	if (!_frameSrvs[frameIdx]) {
+		HRESULT hr = _device->CreateShaderResourceView(frameResource, nullptr, _frameSrvs[frameIdx].put());
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateShaderResourceView 失败", hr);
+			return hr;
+		}
 	}
 
 	// 第一帧无需检查重复帧
@@ -259,68 +199,57 @@ void DuplicateFrameChecker::OnFrameAdopted(uint32_t frameIdx) noexcept {
 
 void DuplicateFrameChecker::OnCaptureRestarted() noexcept {
 	_oldFrameIdx = std::numeric_limits<uint32_t>::max();
-	// 使描述符失效
-	std::fill(_descriptorTracker.begin(), _descriptorTracker.end(), false);
+	std::fill(_frameSrvs.begin(), _frameSrvs.end(), nullptr);
 }
 
 HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept {
-	HRESULT hr = _commandAllocator->Reset();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12CommandAllocator::Reset 失败", hr);
-		return hr;
-	}
-
-	hr = _commandList->Reset(_commandAllocator.get(), _pipelineState.get());
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12GraphicsCommandList::Reset 失败", hr);
-		return hr;
-	}
+	assert(dirtyRects.size() <= MAX_CAPTURE_DIRTY_RECT_COUNT);
 
 	{
-		ID3D12DescriptorHeap* t = _descriptorHeap.get();
-		_commandList->SetDescriptorHeaps(1, &t);
+		assert(_frameSrvs[_oldFrameIdx] && _frameSrvs[newFrameIdx]);
+		ID3D11ShaderResourceView* srvs[]{ _frameSrvs[_oldFrameIdx].get(), _frameSrvs[newFrameIdx].get()};
+		_deviceContext->CSSetShaderResources(0, 2, srvs);
 	}
 
-	_commandList->SetComputeRootSignature(_rootSignature.get());
-
-	_commandList->SetComputeRootUnorderedAccessView(1, _resultBuffer->GetGPUVirtualAddress());
-
-	{
-		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = _descriptorHeap->GetGPUDescriptorHandleForHeapStart();
-		_commandList->SetComputeRootDescriptorTable(
-			2, CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, _oldFrameIdx, _descriptorSize));
-		_commandList->SetComputeRootDescriptorTable(
-			3, CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, newFrameIdx, _descriptorSize));
-	}
-	
 	const uint32_t dirtyRectCount = (uint32_t)dirtyRects.size();
+
+	D3D11_MAPPED_SUBRESOURCE ms;
+	HRESULT hr = _deviceContext->Map(_constantBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D11DeviceContext::Map 失败", hr);
+		return hr;
+	}
+
+	++_curTargetValue;
+
 	for (uint32_t i = 0; i < dirtyRectCount; ++i) {
 		const Rect& dirtyRect = dirtyRects[i];
 
-		if (i == 0) {
-			DirectXHelper::Constant32 constants[] = {
-				{.floatVal = 1.0f / _frameSize.width},
-				{.floatVal = 1.0f / _frameSize.height},
-				{.uintVal = ++_curTargetValue},
-				{.uintVal = i},
-				{.uintVal = dirtyRect.left},
-				{.uintVal = dirtyRect.top},
-				{.uintVal = dirtyRect.right},
-				{.uintVal = dirtyRect.bottom}
-			};
-			_commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
-		} else {
-			DirectXHelper::Constant32 constants[] = {
-				{.uintVal = i},
-				{.uintVal = dirtyRect.left},
-				{.uintVal = dirtyRect.top},
-				{.uintVal = dirtyRect.right},
-				{.uintVal = dirtyRect.bottom}
-			};
-			_commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 3);
-		}
+		alignas(32) DirectXHelper::Constant32 constants[] = {
+			{.floatVal = 1.0f / _frameSize.width},
+			{.floatVal = 1.0f / _frameSize.height},
+			{.uintVal = _curTargetValue},
+			{.uintVal = i},
+			{.uintVal = dirtyRect.left},
+			{.uintVal = dirtyRect.top},
+			{.uintVal = dirtyRect.right},
+			{.uintVal = dirtyRect.bottom}
+		};
+		std::memcpy((uint8_t*)ms.pData + i * 256, constants, sizeof(constants));
+	}
 
-		_commandList->Dispatch(
+	_deviceContext->Unmap(_constantBuffer.get(), 0);
+
+	for (uint32_t i = 0; i < dirtyRectCount; ++i) {
+		{
+			ID3D11Buffer* buffer = _constantBuffer.get();
+			UINT firstConstant = i * 16;
+			UINT numConstants = 16;
+			_deviceContext->CSSetConstantBuffers1(0, 1, &buffer, &firstConstant, &numConstants);
+		}
+		
+		const Rect& dirtyRect = dirtyRects[i];
+		_deviceContext->Dispatch(
 			(dirtyRect.right - dirtyRect.left + DUP_FRAME_DISPATCH_BLOCK_SIZE - 1) / DUP_FRAME_DISPATCH_BLOCK_SIZE,
 			(dirtyRect.bottom - dirtyRect.top + DUP_FRAME_DISPATCH_BLOCK_SIZE - 1) / DUP_FRAME_DISPATCH_BLOCK_SIZE,
 			1
@@ -328,59 +257,31 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVecto
 	}
 
 	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			_resultBuffer.get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
-		_commandList->ResourceBarrier(1, &barrier);
+		D3D11_BOX box = {
+			.right = dirtyRectCount * sizeof(uint32_t),
+			.bottom = 1,
+			.back = 1
+		};
+		_deviceContext->CopySubresourceRegion(_readBackBuffer.get(), 0, 0, 0, 0, _resultBuffer.get(), 0, &box);
 	}
 	
-	_commandList->CopyBufferRegion(_resultReadbackBuffer.get(), 0,
-		_resultBuffer.get(), 0, dirtyRectCount * sizeof(uint32_t));
-
-	hr = _commandList->Close();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
-		return hr;
-	}
-
-	{
-		ID3D12CommandList* t = _commandList.get();
-		_commandQueue->ExecuteCommandLists(1, &t);
-	}
-
-	hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
-		return hr;
-	}
-
-	hr = _fence->SetEventOnCompletion(_curFenceValue, NULL);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12Fence::SetEventOnCompletion 失败", hr);
-		return hr;
-	}
-
 	// 读取结果
 	SmallVector<uint32_t, 4> removeList;
-	{
-		CD3DX12_RANGE range(0, dirtyRectCount * sizeof(uint32_t));
 
-		void* pData;
-		hr = _resultReadbackBuffer->Map(0, nullptr, &pData);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
-			return hr;
-		}
-
-		for (uint32_t i = 0; i < dirtyRectCount; ++i) {
-			if (((uint32_t*)pData)[i] != _curTargetValue) {
-				// 此矩形内画面无变化
-				removeList.push_back(i);
-			}
-		}
-		
-		range = {};
-		_resultReadbackBuffer->Unmap(0, &range);
+	hr = _deviceContext->Map(_readBackBuffer.get(), 0, D3D11_MAP_READ, 0, &ms);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("ID3D11DeviceContext::Map 失败", hr);
+		return hr;
 	}
+	
+	for (uint32_t i = 0; i < dirtyRectCount; ++i) {
+		if (((uint32_t*)ms.pData)[i] != _curTargetValue) {
+			// 此矩形内画面无变化
+			removeList.push_back(i);
+		}
+	}
+
+	_deviceContext->Unmap(_readBackBuffer.get(), 0);
 
 	if (!removeList.empty()) {
 		// 从后向前删除

@@ -176,6 +176,8 @@ HRESULT FrameRingBuffer::ConsumerEndFrame(
 }
 
 HRESULT FrameRingBuffer::SetEventOnNewFrame(uint64_t& frameNumber, HANDLE hEvent) const noexcept {
+	assert(frameNumber != 0);
+
 	HRESULT hr = _producerFence->SetEventOnCompletion(frameNumber, hEvent);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12Fence::SetEventOnCompletion 失败", hr);

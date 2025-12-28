@@ -6,7 +6,7 @@ cbuffer RootConstants : register(b0) {
 };
 
 // 无需同步
-RWStructuredBuffer<uint> result : register(u0);
+RWBuffer<uint> result : register(u0);
 
 Texture2D tex1 : register(t0);
 Texture2D tex2 : register(t1);
