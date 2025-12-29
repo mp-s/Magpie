@@ -157,9 +157,22 @@ bool GraphicsCaptureFrameSource::Initialize(
 		return false;
 	}
 
-	// 从 Win11 24H2 开始支持
-	_isDirtyRegionSupported = winrt::ApiInformation::IsPropertyPresent(
-		winrt::name_of<winrt::GraphicsCaptureSession>(), L"DirtyRegionMode");
+	// 截至 Win11 25H2，WGC 的脏区域汇报存在滞后的问题，这导致我们无法使用脏区域功能。
+	// 考虑下面的场景：
+	// 1. 帧 1 到达
+	// 2. 帧 2 到达，区域 A 有变化但没有汇报，因此不会复制区域 A
+	// 3. 帧 3 到达，汇报区域 A 有变化。对比帧 2 和帧 3 发现区域 A 不变，因此跳过复制
+	// 脏区域汇报滞后导致区域 A 的变化被忽略了。
+	// 
+	// 脏区域处理流程：
+	// 1. _Direct3D11CaptureFramePool_FrameArrived 将脏矩形累积到 _latestFrameDirtyRects
+	// 2. CheckForNewFrame 将 _latestFrameDirtyRects 移动到 _newFrameDirtyRects
+	// 3. CheckForNewFrame 执行重复帧检查，删除 _newFrameDirtyRects 中画面不变的矩形
+	// 4. 如果画面变化，Update 将 _newFrameDirtyRects 移动到 curSlot.dirtyRects
+	// 5. Update 累积所有 slot 的脏矩形然后更新 curSlot.output
+	// 
+	// _isDirtyRegionSupported = winrt::ApiInformation::IsPropertyPresent(
+	//     winrt::name_of<winrt::GraphicsCaptureSession>(), L"DirtyRegionMode");
 
 	{
 		RECT frameBounds;
@@ -288,10 +301,12 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 			_newFrame = std::move(_latestFrame);
 			_latestFrame = nullptr;
 
-			// 如果画面变化接下来会调用 Update，因此 _newFrameDirtyRects 肯定为空
-			assert(_newFrameDirtyRects.empty());
-			// 交换而不是移动以减少堆分配次数
-			std::swap(_newFrameDirtyRects, _latestFrameDirtyRects);
+			if (_isDirtyRegionSupported) {
+				// 如果画面变化接下来会调用 Update，因此 _newFrameDirtyRects 肯定为空
+				assert(_newFrameDirtyRects.empty());
+				// 交换而不是移动以减少堆分配次数
+				std::swap(_newFrameDirtyRects, _latestFrameDirtyRects);
+			}
 		} else {
 			isNewFrameAvailable = (bool)_newFrame;
 			return S_OK;
@@ -366,7 +381,9 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 		DirtyRectsOptimizer::Execute(_newFrameDirtyRects);
 	} else {
 		// 不支持脏矩形时检查整个捕获区域
-		_newFrameDirtyRects.emplace_back(_frameBox.left, _frameBox.top, _frameBox.right, _frameBox.bottom);
+		if (_newFrameDirtyRects.empty()) {
+			_newFrameDirtyRects.emplace_back(_frameBox.left, _frameBox.top, _frameBox.right, _frameBox.bottom);
+		}
 	}
 
 	HRESULT hr = _duplicateFrameChecker->CheckFrame(
@@ -402,6 +419,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 	curSlot.captureFrame = std::move(_newFrame);
 	_newFrame = nullptr;
 	curSlot.captureFrameResourceIdx = _newCaptureFrameResourceIdx;
+
 	if (_isDirtyRegionSupported) {
 		assert(!_newFrameDirtyRects.empty());
 		// 交换而不是移动以减少堆分配次数
@@ -1072,11 +1090,14 @@ void GraphicsCaptureFrameSource::_Direct3D11CaptureFramePool_FrameArrived(
 		auto lk = _latestFrameLock.lock_exclusive();
 
 		_latestFrame = std::move(frame);
-		// 累积脏矩形
-		if (_latestFrameDirtyRects.empty()) {
-			_latestFrameDirtyRects = std::move(dirtyRects);
-		} else {
-			_latestFrameDirtyRects.append(dirtyRects);
+
+		if (_isDirtyRegionSupported) {
+			// 累积脏矩形
+			if (_latestFrameDirtyRects.empty()) {
+				_latestFrameDirtyRects = std::move(dirtyRects);
+			} else {
+				_latestFrameDirtyRects.append(dirtyRects);
+			}
 		}
 		
 #ifdef MP_DEBUG_INFO

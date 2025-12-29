@@ -259,7 +259,7 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVecto
 
 	{
 		D3D11_BOX box = {
-			.right = dirtyRectCount * sizeof(uint32_t),
+			.right = dirtyRectCount * 4,
 			.bottom = 1,
 			.back = 1
 		};
