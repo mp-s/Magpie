@@ -304,8 +304,15 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 			if (_isDirtyRegionSupported) {
 				// 如果画面变化接下来会调用 Update，因此 _newFrameDirtyRects 肯定为空
 				assert(_newFrameDirtyRects.empty());
-				// 交换而不是移动以减少堆分配次数
-				std::swap(_newFrameDirtyRects, _latestFrameDirtyRects);
+
+				if (_captureFrameResourceTable.empty()) {
+					// 第一帧必须更新整个捕获区域
+					_newFrameDirtyRects.emplace_back(_frameBox.left, _frameBox.top, _frameBox.right, _frameBox.bottom);
+					_latestFrameDirtyRects.clear();
+				} else {
+					// 交换而不是移动以减少堆分配次数
+					std::swap(_newFrameDirtyRects, _latestFrameDirtyRects);
+				}
 			}
 		} else {
 			isNewFrameAvailable = (bool)_newFrame;
@@ -926,8 +933,13 @@ bool GraphicsCaptureFrameSource::_CreateBridgeDeviceResources(IDXGIAdapter1* dxg
 
 // 部分使用 Kirikiri 引擎的游戏有着这样的架构: 游戏窗口并非顶级窗口，而是被一个零尺寸
 // 的窗口所有。此时 Alt+Tab 列表中的窗口和任务栏图标实际上是所有者窗口，这会导致 WGC
-// 捕获失败。我们特殊处理这类窗口。
+// 捕获失败，需要特殊处理。
 static bool IsKirikiriWindow(HWND hwndSrc) noexcept {
+	// Win11 24H2 的某次更新修复了这个问题，保险起见从 25H2 开始不再使用 trick
+	if (Win32Helper::GetOSVersion().Is25H2OrNewer()) {
+		return false;
+	}
+
 	const HWND hwndOwner = GetWindowOwner(hwndSrc);
 	if (!hwndOwner) {
 		return false;
