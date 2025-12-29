@@ -309,6 +309,9 @@
     <FxCompile Include="CatmullRomCS_sRGB.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

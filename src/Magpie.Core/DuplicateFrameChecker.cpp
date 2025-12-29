@@ -4,6 +4,7 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "shaders/DuplicateFrameCS.h"
+#include "shaders/DuplicateFrameCS_NoBoundsChecking.h"
 
 namespace Magpie {
 
@@ -18,12 +19,16 @@ DuplicateFrameChecker::DuplicateFrameChecker() noexcept :
 // 1. D3D11 支持 IDXGIDevice::SetGPUThreadPriority，可以提高 GPU 优先级，
 // 而 D3D12 没有等价接口。
 // 2. 对于小任务 D3D11 启动渲染的耗时比 D3D12 短，差距可以达到 50us 以上。
+// 
+// 对于不支持脏矩形且捕获帧右下两边没有多余像素的捕获方式，可以禁用边界检查获得
+// 性能提升。
 bool DuplicateFrameChecker::Initialize(
 	ID3D11Device5* d3d11Device,
 	ID3D11DeviceContext4* d3d11DC,
 	const ColorInfo& colorInfo,
 	Size frameSize,
-	uint32_t frameCount
+	uint32_t frameCount,
+	bool disableBoundsChecking
 ) noexcept {
 	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
 		DuplicateFrameDetectionMode::Never);
@@ -32,11 +37,18 @@ bool DuplicateFrameChecker::Initialize(
 	_deviceContext = d3d11DC;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 	_frameSize = frameSize;
+#ifdef _DEBUG
+	_isBoundsCheckingDisabled = disableBoundsChecking;
+#endif
 
 	_frameSrvs.resize(frameCount);
 
 	HRESULT hr = d3d11Device->CreateComputeShader(
-		DuplicateFrameCS, sizeof(DuplicateFrameCS), nullptr, _dupFrameCS.put());
+		disableBoundsChecking ? DuplicateFrameCS_NoBoundsChecking : DuplicateFrameCS,
+		disableBoundsChecking ? sizeof(DuplicateFrameCS_NoBoundsChecking) : sizeof(DuplicateFrameCS),
+		nullptr,
+		_dupFrameCS.put()
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateComputeShader 失败", hr);
 		return false;
@@ -134,6 +146,13 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 		D3D11_TEXTURE2D_DESC desc;
 		frameResource->GetDesc(&desc);
 		assert(desc.Width == _frameSize.width && desc.Height == _frameSize.height);
+
+		if (_isBoundsCheckingDisabled) {
+			// 确保捕获帧右下两边没有多余像素
+			for (const Rect& rect : dirtyRects) {
+				assert(rect.right == desc.Width && rect.bottom == desc.Height);
+			}
+		}
 	}
 #endif
 

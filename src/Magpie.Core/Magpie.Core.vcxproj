@@ -156,6 +156,9 @@
     <FxCompile Include="shaders\DuplicateFrameCS.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>
+    <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
+      <ShaderType>Compute</ShaderType>
+    </FxCompile>
     <FxCompile Include="shaders\ImGuiImplPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>

@@ -16,7 +16,8 @@ public:
 		ID3D11DeviceContext4* d3d11DC,
 		const ColorInfo& colorInfo,
 		Size frameSize,
-		uint32_t frameCount
+		uint32_t frameCount,
+		bool disableBoundsChecking
 	) noexcept;
 
 	HRESULT CheckFrame(ID3D11Texture2D* frameResource, uint32_t frameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
@@ -49,6 +50,9 @@ private:
 	uint16_t _framesLeft;
 
 	bool _isScRGB = false;
+#ifdef _DEBUG
+	bool _isBoundsCheckingDisabled = false;
+#endif
 	bool _isCheckingForDuplicateFrame = true;
 };
 

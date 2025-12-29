@@ -20,12 +20,30 @@ void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 	}
 	
 	const uint2 gxy = dirtyRect.xy + (gid.xy << 4) + (tid.xy << 1);
+	
+#ifndef MP_NO_BOUNDS_CHECKING
 	if (gxy.x >= dirtyRect.z || gxy.y >= dirtyRect.w) {
 		return;
 	}
+#endif
 	
 	const float2 pos = (gxy + 1) * texPt;
+
+#ifdef MP_NO_BOUNDS_CHECKING
+	if (any(tex1.GatherRed(sam, pos) != tex2.GatherRed(sam, pos))) {
+        result[resultOffset] = target;
+		return;
+	}
 	
+	if (any(tex1.GatherGreen(sam, pos) != tex2.GatherGreen(sam, pos))) {
+        result[resultOffset] = target;
+		return;
+	}
+	
+	if (any(tex1.GatherBlue(sam, pos) != tex2.GatherBlue(sam, pos))) {
+        result[resultOffset] = target;
+    }
+#else
 	// w z
 	// x y
 	float4 mask = 1.0f;
@@ -57,4 +75,5 @@ void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 		result[resultOffset] = target;
 		return;
 	}
+#endif
 }

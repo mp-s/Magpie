@@ -261,8 +261,9 @@ bool GraphicsCaptureFrameSource::Initialize(
 
 	if (options.duplicateFrameDetectionMode != DuplicateFrameDetectionMode::Never) {
 		_duplicateFrameChecker = std::make_unique<DuplicateFrameChecker>();
+		// 不使用脏区域时可以跳过边界检查，因为捕获帧右下两边没有多余像素
 		if (!_duplicateFrameChecker->Initialize(_d3d11Device.get(), _d3d11DC.get(),
-			colorInfo, Size{ _frameBox.right, _frameBox.bottom }, frameCount)) {
+			colorInfo, Size{ _frameBox.right, _frameBox.bottom }, frameCount, !_isDirtyRegionSupported)) {
 			Logger::Get().Error("DuplicateFrameChecker::Initialize 失败");
 			return false;
 		}
@@ -1153,7 +1154,7 @@ HRESULT GraphicsCaptureFrameSource::_StartCapture() noexcept {
 	assert(!_captureFramePool && !_captureSession);
 
 	try {
-		// 创建帧缓冲池。帧的尺寸为包含源窗口的最小尺寸
+		// 创建帧缓冲池。帧的尺寸为包含捕获区域的最小尺寸，既能降低显存压力，又使得检查重复帧时无需边界检查
 		_captureFramePool = winrt::Direct3D11CaptureFramePool::CreateFreeThreaded(
 			_wrappedDevice,
 			_isScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float : winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
