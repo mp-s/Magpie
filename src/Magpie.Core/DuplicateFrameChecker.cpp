@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "DuplicateFrameChecker.h"
+#include "DebugInfo.h"
 #include "DirectXHelper.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
@@ -207,6 +208,24 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 			// 第 2 次连续检查 10 帧，之后逐渐减少，从第 16 次开始只连续检查 2 帧
 			_framesLeft = uint32_t((-4 * (int)_nextSkipCount + 78) / 7);
 		}
+
+#ifdef MP_DEBUG_INFO
+		if (DEBUG_INFO.enableStatisticsForDynamicDuplicateFrameDetection) {
+			// 预测此帧不会重复，验证是否正确
+			SmallVector<Rect> temp(dirtyRects.begin(), dirtyRects.end());
+			HRESULT hr = _CheckDirtyRects(frameIdx, temp);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_CheckDirtyRects 失败", hr);
+				return hr;
+			}
+
+			auto lk = DEBUG_INFO.lock.lock_exclusive();
+			++DEBUG_INFO.ddfdSkippedFrameCount;
+			if (temp.empty()) {
+				++DEBUG_INFO.ddfdWrongPredictionCount;
+			}
+		}
+#endif
 	}
 
 	return S_OK;

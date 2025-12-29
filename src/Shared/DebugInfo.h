@@ -18,6 +18,8 @@ struct DebugInfo {
 	bool highlightBorder = false;
 	// 验证 DirtyRectsOptimizer 的正确性，特定路径下消耗大量 CPU 时间
 	bool validateDirtyRectsOptimizer = false;
+	// 启用动态检查重复帧的预测正确率统计，稍微增加 GPU 负载
+	bool enableStatisticsForDynamicDuplicateFrameDetection = false;
 
 	// 用于同步对下面成员的访问
 	wil::srwlock lock;
@@ -50,6 +52,13 @@ struct DebugInfo {
 	uint32_t ctpFrameNumer = 0;
 	// 单位为微秒
 	uint32_t captureToPresentLatency = 0;
+
+	// 下面几个成员用于统计动态检测重复帧时预测的正确率
+
+	// 总计跳过的帧数量
+	uint32_t ddfdSkippedFrameCount = 0;
+	// 跳过的帧中预测错误的帧数量
+	uint32_t ddfdWrongPredictionCount = 0;
 };
 
 inline DebugInfo DEBUG_INFO;
