@@ -112,9 +112,9 @@ bool SwapChainPresenter::Initialize(
 
 	_frameBuffers.resize(_bufferCount);
 
-	hr = _LoadBufferResources();
+	hr = _CreateDisplayDependentResources();
 	if (FAILED(hr)) {
-		Logger::Get().ComError("_LoadBufferResources 失败", hr);
+		Logger::Get().ComError("_CreateDisplayDependentResources 失败", hr);
 		return false;
 	}
 
@@ -374,15 +374,15 @@ HRESULT SwapChainPresenter::_RecreateBuffers() noexcept {
 
 	_isRecreated = true;
 
-	hr = _LoadBufferResources();
+	hr = _CreateDisplayDependentResources();
 	if (FAILED(hr)) {
-		Logger::Get().ComError("_LoadBufferResources 失败", hr);
+		Logger::Get().ComError("_CreateDisplayDependentResources 失败", hr);
 	}
 
 	return hr;
 }
 
-HRESULT SwapChainPresenter::_LoadBufferResources() noexcept {
+HRESULT SwapChainPresenter::_CreateDisplayDependentResources() noexcept {
 	ID3D12Device5* device = _graphicContext->GetDevice();
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 	for (uint32_t i = 0; i < _bufferCount; ++i) {

@@ -16,7 +16,7 @@ public:
 		ID3D11DeviceContext4* d3d11DC,
 		const ColorInfo& colorInfo,
 		Size frameSize,
-		uint32_t frameCount,
+		uint32_t captureFrameCount,
 		bool disableBoundsChecking
 	) noexcept;
 
@@ -24,7 +24,7 @@ public:
 
 	void OnFrameAdopted(uint32_t frameIdx) noexcept;
 
-	void OnCaptureRestarted() noexcept;
+	void OnCaptureStopped() noexcept;
 
 private:
 	HRESULT _CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;

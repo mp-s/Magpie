@@ -53,7 +53,7 @@ void FrameProducer::InitializeAsync(
 bool FrameProducer::WaitForInitialize(Size& outputSize) const noexcept {
 	_state.wait(ComponentState::Initializing, std::memory_order_relaxed);
 	if (_state.load(std::memory_order_acquire) == ComponentState::NoError) {
-		outputSize = _outputSize;
+		outputSize = _initalOutputSize;
 		return true;
 	} else {
 		return false;
@@ -96,39 +96,15 @@ HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {
 				return;
 			}
 
-			_outputSize = rendererSize;
-			outputSize = _outputSize;
-
-			hr = _frameRingBuffer.OnResized(_outputSize);
-			if (!_CheckResult(hr, "FrameRingBuffer::OnResized 失败")) {
+			SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
+			hr = _effectsDrawer.OnResized(rendererSize, outputResources);
+			if (!_CheckResult(hr, "EffectsDrawer::OnResized 失败")) {
 				return;
 			}
 
-			{
-				const uint32_t maxInFlightFrameCount =
-					ScalingWindow::Get().Options().maxProducerInFlightFrames;
+			outputSize = _effectsDrawer.GetOutputSize();
 
-				SmallVector<ID3D12Resource*, 3> inputs;
-				inputs.resize(maxInFlightFrameCount);
-				for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
-					inputs[i] = _frameSource->GetOutput(i);
-				}
-
-				SmallVector<ID3D12Resource*, 4> outputs;
-				const uint32_t frameBufferCount = maxInFlightFrameCount + 1;
-				outputs.resize(frameBufferCount);
-				for (uint32_t i = 0; i < frameBufferCount; ++i) {
-					outputs[i] = _frameRingBuffer.GetBuffer(i);
-				}
-
-				CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle(
-					_descriptorHeap->GetCPUDescriptorHandleForHeapStart());
-				CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle(
-					_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
-				_catumullRomEffectDrawer.OnResize(
-					_inputSize, outputSize, inputs, outputs, descriptorCpuHandle, descriptorGpuHandle);
-			}
+			_frameRingBuffer.UpdateResources(outputResources);
 
 			hr = _Render();
 			if (!_CheckResult(hr, "_Render 失败")) {
@@ -167,9 +143,43 @@ HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 				return;
 			}
 
-			hr = _frameRingBuffer.OnColorInfoChanged(colorInfo);
-			if (!_CheckResult(hr, "FrameRingBuffer::OnColorInfoChanged 失败")) {
+			hr = _frameSource->OnColorInfoChanged(colorInfo);
+			if (!_CheckResult(hr, "GraphicsCaptureFrameSource::OnColorInfoChanged 失败")) {
 				return;
+			}
+
+			{
+				const uint32_t maxInFlightFrameCount =
+					ScalingWindow::Get().Options().maxProducerInFlightFrames;
+
+				SmallVector<ID3D12Resource*, 3> inputResources;
+				for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
+					inputResources.push_back(_frameSource->GetOutput(i));
+				}
+
+				SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
+
+				hr = _effectsDrawer.OnColorInfoChanged(colorInfo, inputResources, outputResources);
+				if (!_CheckResult(hr, "EffectsDrawer::OnColorInfoChanged 失败")) {
+					return;
+				}
+
+				_frameRingBuffer.UpdateResources(outputResources);
+			}
+
+			// 等待新帧
+			while (true) {
+				bool isNewFrameAvailable;
+				hr = _frameSource->CheckForNewFrame(isNewFrameAvailable);
+				if (!_CheckResult(hr, "GraphicsCaptureFrameSource::CheckForNewFrame 失败")) {
+					return;
+				}
+
+				if (isNewFrameAvailable) {
+					break;
+				} else {
+					WaitMessage();
+				}
 			}
 
 			hr = _Render();
@@ -337,22 +347,6 @@ bool FrameProducer::_Initialize(
 		return false;
 	}
 
-	ID3D12Device5* device = _graphicsContext.GetDevice();
-
-	// 检查半精度浮点支持
-	{
-		D3D12_FEATURE_DATA_D3D12_OPTIONS featureData{};
-		HRESULT hr = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &featureData, sizeof(featureData));
-		if (SUCCEEDED(hr)) {
-			_isFP16Supported = featureData.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;
-			Logger::Get().Info(StrHelper::Concat("FP16 支持: ", _isFP16Supported ? "是" : "否"));
-		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-		}
-	}
-
-	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
 	_frameSource = std::make_unique<GraphicsCaptureFrameSource>();
 	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
 		Logger::Get().Error("初始化 GraphicsCaptureFrameSource 失败");
@@ -391,97 +385,29 @@ bool FrameProducer::_Initialize(
 		_stepTimer.Initialize(minFrameRate, maxFrameRate);
 	}
 
-	_inputSize.width = srcRect.right - srcRect.left;
-	_inputSize.height = srcRect.bottom - srcRect.top;
-
-	_outputSize = rendererSize;
-
-	// 初始化效果
-	uint32_t descriptorTotal;
-	EffectColorSpace colorSpace = colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-		EffectColorSpace::sRGB : EffectColorSpace::scRGB;
-	HRESULT hr = _catumullRomEffectDrawer.Initialize(
-		_graphicsContext, _descriptorSize, _inputSize, _outputSize, true,
-		colorSpace, colorSpace, maxInFlightFrameCount, maxInFlightFrameCount + 1, descriptorTotal);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CatumullRomEffectDrawer::Initialize 失败", hr);
-		return false;
-	}
-
-	if (!_frameRingBuffer.Initialize(_graphicsContext, _outputSize, colorInfo)) {
-		Logger::Get().Error("初始化 FrameRingBuffer 失败");
-		return false;
-	}
-
 	{
-		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {
-			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-			.NumDescriptors = descriptorTotal,
-			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
+		const Size inputSize = {
+			uint32_t(srcRect.right - srcRect.left),
+			uint32_t(srcRect.bottom - srcRect.top)
 		};
-		hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_descriptorHeap));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
-			return false;
-		}
-	}
 
-	{
-		SmallVector<ID3D12Resource*, 3> inputs;
-		inputs.resize(maxInFlightFrameCount);
+		SmallVector<ID3D12Resource*, 3> inputResources;
 		for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
-			inputs[i] = _frameSource->GetOutput(i);
+			inputResources.push_back(_frameSource->GetOutput(i));
 		}
 
-		SmallVector<ID3D12Resource*, 4> outputs;
-		const uint32_t frameBufferCount = maxInFlightFrameCount + 1;
-		outputs.resize(frameBufferCount);
-		for (uint32_t i = 0; i < frameBufferCount; ++i) {
-			outputs[i] = _frameRingBuffer.GetBuffer(i);
-		}
+		SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle(
-			_descriptorHeap->GetCPUDescriptorHandleForHeapStart());
-		CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle(
-			_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
-		_catumullRomEffectDrawer.CreateDeviceResources(
-			inputs, outputs, descriptorCpuHandle, descriptorGpuHandle);
-	}
-
-	{
-		// 每帧两个时间戳
-		const uint32_t timestampCount = 2 * maxInFlightFrameCount;
-
-		D3D12_QUERY_HEAP_DESC queryHeapDesc = {
-			.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
-			.Count = timestampCount
-		};
-		hr = device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&_queryHeap));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateQueryHeap 失败", hr);
+		if (!_effectsDrawer.Initialize(_graphicsContext, colorInfo, inputSize,
+			rendererSize, inputResources, outputResources)) {
+			Logger::Get().Error("EffectsDrawer::Initialize 失败");
 			return false;
 		}
 
-		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_READBACK);
-		CD3DX12_RESOURCE_DESC bufferDesc =
-			CD3DX12_RESOURCE_DESC::Buffer(timestampCount * sizeof(UINT64));
-		hr = device->CreateCommittedResource(
-			&heapProps,
-			D3D12_HEAP_FLAG_NONE,
-			&bufferDesc,
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			nullptr,
-			IID_PPV_ARGS(&_queryResultBuffer)
-		);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
-			return false;
-		}
+		_initalOutputSize = _effectsDrawer.GetOutputSize(); 
 
-		hr = _graphicsContext.GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("ID3D12CommandQueue::GetTimestampFrequency 失败", hr);
+		if (!_frameRingBuffer.Initialize(_graphicsContext, outputResources)) {
+			Logger::Get().Error("初始化 FrameRingBuffer 失败");
 			return false;
 		}
 	}
@@ -507,24 +433,6 @@ HRESULT FrameProducer::_Render() noexcept {
 		return hr;
 	}
 	
-	// 获取渲染时间
-	const uint32_t queryHeapIndex = 2 * frameIndex;
-	{
-		CD3DX12_RANGE range(queryHeapIndex * sizeof(UINT64), (queryHeapIndex + 2) * sizeof(UINT64));
-
-		void* pData;
-		hr = _queryResultBuffer->Map(0, nullptr, &pData);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
-			return hr;
-		}
-
-		// UINT64* timestampes = (UINT64*)pData + queryHeapIndex;
-
-		range = {};
-		_queryResultBuffer->Unmap(0, &range);
-	}
-
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 
 	uint32_t frameRingBufferIdx;
@@ -558,19 +466,12 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
-	{
-		ID3D12DescriptorHeap* t = _descriptorHeap.get();
-		commandList->SetDescriptorHeaps(1, &t);
+	hr = _effectsDrawer.Draw(frameIndex, frameSourceOutputIdx, frameRingBufferIdx);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("EffectsDrawer::Draw 失败", hr);
+		return hr;
 	}
 
-	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
-
-	_catumullRomEffectDrawer.Draw(frameSourceOutputIdx, frameRingBufferIdx);
-
-	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
-	commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,
-		_queryResultBuffer.get(), queryHeapIndex * sizeof(UINT64));
-	
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(

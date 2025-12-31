@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "CatumullRomEffectDrawer.h"
+#include "CatmullRomEffectDrawer.h"
 #include "DirectXHelper.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
@@ -8,23 +8,26 @@
 
 namespace Magpie {
 
-HRESULT CatumullRomEffectDrawer::Initialize(
+uint32_t CatmullRomEffectDrawer::CalcDescriptorCount(bool isFirst, bool isLast) {
+	return 2 - isFirst - isLast;
+}
+
+HRESULT CatmullRomEffectDrawer::Initialize(
 	GraphicsContext& graphicsContext,
-	uint32_t descriptorSize,
 	Size inputSize,
 	Size outputSize,
-	bool isFirst,
 	EffectColorSpace inputColorSpace,
 	EffectColorSpace outputColorSpace,
-	uint32_t inputSlotCount,
-	uint32_t outputSlotCount,
-	uint32_t& descriptorCount
+	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
+	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
+	uint32_t descriptorSize,
+	ID3D12Resource* inputResource,
+	ID3D12Resource* outputResource
 ) noexcept {
-	assert(!(isFirst && inputColorSpace == EffectColorSpace::linear_sRGB));
+	// 第一个效果的输入色彩空间不会是 linear_sRGB
+	assert(inputResource || inputColorSpace != EffectColorSpace::linear_sRGB);
 
 	_graphicsContext = &graphicsContext;
-	_descriptorSize = descriptorSize;
-	_isFirst = isFirst;
 	_inputSize = inputSize;
 	_outputSize = outputSize;
 	_inputColorSpace = inputColorSpace;
@@ -105,72 +108,19 @@ HRESULT CatumullRomEffectDrawer::Initialize(
 		}
 	}
 
-	descriptorCount = inputSlotCount + outputSlotCount;
+	_CreateDisplayDependentResources(
+		descriptorCpuHandle, descriptorGpuHandle, descriptorSize, inputResource, outputResource);
+
 	return S_OK;
 }
 
-void CatumullRomEffectDrawer::CreateDeviceResources(
-	const SmallVectorImpl<ID3D12Resource*>& inputSlots,
-	const SmallVectorImpl<ID3D12Resource*>& outputSlots,
-	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
-	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle
+void CatmullRomEffectDrawer::Draw(
+	D3D12_GPU_DESCRIPTOR_HANDLE inputGpuHandle,
+	D3D12_GPU_DESCRIPTOR_HANDLE outputGpuHandle
 ) noexcept {
-	ID3D12Device5* device = _graphicsContext->GetDevice();
+	assert((bool)inputGpuHandle.ptr != (bool)_inputGpuHandle.ptr);
+	assert((bool)outputGpuHandle.ptr != (bool)_outputGpuHandle.ptr);
 
-	{
-		const uint32_t inputSlotCount = (uint32_t)inputSlots.size();
-
-		DXGI_FORMAT format;
-		if (_inputColorSpace == EffectColorSpace::linear_sRGB) {
-			format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		} else if (_inputColorSpace == EffectColorSpace::sRGB) {
-			// 着色器输入始终是 linear rgb
-			if (_isFirst) {
-				format = DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
-			} else {
-				format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-			}
-		} else {
-			format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-		}
-
-		for (uint32_t i = 0; i < inputSlotCount; ++i) {
-			CD3DX12_SHADER_RESOURCE_VIEW_DESC desc =
-				CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(format, 1);
-			device->CreateShaderResourceView(inputSlots[i], &desc, descriptorCpuHandle);
-
-			descriptorCpuHandle.Offset(1, _descriptorSize);
-		}
-
-		_inputDescriptorBase = descriptorGpuHandle;
-		descriptorGpuHandle.Offset(inputSlotCount, _descriptorSize);
-	}
-	
-	
-	{
-		const uint32_t outputSlotCount = (uint32_t)outputSlots.size();
-
-		DXGI_FORMAT format;
-		if (_outputColorSpace == EffectColorSpace::scRGB) {
-			format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-		} else {
-			format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		}
-
-		for (uint32_t i = 0; i < outputSlotCount; ++i) {
-			CD3DX12_UNORDERED_ACCESS_VIEW_DESC desc =
-				CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(format);
-			device->CreateUnorderedAccessView(outputSlots[i], nullptr, &desc, descriptorCpuHandle);
-
-			descriptorCpuHandle.Offset(1, _descriptorSize);
-		}
-
-		_outputDescriptorBase = descriptorGpuHandle;
-		descriptorGpuHandle.Offset(outputSlotCount, _descriptorSize);
-	}
-}
-
-void CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) noexcept {
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
 
 	commandList->SetPipelineState(_pipelineState.get());
@@ -191,9 +141,9 @@ void CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) noex
 	}
 
 	commandList->SetComputeRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(_inputDescriptorBase, inputSlot, _descriptorSize));
+		1, inputGpuHandle.ptr ? inputGpuHandle : _inputGpuHandle);
 	commandList->SetComputeRootDescriptorTable(
-		2, CD3DX12_GPU_DESCRIPTOR_HANDLE(_outputDescriptorBase, outputSlot, _descriptorSize));
+		2, outputGpuHandle.ptr ? outputGpuHandle : _outputGpuHandle);
 
 	constexpr std::pair<uint32_t, uint32_t> BLOCK_SIZE = { 16, 8 };
 	commandList->Dispatch(
@@ -203,18 +153,87 @@ void CatumullRomEffectDrawer::Draw(uint32_t inputSlot, uint32_t outputSlot) noex
 	);
 }
 
-void CatumullRomEffectDrawer::OnResize(
+void CatmullRomEffectDrawer::OnResized(
 	Size inputSize,
 	Size outputSize,
-	const SmallVectorImpl<ID3D12Resource*>& inputSlots,
-	const SmallVectorImpl<ID3D12Resource*>& outputSlots,
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
-	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle
-) {
+	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
+	uint32_t descriptorSize,
+	ID3D12Resource* inputResource,
+	ID3D12Resource* outputResource
+) noexcept {
 	_inputSize = inputSize;
 	_outputSize = outputSize;
 
-	CreateDeviceResources(inputSlots, outputSlots, descriptorCpuHandle, descriptorGpuHandle);
+	_CreateDisplayDependentResources(
+		descriptorCpuHandle, descriptorGpuHandle, descriptorSize, inputResource, outputResource);
+}
+
+void CatmullRomEffectDrawer::OnColorInfoChanged(
+	EffectColorSpace inputColorSpace,
+	EffectColorSpace outputColorSpace,
+	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
+	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
+	uint32_t descriptorSize,
+	ID3D12Resource* inputResource,
+	ID3D12Resource* outputResource
+) noexcept {
+	if (_inputColorSpace == inputColorSpace && _outputColorSpace == outputColorSpace) {
+		return;
+	}
+	_inputColorSpace = inputColorSpace;
+	_outputColorSpace = outputColorSpace;
+
+	_CreateDisplayDependentResources(
+		descriptorCpuHandle, descriptorGpuHandle, descriptorSize, inputResource, outputResource);
+}
+
+void CatmullRomEffectDrawer::_CreateDisplayDependentResources(
+	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
+	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
+	uint32_t descriptorSize,
+	ID3D12Resource* inputResource,
+	ID3D12Resource* outputResource
+) noexcept {
+	ID3D12Device5* device = _graphicsContext->GetDevice();
+
+	if (inputResource) {
+		DXGI_FORMAT format;
+		if (_inputColorSpace == EffectColorSpace::linear_sRGB) {
+			format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		} else if (_inputColorSpace == EffectColorSpace::sRGB) {
+			format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+		} else {
+			format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		}
+
+		CD3DX12_SHADER_RESOURCE_VIEW_DESC desc =
+			CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(format, 1);
+		device->CreateShaderResourceView(inputResource, &desc, descriptorCpuHandle);
+
+		_inputGpuHandle = descriptorGpuHandle;
+
+		descriptorCpuHandle.Offset(1, descriptorSize);
+		descriptorGpuHandle.Offset(1, descriptorSize);
+	}
+
+	if (outputResource) {
+		DXGI_FORMAT format;
+		if (_outputColorSpace == EffectColorSpace::scRGB) {
+			format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		} else {
+			format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		}
+
+		CD3DX12_UNORDERED_ACCESS_VIEW_DESC desc =
+			CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(format);
+		device->CreateUnorderedAccessView(outputResource, nullptr, &desc, descriptorCpuHandle);
+
+		_outputGpuHandle = descriptorGpuHandle;
+
+		descriptorCpuHandle.Offset(1, descriptorSize);
+		descriptorGpuHandle.Offset(1, descriptorSize);
+	}
 }
 
 }

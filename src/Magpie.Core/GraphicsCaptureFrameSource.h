@@ -45,12 +45,16 @@ public:
 
 	HRESULT Update(uint32_t& outputIdx) noexcept;
 
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+
 	HRESULT OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
 
 private:
 	bool _CreateCaptureDevice(HMONITOR hMonSrc) noexcept;
 
 	bool _CreateBridgeDeviceResources(IDXGIAdapter1* dxgiAdapter) noexcept;
+
+	HRESULT _CreateDisplayDependentResources() noexcept;
 
 	bool _InitializeCaptureItem() noexcept;
 
@@ -64,6 +68,8 @@ private:
 	HRESULT _StartCapture() noexcept;
 
 	void _StopCapture() noexcept;
+
+	void _ReleaseCaptureFrames() noexcept;
 
 	GraphicsContext* _graphicsContext = nullptr;
 

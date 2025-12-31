@@ -1,8 +1,8 @@
 #pragma once
 #include "GraphicsContext.h"
+#include "EffectsDrawer.h"
 #include "FrameRingBuffer.h"
 #include "StepTimer.h"
-#include "CatumullRomEffectDrawer.h"
 
 namespace Magpie {
 
@@ -75,20 +75,9 @@ private:
 	FrameRingBuffer _frameRingBuffer;
 	StepTimer _stepTimer;
 	std::unique_ptr<GraphicsCaptureFrameSource> _frameSource;
+	EffectsDrawer _effectsDrawer;
 
-	winrt::com_ptr<ID3D12DescriptorHeap> _descriptorHeap;
-	uint32_t _descriptorSize = 0;
-
-	CatumullRomEffectDrawer _catumullRomEffectDrawer;
-
-	winrt::com_ptr<ID3D12QueryHeap> _queryHeap;
-	winrt::com_ptr<ID3D12Resource> _queryResultBuffer;
-	UINT64 _timestampFrequency = 0;
-	
-	Size _inputSize{};
-	Size _outputSize{};
-
-	bool _isFP16Supported = false;
+	Size _initalOutputSize{};
 };
 
 }

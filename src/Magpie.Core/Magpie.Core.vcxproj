@@ -48,7 +48,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BackendDescriptorStore.h" />
-    <ClInclude Include="CatumullRomEffectDrawer.h" />
+    <ClInclude Include="CatmullRomEffectDrawer.h" />
     <ClInclude Include="CompSwapchainPresenter.h" />
     <ClInclude Include="CursorManager.h" />
     <ClInclude Include="CursorDrawer.h" />
@@ -63,6 +63,7 @@
     <ClInclude Include="EffectDrawer.h" />
     <ClInclude Include="EffectDrawerBase.h" />
     <ClInclude Include="EffectHelper.h" />
+    <ClInclude Include="EffectsDrawer.h" />
     <ClInclude Include="EffectsProfiler.h" />
     <ClInclude Include="ExclModeHelper.h" />
     <ClInclude Include="FrameProducer.h" />
@@ -101,7 +102,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BackendDescriptorStore.cpp" />
-    <ClCompile Include="CatumullRomEffectDrawer.cpp" />
+    <ClCompile Include="CatmullRomEffectDrawer.cpp" />
     <ClCompile Include="CompSwapchainPresenter.cpp" />
     <ClCompile Include="CursorManager.cpp" />
     <ClCompile Include="CursorDrawer.cpp" />
@@ -115,6 +116,7 @@
     <ClCompile Include="EffectCacheManager.cpp" />
     <ClCompile Include="EffectCompiler.cpp" />
     <ClCompile Include="EffectDrawer.cpp" />
+    <ClCompile Include="EffectsDrawer.cpp" />
     <ClCompile Include="EffectsProfiler.cpp" />
     <ClCompile Include="ExclModeHelper.cpp" />
     <ClCompile Include="FrameProducer.cpp" />

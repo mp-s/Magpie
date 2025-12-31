@@ -155,7 +155,7 @@
     <ClInclude Include="EffectDrawerBase.h">
       <Filter>EffectDrawer</Filter>
     </ClInclude>
-    <ClInclude Include="CatumullRomEffectDrawer.h">
+    <ClInclude Include="CatmullRomEffectDrawer.h">
       <Filter>EffectDrawer</Filter>
     </ClInclude>
     <ClInclude Include="DuplicateFrameChecker.h">
@@ -164,6 +164,9 @@
     <ClInclude Include="RectHelper.h" />
     <ClInclude Include="DirtyRectsOptimizer.h">
       <Filter>Capture</Filter>
+    </ClInclude>
+    <ClInclude Include="EffectsDrawer.h">
+      <Filter>Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -271,7 +274,7 @@
     <ClCompile Include="FrameRingBuffer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
-    <ClCompile Include="CatumullRomEffectDrawer.cpp">
+    <ClCompile Include="CatmullRomEffectDrawer.cpp">
       <Filter>EffectDrawer</Filter>
     </ClCompile>
     <ClCompile Include="DuplicateFrameChecker.cpp">
@@ -279,6 +282,9 @@
     </ClCompile>
     <ClCompile Include="DirtyRectsOptimizer.cpp">
       <Filter>Capture</Filter>
+    </ClCompile>
+    <ClCompile Include="EffectsDrawer.cpp">
+      <Filter>Render</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

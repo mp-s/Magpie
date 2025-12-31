@@ -28,7 +28,7 @@ bool DuplicateFrameChecker::Initialize(
 	ID3D11DeviceContext4* d3d11DC,
 	const ColorInfo& colorInfo,
 	Size frameSize,
-	uint32_t frameCount,
+	uint32_t captureFrameCount,
 	bool disableBoundsChecking
 ) noexcept {
 	assert(ScalingWindow::Get().Options().duplicateFrameDetectionMode !=
@@ -42,7 +42,7 @@ bool DuplicateFrameChecker::Initialize(
 	_isBoundsCheckingDisabled = disableBoundsChecking;
 #endif
 
-	_frameSrvs.resize(frameCount);
+	_frameSrvs.resize(captureFrameCount);
 
 	HRESULT hr = d3d11Device->CreateComputeShader(
 		disableBoundsChecking ? DuplicateFrameCS_NoBoundsChecking : DuplicateFrameCS,
@@ -212,8 +212,8 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 #ifdef MP_DEBUG_INFO
 		if (DEBUG_INFO.enableStatisticsForDynamicDuplicateFrameDetection) {
 			// 预测此帧不会重复，验证是否正确
-			SmallVector<Rect> temp(dirtyRects.begin(), dirtyRects.end());
-			HRESULT hr = _CheckDirtyRects(frameIdx, temp);
+			SmallVector<Rect> tempRects(dirtyRects.begin(), dirtyRects.end());
+			HRESULT hr = _CheckDirtyRects(frameIdx, tempRects);
 			if (FAILED(hr)) {
 				Logger::Get().ComError("_CheckDirtyRects 失败", hr);
 				return hr;
@@ -221,7 +221,7 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 
 			auto lk = DEBUG_INFO.lock.lock_exclusive();
 			++DEBUG_INFO.ddfdSkippedFrameCount;
-			if (temp.empty()) {
+			if (tempRects.empty()) {
 				++DEBUG_INFO.ddfdWrongPredictionCount;
 			}
 		}
@@ -235,7 +235,7 @@ void DuplicateFrameChecker::OnFrameAdopted(uint32_t frameIdx) noexcept {
 	_oldFrameIdx = frameIdx;
 }
 
-void DuplicateFrameChecker::OnCaptureRestarted() noexcept {
+void DuplicateFrameChecker::OnCaptureStopped() noexcept {
 	_oldFrameIdx = std::numeric_limits<uint32_t>::max();
 	std::fill(_frameSrvs.begin(), _frameSrvs.end(), nullptr);
 }

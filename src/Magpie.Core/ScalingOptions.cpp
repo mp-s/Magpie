@@ -47,7 +47,7 @@ void ScalingOptions::Prepare() noexcept {
 	assert(initialWindowedScaleFactor >= 0);
 	assert(!screenshotsDir.empty());
 	assert(showToast && showError && save);
-	assert(maxProducerInFlightFrames >= 1);
+	assert(maxProducerInFlightFrames >= 1 && maxProducerInFlightFrames <= 3);
 
 	// GDI 和 DwmSharedSurface 不支持捕获标题栏
 	IsCaptureTitleBar(IsCaptureTitleBar() &&

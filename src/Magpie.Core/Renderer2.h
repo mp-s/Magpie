@@ -1,12 +1,11 @@
 #pragma once
-#include "DirectXHelper.h"
+#include "FrameProducer.h"
 #include "GraphicsContext.h"
 #include "ScalingOptions.h"
 
 namespace Magpie {
 
 class SwapChainPresenter;
-class FrameProducer;
 
 class Renderer2 {
 public:
@@ -66,7 +65,7 @@ private:
 	RECT _outputRect{};
 
 	GraphicsContext _graphicsContext;
-	std::unique_ptr<FrameProducer> _frameProducer;
+	FrameProducer _frameProducer;
 	std::unique_ptr<SwapChainPresenter> _presenter;
 	
 	HMONITOR _hCurMonitor = NULL;

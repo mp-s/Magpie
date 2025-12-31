@@ -91,9 +91,7 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	_frameProducer = std::make_unique<FrameProducer>();
-	// 也会初始化 FrameRingBuffer
-	_frameProducer->InitializeAsync(_graphicsContext, srcRect, size, hMonitor, _colorInfo);
+	_frameProducer.InitializeAsync(_graphicsContext, srcRect, size, hMonitor, _colorInfo);
 
 	_presenter = std::make_unique<SwapChainPresenter>();
 	if (!_presenter->Initialize(_graphicsContext, hwndAttach, size, _colorInfo)) {
@@ -102,7 +100,7 @@ ScalingError Renderer2::Initialize(
 	}
 
 	Size outputSize;
-	if (!_frameProducer->WaitForInitialize(outputSize)) {
+	if (!_frameProducer.WaitForInitialize(outputSize)) {
 		Logger::Get().Error("FrameProducer::WaitForInitialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -119,13 +117,13 @@ ComponentState Renderer2::Render(bool waitForGpu, bool* waitingForFirstFrame) no
 		return _state;
 	}
 
-	_state = _frameProducer->GetState();
+	_state = _frameProducer.GetState();
 	if (_state != ComponentState::NoError) {
 		return _state;
 	}
 
 	{
-		uint64_t latestProducerFrameNumber = _frameProducer->GetLatestFrameNumber();
+		uint64_t latestProducerFrameNumber = _frameProducer.GetLatestFrameNumber();
 		if (latestProducerFrameNumber == _lastProducerFrameNumber) {
 			if (waitingForFirstFrame && latestProducerFrameNumber == 0) {
 				*waitingForFirstFrame = true;
@@ -171,13 +169,12 @@ void Renderer2::OnResized(Size size) noexcept {
 		return;
 	}
 
-	// 会等待 GPU
 	if (!_CheckResult(_presenter->OnResized(size), "SwapChainPresenter::OnResized 失败")) {
 		return;
 	}
 
 	Size outputSize;
-	if (!_CheckResult(_frameProducer->OnResized(size, outputSize), "FrameProducer::OnResized 失败")) {
+	if (!_CheckResult(_frameProducer.OnResized(size, outputSize), "FrameProducer::OnResized 失败")) {
 		return;
 	}
 
@@ -196,7 +193,7 @@ void Renderer2::OnMsgDisplayChanged() noexcept {
 }
 
 void Renderer2::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
-	_frameProducer->OnCursorVisibilityChanged(isVisible, onDestory);
+	_frameProducer.OnCursorVisibilityChanged(isVisible, onDestory);
 }
 
 void Renderer2::_TryInitDisplayInfo() noexcept {
@@ -335,12 +332,19 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 		return S_OK;
 	}
 
-	// 会等待 GPU
 	HRESULT hr = _presenter->OnColorInfoChanged(_colorInfo);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("SwapChainPresenter::OnColorInfoChanged 失败", hr);
 		return hr;
 	}
+
+	hr = _frameProducer.OnColorInfoChanged(_colorInfo);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("FrameProducer::OnColorInfoChanged 失败", hr);
+		return hr;
+	}
+
+	_CheckResult(_RenderImpl(true), "_RenderImpl 失败");
 
 	return S_OK;
 }
@@ -349,7 +353,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
 	UINT64 fenceValueToSignal;
-	if (!_frameProducer->ConsumerBeginFrame(curBuffer, fenceValueToSignal)) {
+	if (!_frameProducer.ConsumerBeginFrame(curBuffer, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -416,7 +420,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
 
-	hr =_frameProducer->ConsumerEndFrame(commandQueue, fenceValueToSignal);
+	hr =_frameProducer.ConsumerEndFrame(commandQueue, fenceValueToSignal);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("FrameProducer::ConsumerEndFrame 失败", hr);
 		return hr;

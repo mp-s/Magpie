@@ -7,13 +7,15 @@
 
 namespace Magpie {
 
-bool FrameRingBuffer::Initialize(GraphicsContext& graphicsContext, Size size, const ColorInfo& colorInfo) noexcept {
+bool FrameRingBuffer::Initialize(
+	GraphicsContext& graphicsContext,
+	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& resources
+) noexcept {
 	_graphicsContext = &graphicsContext;
-	_size = size;
-	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	const uint32_t slotCount = ScalingWindow::Get().Options().maxProducerInFlightFrames + 1;
 	_slots.resize(slotCount);
+	assert((uint32_t)resources.size() == slotCount);
 
 	// 消费者应落后于生产者
 	_curConsumerIdx = slotCount - 1;
@@ -32,12 +34,8 @@ bool FrameRingBuffer::Initialize(GraphicsContext& graphicsContext, Size size, co
 		return false;
 	}
 
-	hr = _LoadBufferResources();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_LoadBufferResources 失败", hr);
-		return false;
-	}
-
+	UpdateResources(resources);
+	
 	return true;
 }
 
@@ -193,61 +191,13 @@ uint64_t FrameRingBuffer::GetLatestFrameNumber() const noexcept {
 	return _producerFence->GetCompletedValue();
 }
 
-HRESULT FrameRingBuffer::OnResized(Size size) noexcept {
-	_size = size;
-
-	HRESULT hr = _LoadBufferResources();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_LoadBufferResources 失败", hr);
-		return hr;
+void FrameRingBuffer::UpdateResources(
+	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& resources
+) noexcept {
+	const size_t slotCount = _slots.size();
+	for (size_t i = 0; i < slotCount; ++i) {
+		_slots[i].resource = std::move(resources[i]);
 	}
-
-	return S_OK;
-}
-
-HRESULT FrameRingBuffer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
-	const bool wasScRGB = _isScRGB;
-	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
-
-	if (_isScRGB == wasScRGB) {
-		return S_OK;
-	}
-
-	HRESULT hr = _LoadBufferResources();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_LoadBufferResources 失败", hr);
-		return hr;
-	}
-
-	return S_OK;
-}
-
-HRESULT FrameRingBuffer::_LoadBufferResources() noexcept {
-	ID3D12Device5* device = _graphicsContext->GetDevice();
-
-	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-	D3D12_HEAP_FLAGS heapFlag = _graphicsContext->IsHeapFlagCreateNotZeroedSupported() ?
-		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
-		_size.width,
-		_size.height,
-		1, 1, 1, 0,
-		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-	);
-	
-	auto lk = _lock.lock_exclusive();
-
-	for (_FrameResourceSlot& slot : _slots) {
-		HRESULT hr = device->CreateCommittedResource(&heapProperties, heapFlag,
-			&texDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&slot.resource));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
-			return hr;
-		}
-	}
-
-	return S_OK;
 }
 
 }

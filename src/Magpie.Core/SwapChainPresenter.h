@@ -34,7 +34,7 @@ public:
 private:
 	HRESULT _RecreateBuffers() noexcept;
 
-	HRESULT _LoadBufferResources() noexcept;
+	HRESULT _CreateDisplayDependentResources() noexcept;
 
 	GraphicsContext* _graphicContext = nullptr;
 
