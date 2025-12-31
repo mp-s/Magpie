@@ -327,18 +327,15 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 			return hr;
 		}
 
-		if (_captureFrameResourceTable.empty()) {
-			// 丢弃 Recreate 后收到的旧帧，WGC 内部没做同步
+#ifdef _DEBUG
+		{
 			D3D11_TEXTURE2D_DESC desc;
 			d3d11Texture->GetDesc(&desc);
 			const DXGI_FORMAT expectedFormat =
 				_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;
-			if (desc.Format != expectedFormat) {
-				_newFrame = nullptr;
-				isNewFrameAvailable = false;
-				return S_OK;
-			}
+			assert(desc.Format == expectedFormat);
 		}
+#endif
 		
 		// 目前 WGC 帧池不会变化，因此可以缓存，需要采取保护措施防止内部实现变化
 		auto it = std::find_if(
@@ -630,20 +627,16 @@ HRESULT GraphicsCaptureFrameSource::OnColorInfoChanged(const ColorInfo& colorInf
 		return S_OK;
 	}
 
-	_ReleaseCaptureFrames();
+	// 重启捕获而不是 Recreate，这样可以立刻获得新帧
+	_StopCapture();
 
-	try {
-		winrt::DirectXPixelFormat format = _isScRGB ? winrt::DirectXPixelFormat::R16G16B16A16Float :
-			winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized;
-		_captureFramePool.Recreate(_wrappedDevice, format, CalcCaptureFrameCount(),
-			{ (int)_frameBox.right, (int)_frameBox.bottom });
-	} catch (const winrt::hresult_error& e) {
-		Logger::Get().ComInfo(StrHelper::Concat("Direct3D11CaptureFramePool::Recreate 失败: ",
-			StrHelper::UTF16ToUTF8(e.message())), e.code());
-		return e.code();
+	HRESULT hr = _StartCapture();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_StartCapture 失败", hr);
+		return hr;
 	}
-
-	HRESULT hr = _CreateDisplayDependentResources();
+	
+	hr = _CreateDisplayDependentResources();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("_CreateDisplayDependentResources 失败", hr);
 		return hr;
@@ -1276,17 +1269,11 @@ void GraphicsCaptureFrameSource::_StopCapture() noexcept {
 	_captureFramePool.Close();
 	_captureFramePool = nullptr;
 
-	_ReleaseCaptureFrames();
-}
-
-void GraphicsCaptureFrameSource::_ReleaseCaptureFrames() noexcept {
+	// 捕获已结束，可以安全操作 _latestFrame
 	{
-		winrt::Direct3D11CaptureFrame frame{ nullptr };
-		{
-			auto lk = _latestFrameLock.lock_exclusive();
-			frame = std::move(_latestFrame);
-			_latestFrameDirtyRects.clear();
-		}
+		auto lk = _latestFrameLock.lock_exclusive();
+		_latestFrame = nullptr;
+		_latestFrameDirtyRects.clear();
 	}
 
 	_captureFrameResourceTable.clear();

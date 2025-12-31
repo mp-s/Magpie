@@ -71,7 +71,6 @@ static constexpr uint32_t MAX_CAPTURE_DIRTY_RECT_COUNT = 4;
 static constexpr uint32_t DUP_FRAME_DISPATCH_BLOCK_SIZE = 16;
 
 enum class ComponentState {
-	Initializing,
 	NoError,
 	DeviceLost,
 	Error

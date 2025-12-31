@@ -46,7 +46,7 @@ public:
 		ID3D12Resource* outputResource
 	) noexcept;
 
-	void OnColorInfoChanged(
+	HRESULT OnColorInfoChanged(
 		EffectColorSpace inputColorSpace,
 		EffectColorSpace outputColorSpace,
 		CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
@@ -57,7 +57,9 @@ public:
 	) noexcept;
 
 private:
-	void _CreateDisplayDependentResources(
+	HRESULT _CreatePiplineState() noexcept;
+
+	void _CreateDescriptors(
 		CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
 		CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
 		uint32_t descriptorSize,

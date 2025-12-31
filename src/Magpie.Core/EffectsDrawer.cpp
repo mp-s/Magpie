@@ -226,9 +226,13 @@ HRESULT EffectsDrawer::OnColorInfoChanged(
 		EffectColorSpace::sRGB : EffectColorSpace::scRGB;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle = _effectsDescriptorCpuBase;
 	CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle = _effectsDescriptorGpuBase;
-	_catmullRom.OnColorInfoChanged(colorSpace, colorSpace, descriptorCpuHandle,
+	HRESULT hr = _catmullRom.OnColorInfoChanged(colorSpace, colorSpace, descriptorCpuHandle,
 		descriptorGpuHandle, _descriptorSize, nullptr, nullptr);
-	
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CatmullRomEffectDrawer::OnColorInfoChanged 失败", hr);
+		return hr;
+	}
+
 	return S_OK;
 }
 

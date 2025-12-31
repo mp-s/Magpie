@@ -93,22 +93,13 @@ HRESULT CatmullRomEffectDrawer::Initialize(
 		}
 	}
 
-	{
-		D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
-			.pRootSignature = _rootSignature.get(),
-			.CS = CD3DX12_SHADER_BYTECODE(
-				_outputColorSpace == EffectColorSpace::sRGB ? CatmullRomCS_sRGB : CatmullRomCS,
-				_outputColorSpace == EffectColorSpace::sRGB ? sizeof(CatmullRomCS_sRGB) : sizeof(CatmullRomCS)
-			)
-		};
-		HRESULT hr = device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateComputePipelineState 失败", hr);
-			return hr;
-		}
+	HRESULT hr = _CreatePiplineState();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_CreatePiplineState 失败", hr);
+		return hr;
 	}
 
-	_CreateDisplayDependentResources(
+	_CreateDescriptors(
 		descriptorCpuHandle, descriptorGpuHandle, descriptorSize, inputResource, outputResource);
 
 	return S_OK;
@@ -165,11 +156,11 @@ void CatmullRomEffectDrawer::OnResized(
 	_inputSize = inputSize;
 	_outputSize = outputSize;
 
-	_CreateDisplayDependentResources(
+	_CreateDescriptors(
 		descriptorCpuHandle, descriptorGpuHandle, descriptorSize, inputResource, outputResource);
 }
 
-void CatmullRomEffectDrawer::OnColorInfoChanged(
+HRESULT CatmullRomEffectDrawer::OnColorInfoChanged(
 	EffectColorSpace inputColorSpace,
 	EffectColorSpace outputColorSpace,
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
@@ -179,16 +170,47 @@ void CatmullRomEffectDrawer::OnColorInfoChanged(
 	ID3D12Resource* outputResource
 ) noexcept {
 	if (_inputColorSpace == inputColorSpace && _outputColorSpace == outputColorSpace) {
-		return;
+		return S_OK;
 	}
-	_inputColorSpace = inputColorSpace;
-	_outputColorSpace = outputColorSpace;
 
-	_CreateDisplayDependentResources(
-		descriptorCpuHandle, descriptorGpuHandle, descriptorSize, inputResource, outputResource);
+	_inputColorSpace = inputColorSpace;
+
+	if (_outputColorSpace != outputColorSpace) {
+		_outputColorSpace = outputColorSpace;
+
+		HRESULT hr = _CreatePiplineState();
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_CreatePiplineState 失败", hr);
+			return hr;
+		}
+	}
+	
+	_CreateDescriptors(descriptorCpuHandle, descriptorGpuHandle,
+		descriptorSize, inputResource, outputResource);
+
+	return S_OK;
 }
 
-void CatmullRomEffectDrawer::_CreateDisplayDependentResources(
+HRESULT CatmullRomEffectDrawer::_CreatePiplineState() noexcept {
+	ID3D12Device5* device = _graphicsContext->GetDevice();
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _rootSignature.get(),
+		.CS = CD3DX12_SHADER_BYTECODE(
+			_outputColorSpace == EffectColorSpace::sRGB ? CatmullRomCS_sRGB : CatmullRomCS,
+			_outputColorSpace == EffectColorSpace::sRGB ? sizeof(CatmullRomCS_sRGB) : sizeof(CatmullRomCS)
+		)
+	};
+	HRESULT hr = device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
+}
+
+void CatmullRomEffectDrawer::_CreateDescriptors(
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& descriptorCpuHandle,
 	CD3DX12_GPU_DESCRIPTOR_HANDLE& descriptorGpuHandle,
 	uint32_t descriptorSize,

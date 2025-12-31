@@ -69,8 +69,6 @@ private:
 
 	void _StopCapture() noexcept;
 
-	void _ReleaseCaptureFrames() noexcept;
-
 	GraphicsContext* _graphicsContext = nullptr;
 
 	std::atomic<DWORD> _producerThreadId;
@@ -92,6 +90,8 @@ private:
 	uint64_t _curCrossAdapterFenceValue = 0;
 
 	wil::srwlock _latestFrameLock;
+	// 不要在持有 _latestFrameLock 时释放 _latestFrame 或调用其中的方法，和 WGC 内部的
+	// 同步机制冲突。如果此时_Direct3D11CaptureFramePool_FrameArrived 正在执行会死锁。
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _latestFrame{ nullptr };
 	SmallVector<Rect> _latestFrameDirtyRects;
 

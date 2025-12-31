@@ -161,7 +161,9 @@ void FrameProducer::OnColorInfoChangedAsync(
 				return;
 			}
 
-			_frameRingBuffer.UpdateResources(outputResources);
+			if (!outputResources.empty()) {
+				_frameRingBuffer.UpdateResources(outputResources);
+			}
 		}
 
 		// 等待新帧
@@ -218,11 +220,9 @@ void FrameProducer::_ProducerThreadProc(
 	if (_Initialize(colorInfo, hMonSrc, srcRect, rendererSize, outputSize)) {
 		// 同步 outputSize
 		task.SetResult(true, std::memory_order_release);
-		_state.store(ComponentState::NoError, std::memory_order_release);
 	} else {
 		Logger::Get().Error("_Initialize 失败");
 		task.SetResult(false);
-		_state.store(ComponentState::Error, std::memory_order_relaxed);
 		return;
 	}
 

@@ -68,7 +68,7 @@ private:
 
 	bool _CheckResult(HRESULT hr, std::string_view errorMsg) noexcept;
 
-	std::atomic<ComponentState> _state = ComponentState::Initializing;
+	std::atomic<ComponentState> _state = ComponentState::NoError;
 
 	std::thread _producerThread;
 	winrt::DispatcherQueue _dispatcher{ nullptr };
