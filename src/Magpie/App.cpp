@@ -120,9 +120,9 @@ bool App::Initialize(const wchar_t* arguments) {
 		return false;
 	}
 
-	_mainWindow = std::make_unique<class MainWindow>();
-
 	EffectsService::Get().Initialize();
+
+	_mainWindow = std::make_unique<class MainWindow>();
 
 	// 初始化 XAML 框架。退出时也不要关闭，如果正在播放动画会崩溃。文档中的清空消息队列的做法无用。
 	_windowsXamlManager = Hosting::WindowsXamlManager::InitializeForCurrentThread();

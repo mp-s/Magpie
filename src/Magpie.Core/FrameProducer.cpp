@@ -33,31 +33,25 @@ FrameProducer::~FrameProducer() noexcept {
 
 void FrameProducer::InitializeAsync(
 	const GraphicsContext& graphicsContext,
+	const ColorInfo& colorInfo,
+	HMONITOR hMonSrc,
 	const RECT& srcRect,
 	Size rendererSize,
-	HMONITOR hMonSrc,
-	const ColorInfo& colorInfo
+	Size& outputSize,
+	SimpleTask<bool>& task
 ) noexcept {
 	_graphicsContext.CopyDevice(graphicsContext);
 
 	_producerThread = std::thread(
 		&FrameProducer::_ProducerThreadProc,
 		this,
+		colorInfo,
+		hMonSrc,
 		srcRect,
 		rendererSize,
-		hMonSrc,
-		colorInfo
+		std::ref(outputSize),
+		std::ref(task)
 	);
-}
-
-bool FrameProducer::WaitForInitialize(Size& outputSize) const noexcept {
-	_state.wait(ComponentState::Initializing, std::memory_order_relaxed);
-	if (_state.load(std::memory_order_acquire) == ComponentState::NoError) {
-		outputSize = _initalOutputSize;
-		return true;
-	} else {
-		return false;
-	}
 }
 
 ComponentState FrameProducer::GetState() const noexcept {
@@ -79,127 +73,123 @@ HRESULT FrameProducer::ConsumerEndFrame(
 	return _frameRingBuffer.ConsumerEndFrame(commandQueue, fenceValueToSignal);
 }
 
-HRESULT FrameProducer::OnResized(Size rendererSize, Size& outputSize) noexcept {
-	HRESULT hr = S_OK;
-	std::atomic<bool> done = false;
-
+void FrameProducer::OnResizedAsync(
+	Size rendererSize,
+	Size& outputSize,
+	SimpleTask<HRESULT>& task
+) noexcept {
 	_dispatcher.TryEnqueue([&] {
-		[&] {
-			ComponentState state = _state.load(std::memory_order_relaxed);
-			if (state != ComponentState::NoError) {
-				hr = state == ComponentState::DeviceLost ? DXGI_ERROR_DEVICE_REMOVED : E_FAIL;
-				return;
-			}
+		HRESULT hr = S_OK;
+		auto se = wil::scope_exit([&] {
+			// 同步 outputSize
+			task.SetResult(hr, std::memory_order_release);
+		});
 
-			hr = _graphicsContext.WaitForGpu();
-			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
-				return;
+		ComponentState state = _state.load(std::memory_order_relaxed);
+		if (state != ComponentState::NoError) {
+			hr = state == ComponentState::DeviceLost ? DXGI_ERROR_DEVICE_REMOVED : E_FAIL;
+			return;
+		}
+
+		hr = _graphicsContext.WaitForGpu();
+		if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
+			return;
+		}
+
+		SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
+		hr = _effectsDrawer.OnResized(rendererSize, outputResources);
+		if (!_CheckResult(hr, "EffectsDrawer::OnResized 失败")) {
+			return;
+		}
+
+		outputSize = _effectsDrawer.GetOutputSize();
+
+		_frameRingBuffer.UpdateResources(outputResources);
+
+		hr = _Render();
+		if (!_CheckResult(hr, "_Render 失败")) {
+			return;
+		}
+
+		// 等待渲染完成
+		hr = _graphicsContext.WaitForGpu();
+		if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
+			return;
+		}
+	});
+}
+
+void FrameProducer::OnColorInfoChangedAsync(
+	const ColorInfo& colorInfo,
+	SimpleTask<HRESULT>& task
+) noexcept {
+	_dispatcher.TryEnqueue([&] {
+		HRESULT hr = S_OK;
+		auto se = wil::scope_exit([&] {
+			task.SetResult(hr);
+		});
+		
+		ComponentState state = _state.load(std::memory_order_relaxed);
+		if (state != ComponentState::NoError) {
+			hr = state == ComponentState::DeviceLost ? DXGI_ERROR_DEVICE_REMOVED : E_FAIL;
+			return;
+		}
+
+		hr = _graphicsContext.WaitForGpu();
+		if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
+			return;
+		}
+
+		hr = _frameSource->OnColorInfoChanged(colorInfo);
+		if (!_CheckResult(hr, "GraphicsCaptureFrameSource::OnColorInfoChanged 失败")) {
+			return;
+		}
+
+		{
+			const uint32_t maxInFlightFrameCount =
+				ScalingWindow::Get().Options().maxProducerInFlightFrames;
+
+			SmallVector<ID3D12Resource*, 3> inputResources;
+			for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
+				inputResources.push_back(_frameSource->GetOutput(i));
 			}
 
 			SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
-			hr = _effectsDrawer.OnResized(rendererSize, outputResources);
-			if (!_CheckResult(hr, "EffectsDrawer::OnResized 失败")) {
+
+			hr = _effectsDrawer.OnColorInfoChanged(colorInfo, inputResources, outputResources);
+			if (!_CheckResult(hr, "EffectsDrawer::OnColorInfoChanged 失败")) {
 				return;
 			}
-
-			outputSize = _effectsDrawer.GetOutputSize();
 
 			_frameRingBuffer.UpdateResources(outputResources);
+		}
 
-			hr = _Render();
-			if (!_CheckResult(hr, "_Render 失败")) {
+		// 等待新帧
+		while (true) {
+			bool isNewFrameAvailable;
+			hr = _frameSource->CheckForNewFrame(isNewFrameAvailable);
+			if (!_CheckResult(hr, "GraphicsCaptureFrameSource::CheckForNewFrame 失败")) {
 				return;
 			}
 
-			// 等待渲染完成
-			hr = _graphicsContext.WaitForGpu();
-			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
-				return;
+			if (isNewFrameAvailable) {
+				break;
+			} else {
+				WaitMessage();
 			}
-		}();
-		
-		done.store(true, std::memory_order_release);
-		done.notify_one();
+		}
+
+		hr = _Render();
+		if (!_CheckResult(hr, "_Render 失败")) {
+			return;
+		}
+
+		// 等待渲染完成
+		hr = _graphicsContext.WaitForGpu();
+		if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
+			return;
+		}
 	});
-
-	done.wait(false, std::memory_order_acquire);
-	return hr;
-}
-
-HRESULT FrameProducer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
-	HRESULT hr = S_OK;
-	std::atomic<bool> done = false;
-
-	_dispatcher.TryEnqueue([&] {
-		[&] {
-			ComponentState state = _state.load(std::memory_order_relaxed);
-			if (state != ComponentState::NoError) {
-				hr = state == ComponentState::DeviceLost ? DXGI_ERROR_DEVICE_REMOVED : E_FAIL;
-				return;
-			}
-
-			hr = _graphicsContext.WaitForGpu();
-			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
-				return;
-			}
-
-			hr = _frameSource->OnColorInfoChanged(colorInfo);
-			if (!_CheckResult(hr, "GraphicsCaptureFrameSource::OnColorInfoChanged 失败")) {
-				return;
-			}
-
-			{
-				const uint32_t maxInFlightFrameCount =
-					ScalingWindow::Get().Options().maxProducerInFlightFrames;
-
-				SmallVector<ID3D12Resource*, 3> inputResources;
-				for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
-					inputResources.push_back(_frameSource->GetOutput(i));
-				}
-
-				SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
-
-				hr = _effectsDrawer.OnColorInfoChanged(colorInfo, inputResources, outputResources);
-				if (!_CheckResult(hr, "EffectsDrawer::OnColorInfoChanged 失败")) {
-					return;
-				}
-
-				_frameRingBuffer.UpdateResources(outputResources);
-			}
-
-			// 等待新帧
-			while (true) {
-				bool isNewFrameAvailable;
-				hr = _frameSource->CheckForNewFrame(isNewFrameAvailable);
-				if (!_CheckResult(hr, "GraphicsCaptureFrameSource::CheckForNewFrame 失败")) {
-					return;
-				}
-
-				if (isNewFrameAvailable) {
-					break;
-				} else {
-					WaitMessage();
-				}
-			}
-
-			hr = _Render();
-			if (!_CheckResult(hr, "_Render 失败")) {
-				return;
-			}
-
-			// 等待渲染完成
-			hr = _graphicsContext.WaitForGpu();
-			if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
-				return;
-			}
-		}();
-		
-		done.store(true, std::memory_order_release);
-		done.notify_one();
-	});
-
-	done.wait(false, std::memory_order_acquire);
-	return hr;
 }
 
 void FrameProducer::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
@@ -214,21 +204,25 @@ void FrameProducer::OnCursorVisibilityChanged(bool isVisible, bool onDestory) no
 }
 
 void FrameProducer::_ProducerThreadProc(
+	const ColorInfo& colorInfo,
+	HMONITOR hMonSrc,
 	RECT srcRect,
 	Size rendererSize,
-	HMONITOR hMonSrc,
-	const ColorInfo& colorInfo
+	Size& outputSize,
+	SimpleTask<bool>& task
 ) noexcept {
 #ifdef _DEBUG
 	SetThreadDescription(GetCurrentThread(), L"Magpie-缩放生产者线程");
 #endif
 
-	if (_Initialize(srcRect, rendererSize, hMonSrc, colorInfo)) {
+	if (_Initialize(colorInfo, hMonSrc, srcRect, rendererSize, outputSize)) {
+		// 同步 outputSize
+		task.SetResult(true, std::memory_order_release);
 		_state.store(ComponentState::NoError, std::memory_order_release);
-		_state.notify_one();
 	} else {
+		Logger::Get().Error("_Initialize 失败");
+		task.SetResult(false);
 		_state.store(ComponentState::Error, std::memory_order_relaxed);
-		_state.notify_one();
 		return;
 	}
 
@@ -311,10 +305,11 @@ void FrameProducer::_ProducerThreadProc(
 }
 
 bool FrameProducer::_Initialize(
+	const ColorInfo& colorInfo,
+	HMONITOR hMonSrc,
 	const RECT& srcRect,
 	Size rendererSize,
-	HMONITOR hMonSrc,
-	const ColorInfo& colorInfo
+	Size& outputSize
 ) noexcept {
 	winrt::init_apartment(winrt::apartment_type::single_threaded);
 
@@ -404,7 +399,7 @@ bool FrameProducer::_Initialize(
 			return false;
 		}
 
-		_initalOutputSize = _effectsDrawer.GetOutputSize(); 
+		outputSize = _effectsDrawer.GetOutputSize();
 
 		if (!_frameRingBuffer.Initialize(_graphicsContext, outputResources)) {
 			Logger::Get().Error("初始化 FrameRingBuffer 失败");

@@ -91,7 +91,10 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	_frameProducer.InitializeAsync(_graphicsContext, srcRect, size, hMonitor, _colorInfo);
+	Size outputSize;
+	SimpleTask<bool> task;
+	_frameProducer.InitializeAsync(
+		_graphicsContext, _colorInfo, hMonitor, srcRect, size, outputSize, task);
 
 	_presenter = std::make_unique<SwapChainPresenter>();
 	if (!_presenter->Initialize(_graphicsContext, hwndAttach, size, _colorInfo)) {
@@ -99,9 +102,9 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	Size outputSize;
-	if (!_frameProducer.WaitForInitialize(outputSize)) {
-		Logger::Get().Error("FrameProducer::WaitForInitialize 失败");
+	// 同步点，使生产者线程的修改可见
+	if (!task.GetResult(std::memory_order_acquire)) {
+		Logger::Get().Error("FrameProducer::InitializeAsync 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 
@@ -169,12 +172,16 @@ void Renderer2::OnResized(Size size) noexcept {
 		return;
 	}
 
+	Size outputSize;
+	SimpleTask<HRESULT> task;
+	_frameProducer.OnResizedAsync(size, outputSize, task);
+
 	if (!_CheckResult(_presenter->OnResized(size), "SwapChainPresenter::OnResized 失败")) {
 		return;
 	}
 
-	Size outputSize;
-	if (!_CheckResult(_frameProducer.OnResized(size, outputSize), "FrameProducer::OnResized 失败")) {
+	if (!_CheckResult(task.GetResult(std::memory_order_acquire),
+		"FrameProducer::OnResizedAsync 失败")) {
 		return;
 	}
 
@@ -332,15 +339,17 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 		return S_OK;
 	}
 
+	SimpleTask<HRESULT> task;
+	_frameProducer.OnColorInfoChangedAsync(_colorInfo, task);
+
 	HRESULT hr = _presenter->OnColorInfoChanged(_colorInfo);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("SwapChainPresenter::OnColorInfoChanged 失败", hr);
 		return hr;
 	}
 
-	hr = _frameProducer.OnColorInfoChanged(_colorInfo);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("FrameProducer::OnColorInfoChanged 失败", hr);
+	hr = task.GetResult();
+	if (!_CheckResult(hr, "FrameProducer::OnColorInfoChangedAsync 失败")) {
 		return hr;
 	}
 

@@ -3,6 +3,7 @@
 #include "EffectsDrawer.h"
 #include "FrameRingBuffer.h"
 #include "StepTimer.h"
+#include "SimpleTask.h"
 
 namespace Magpie {
 
@@ -18,13 +19,13 @@ public:
 
 	void InitializeAsync(
 		const GraphicsContext& graphicsContext,
+		const ColorInfo& colorInfo,
+		HMONITOR hMonSrc,
 		const RECT& srcRect,
 		Size rendererSize,
-		HMONITOR hMonSrc,
-		const ColorInfo& colorInfo
+		Size& outputSize,
+		SimpleTask<bool>& task
 	) noexcept;
-
-	bool WaitForInitialize(Size& outputSize) const noexcept;
 
 	ComponentState GetState() const noexcept;
 
@@ -37,25 +38,28 @@ public:
 		UINT64 fenceValueToSignal
 	) const noexcept;
 
-	HRESULT OnResized(Size rendererSize, Size& outputSize) noexcept;
+	void OnResizedAsync(Size rendererSize, Size& outputSize, SimpleTask<HRESULT>& task) noexcept;
 
-	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+	void OnColorInfoChangedAsync(const ColorInfo& colorInfo, SimpleTask<HRESULT>& task) noexcept;
 
 	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
 
 private:
 	void _ProducerThreadProc(
+		const ColorInfo& colorInfo,
+		HMONITOR hMonSrc,
 		RECT srcRect,
 		Size rendererSize,
-		HMONITOR hMonSrc,
-		const ColorInfo& colorInfo
+		Size& outputSize,
+		SimpleTask<bool>& task
 	) noexcept;
 
 	bool _Initialize(
+		const ColorInfo& colorInfo,
+		HMONITOR hMonSrc,
 		const RECT& srcRect,
 		Size rendererSize,
-		HMONITOR hMonSrc,
-		const ColorInfo& colorInfo
+		Size& outputSize
 	) noexcept;
 
 	HRESULT _Render() noexcept;
@@ -76,8 +80,6 @@ private:
 	StepTimer _stepTimer;
 	std::unique_ptr<GraphicsCaptureFrameSource> _frameSource;
 	EffectsDrawer _effectsDrawer;
-
-	Size _initalOutputSize{};
 };
 
 }
