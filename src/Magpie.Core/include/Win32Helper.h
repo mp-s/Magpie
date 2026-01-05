@@ -187,7 +187,7 @@ struct Win32Helper {
 	static const std::filesystem::path& GetExePath() noexcept;
 
 	template<typename T, std::enable_if_t<std::is_function_v<T>, int> = 0>
-	static T* LoadSystemFunction(const wchar_t* dllName, const char* funcName) noexcept {
+	static T* LoadFunction(const wchar_t* dllName, const char* funcName) noexcept {
 		assert(dllName && funcName);
 
 		HMODULE hMod = GetModuleHandle(dllName);

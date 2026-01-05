@@ -187,7 +187,7 @@ bool SrcTracker::UpdateState(
 	// 不要使用 IsHungAppWindow，它有误报的情况，见 GH#1244。这里用了未记录函数
 	// GhostWindowFromHungWindow，它可以准确检查源窗口是否已被替换为幽灵窗口。
 	static const auto ghostWindowFromHungWindow =
-		Win32Helper::LoadSystemFunction<HWND WINAPI(HWND)>(
+		Win32Helper::LoadFunction<HWND WINAPI(HWND)>(
 			L"user32.dll", "GhostWindowFromHungWindow");
 	if (ghostWindowFromHungWindow && ghostWindowFromHungWindow(_hWnd)) {
 		// 检查源窗口是否真的处于无响应状态

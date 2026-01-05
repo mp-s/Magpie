@@ -225,7 +225,7 @@ void CursorManager::_ShowSystemCursor(bool show, bool onDestory) {
 	}
 
 	static const auto showSystemCursor =
-		Win32Helper::LoadSystemFunction<void WINAPI(BOOL)>(L"user32.dll", "ShowSystemCursor");
+		Win32Helper::LoadFunction<void WINAPI(BOOL)>(L"user32.dll", "ShowSystemCursor");
 
 	if (showSystemCursor) {
 		showSystemCursor((BOOL)show);

@@ -98,7 +98,7 @@ ScalingError Renderer2::Initialize(
 
 	_presenter = std::make_unique<SwapChainPresenter>();
 	if (!_presenter->Initialize(_graphicsContext, hwndAttach, size, _colorInfo)) {
-		Logger::Get().Error("初始化 SwapChainPresenter 失败");
+		Logger::Get().Error("SwapChainPresenter::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 

@@ -8,7 +8,7 @@
 
 namespace Magpie {
 
-using DwmGetDxSharedSurfaceFunc = BOOL(
+using FnDwmGetDxSharedSurface = BOOL WINAPI(
 	HWND hWnd,
 	HANDLE* phSurface,
 	LUID* pAdapterLuid,
@@ -17,11 +17,11 @@ using DwmGetDxSharedSurfaceFunc = BOOL(
 	ULONGLONG* pWin32KUpdateId
 );
 
-static DwmGetDxSharedSurfaceFunc* DwmGetDxSharedSurface = nullptr;
+static FnDwmGetDxSharedSurface* DwmGetDxSharedSurface = nullptr;
 
 bool DwmSharedSurfaceFrameSource::_Initialize() noexcept {
 	[[maybe_unused]] static Ignore _ = [] {
-		DwmGetDxSharedSurface = Win32Helper::LoadSystemFunction<DwmGetDxSharedSurfaceFunc>(
+		DwmGetDxSharedSurface = Win32Helper::LoadFunction<FnDwmGetDxSharedSurface>(
 			L"user32.dll", "DwmGetDxSharedSurface");
 		return Ignore();
 	}();

@@ -54,7 +54,7 @@ wil::unique_process_handle Win32Helper::GetWindowProcessHandle(HWND hWnd) noexce
 
 	// 在某些窗口上 OpenProcess 会失败（如暗黑 2），尝试使用 GetProcessHandleFromHwnd
 	static const auto getProcessHandleFromHwnd =
-		Win32Helper::LoadSystemFunction<HANDLE WINAPI(HWND)>(L"Oleacc.dll", "GetProcessHandleFromHwnd");
+		Win32Helper::LoadFunction<HANDLE WINAPI(HWND)>(L"Oleacc.dll", "GetProcessHandleFromHwnd");
 	if (!getProcessHandleFromHwnd) {
 		return result;
 	}
@@ -426,7 +426,7 @@ bool Win32Helper::CreateDir(const std::wstring& path, bool recursive) noexcept {
 const Win32Helper::OSVersion& Win32Helper::GetOSVersion() noexcept {
 	static OSVersion version = [] {
 		const auto rtlGetVersion =
-			LoadSystemFunction<LONG WINAPI(PRTL_OSVERSIONINFOW)>(L"ntdll.dll", "RtlGetVersion");
+			LoadFunction<LONG WINAPI(PRTL_OSVERSIONINFOW)>(L"ntdll.dll", "RtlGetVersion");
 		if (!rtlGetVersion) {
 			return OSVersion();
 		}
@@ -885,7 +885,7 @@ void Win32Helper::WaitForDwmComposition() noexcept {
 	// Win11 可以使用准确的 DCompositionWaitForCompositorClock
 	if (Win32Helper::GetOSVersion().IsWin11()) {
 		static const auto dCompositionWaitForCompositorClock =
-			Win32Helper::LoadSystemFunction<decltype(DCompositionWaitForCompositorClock)>(
+			Win32Helper::LoadFunction<decltype(DCompositionWaitForCompositorClock)>(
 				L"dcomp.dll", "DCompositionWaitForCompositorClock");
 		if (dCompositionWaitForCompositorClock) {
 			dCompositionWaitForCompositorClock(0, nullptr, INFINITE);

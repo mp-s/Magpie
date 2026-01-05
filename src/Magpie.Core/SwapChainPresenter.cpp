@@ -135,7 +135,7 @@ static void WaitForDwmComposition() noexcept {
 	// Win11 可以使用准确的 DCompositionWaitForCompositorClock
 	if (Win32Helper::GetOSVersion().IsWin11()) {
 		static const auto dCompositionWaitForCompositorClock =
-			Win32Helper::LoadSystemFunction<decltype(DCompositionWaitForCompositorClock)>(
+			Win32Helper::LoadFunction<decltype(DCompositionWaitForCompositorClock)>(
 				L"dcomp.dll", "DCompositionWaitForCompositorClock");
 		if (dCompositionWaitForCompositorClock) {
 			dCompositionWaitForCompositorClock(0, nullptr, INFINITE);
