@@ -344,7 +344,7 @@ void CursorManager::_ReliableSetCursorPos(POINT pos) const noexcept {
 	// 还原原始光标限制区域
 	ClipCursor(&originClipRect);
 
-	// 有的窗口（比如 Magpie 主窗口）移动光标后光标形状有时不会主动更新，发送 WM_SETCURSOR
+	// 有的窗口（比如 Magpie 主窗口）上移动光标后光标形状有时不会主动更新，发送 WM_SETCURSOR
 	// 强制更新。
 	if (_isVirtualized) {
 		const HWND hwndSrc = ScalingWindow::Get().SrcHandle();

@@ -402,11 +402,11 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 		return hr;
 	}
 
-	ScalingWindow::Get().Render();
+	// 生产者渲染完成会通知消费者渲染新帧
 	return S_OK;
 }
 
-HRESULT Renderer2::_RenderImpl(HCURSOR hCursor, POINT cursorPos, bool waitForGpu) noexcept {
+HRESULT Renderer2::_RenderImpl(HCURSOR /*hCursor*/, POINT /*cursorPos*/, bool waitForGpu) noexcept {
 	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
 	UINT64 fenceValueToSignal;

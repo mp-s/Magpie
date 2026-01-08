@@ -623,11 +623,7 @@ HRESULT GraphicsCaptureFrameSource::OnColorInfoChanged(const ColorInfo& colorInf
 	const bool wasScRGB = _isScRGB;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
-	if (_isScRGB == wasScRGB) {
-		return S_OK;
-	}
-
-	// 重启捕获而不是 Recreate，这样可以立刻获得新帧
+	// 一旦色域变化我们需要立刻获得新帧，因此重启捕获而不是使用 Recreate
 	_StopCapture();
 
 	HRESULT hr = _StartCapture();
@@ -635,13 +631,15 @@ HRESULT GraphicsCaptureFrameSource::OnColorInfoChanged(const ColorInfo& colorInf
 		Logger::Get().ComError("_StartCapture 失败", hr);
 		return hr;
 	}
-	
-	hr = _CreateDisplayDependentResources();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateDisplayDependentResources 失败", hr);
-		return hr;
-	}
 
+	if (_isScRGB != wasScRGB) {
+		hr = _CreateDisplayDependentResources();
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_CreateDisplayDependentResources 失败", hr);
+			return hr;
+		}
+	}
+	
 	return S_OK;
 }
 
