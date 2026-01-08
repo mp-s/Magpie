@@ -80,14 +80,22 @@ struct Size {
 	uint32_t width;
 	uint32_t height;
 
-	bool operator==(const Size& other) const = default;
+	bool operator==(const Size&) const noexcept = default;
+
+	explicit operator SIZE() const noexcept {
+		return { (LONG)width,(LONG)height };
+	}
 };
 
 struct Point {
 	uint32_t x;
 	uint32_t y;
 
-	bool operator==(const Point& other) const = default;
+	bool operator==(const Point&) const noexcept = default;
+
+	explicit operator POINT() const noexcept {
+		return { (LONG)x,(LONG)y };
+	}
 };
 
 struct Rect {
@@ -97,6 +105,10 @@ struct Rect {
 	uint32_t bottom;
 
 	bool operator==(const Rect& other) const = default;
+
+	explicit operator RECT() const noexcept {
+		return { (LONG)left,(LONG)top,(LONG)right,(LONG)bottom };
+	}
 };
 
 struct ColorInfo {

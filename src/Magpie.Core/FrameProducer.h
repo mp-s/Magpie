@@ -51,7 +51,7 @@ private:
 		RECT srcRect,
 		Size rendererSize,
 		Size& outputSize,
-		SimpleTask<bool>& task
+		SimpleTask<bool>& initializeTask
 	) noexcept;
 
 	bool _Initialize(

@@ -1,4 +1,5 @@
 #pragma once
+#include "CursorDrawer2.h"
 #include "FrameProducer.h"
 #include "GraphicsContext.h"
 #include "ScalingOptions.h"
@@ -25,7 +26,7 @@ public:
 
 	ComponentState Render(bool waitForGpu = false, bool* waitingForFirstFrame = nullptr) noexcept;
 
-	const RECT& GetOutputRect() const noexcept {
+	const Rect& GetOutputRect() const noexcept {
 		return _outputRect;
 	}
 
@@ -62,10 +63,11 @@ private:
 	winrt::DisplayInformation _displayInfo{ nullptr };
 	winrt::DisplayInformation::AdvancedColorInfoChanged_revoker _acInfoChangedRevoker;
 
-	RECT _outputRect{};
+	Rect _outputRect{};
 
 	GraphicsContext _graphicsContext;
 	FrameProducer _frameProducer;
+	CursorDrawer2 _cursorDrawer;
 	std::unique_ptr<SwapChainPresenter> _presenter;
 	
 	HMONITOR _hCurMonitor = NULL;

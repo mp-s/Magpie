@@ -317,7 +317,14 @@ HRESULT SwapChainPresenter::OnResizeEnded() noexcept {
 	_bufferCount = _graphicContext->GetMaxInFlightFrameCount() + 1;
 
 	if (_bufferCount != oldBufferCount) {
-		HRESULT hr = _RecreateBuffers();
+		// 调用此方法前不会等待 GPU
+		HRESULT hr = _graphicContext->WaitForGpu();
+		if (FAILED(hr)) {
+			Logger::Get().ComError("GraphicsContext::WaitForGPU", hr);
+			return hr;
+		}
+
+		hr = _RecreateBuffers();
 		if (FAILED(hr)) {
 			Logger::Get().ComError("_RecreateBuffers 失败", hr);
 			return hr;
@@ -351,17 +358,11 @@ HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexc
 }
 
 HRESULT SwapChainPresenter::_RecreateBuffers() noexcept {
-	HRESULT hr = _graphicContext->WaitForGpu();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("GraphicsContext::WaitForGPU", hr);
-		return hr;
-	}
-
 	std::fill(_frameBuffers.begin(), _frameBuffers.end(), nullptr);
 
 	// 不要更改最大帧延迟，一来调整大小期间不会有帧排队，二来交换链不大支持中途改变
 	// 最大帧延迟，需要额外等待 FrameLatencyWaitableObject 来修正内部状态。
-	hr = _dxgiSwapChain->ResizeBuffers(
+	HRESULT hr = _dxgiSwapChain->ResizeBuffers(
 		_bufferCount, _size.width, _size.height,
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
 		UINT((_isTearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0)

@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "CursorWindow.h"
 
-static HCURSOR CreateCursorFromBitmaps(HBITMAP hColorBitmap, HBITMAP hMaskBitmap) noexcept {
+static wil::unique_hcursor CreateCursorFromBitmaps(HBITMAP hColorBitmap, HBITMAP hMaskBitmap) noexcept {
 	ICONINFO iconInfo = {
 		.fIcon = FALSE,
 		.xHotspot = 0,
@@ -9,10 +9,10 @@ static HCURSOR CreateCursorFromBitmaps(HBITMAP hColorBitmap, HBITMAP hMaskBitmap
 		.hbmMask = hMaskBitmap,
 		.hbmColor = hColorBitmap
 	};
-	return CreateIconIndirect(&iconInfo);
+	return wil::unique_hcursor(CreateIconIndirect(&iconInfo));
 }
 
-static HCURSOR CreateColorCursor() noexcept {
+static wil::unique_hcursor CreateColorCursor() noexcept {
 	const uint32_t width = (uint32_t)GetSystemMetrics(SM_CXCURSOR);
 	const uint32_t height = (uint32_t)GetSystemMetrics(SM_CYCURSOR);
 
@@ -25,7 +25,7 @@ static HCURSOR CreateColorCursor() noexcept {
 	return CreateCursorFromBitmaps(hColorBitmap.get(), hMaskBitmap.get());
 }
 
-static HCURSOR CreateMonochromeCursor() noexcept {
+static wil::unique_hcursor CreateMonochromeCursor() noexcept {
 	const uint32_t width = (uint32_t)GetSystemMetrics(SM_CXCURSOR);
 	const uint32_t height = (uint32_t)GetSystemMetrics(SM_CYCURSOR);
 
@@ -65,7 +65,7 @@ static HCURSOR CreateMonochromeCursor() noexcept {
 	return CreateCursorFromBitmaps(NULL, hMaskBitmap.get());
 }
 
-static HCURSOR CreateMaskedColorCursor() noexcept {
+static wil::unique_hcursor CreateMaskedColorCursor() noexcept {
 	const uint32_t width = (uint32_t)GetSystemMetrics(SM_CXCURSOR);
 	const uint32_t height = (uint32_t)GetSystemMetrics(SM_CYCURSOR);
 
@@ -77,7 +77,7 @@ static HCURSOR CreateMaskedColorCursor() noexcept {
 	// 左半：红色 (COLOR=0x00FF0000, MASK=0)
 	// 右半：和红色 XOR (COLOR=0x00FF0000, MASK=1)
 	
-	// 颜色位图初始化为红色。注意透明通道为 0，否则会被识别为彩色光标，遮罩位图被忽略
+	// 颜色位图初始化为红色。注意透明通道为 0，否则会被识别为彩色光标
 	std::vector<uint32_t> colorBits(width * height, 0x00FF0000);
 	std::vector<uint8_t> maskBits(widthByteCount * height, 0);
 	
@@ -180,7 +180,7 @@ LRESULT CursorWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) no
 	case WM_SETCURSOR:
 	{
 		if (LOWORD(lParam) == HTCLIENT) {
-			SetCursor(_hCursor);
+			SetCursor(_hCursor.get());
 			return TRUE;
 		}
 		break;
@@ -188,8 +188,7 @@ LRESULT CursorWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) no
 	case WM_ERASEBKGND:
 	{
 		// 绘制渐变背景
-		PAINTSTRUCT ps;
-		HDC hdc = BeginPaint(Handle(), &ps);
+		wil::unique_hdc_paint hdc = wil::BeginPaint(Handle());
 
 		RECT rc;
 		GetClientRect(Handle(), &rc);
@@ -211,9 +210,8 @@ LRESULT CursorWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) no
 			}
 		};
 		GRADIENT_RECT rect = { 0, 1 };
-		GradientFill(hdc, vertices, 2, &rect, 1, GRADIENT_FILL_RECT_V);
+		GradientFill(hdc.get(), vertices, 2, &rect, 1, GRADIENT_FILL_RECT_V);
 
-		EndPaint(Handle(), &ps);
 		return TRUE;
 	}
 	case WM_DESTROY:

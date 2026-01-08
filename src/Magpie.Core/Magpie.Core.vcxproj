@@ -50,6 +50,7 @@
     <ClInclude Include="BackendDescriptorStore.h" />
     <ClInclude Include="CatmullRomEffectDrawer.h" />
     <ClInclude Include="CompSwapchainPresenter.h" />
+    <ClInclude Include="CursorDrawer2.h" />
     <ClInclude Include="CursorManager.h" />
     <ClInclude Include="CursorDrawer.h" />
     <ClInclude Include="DDS.h" />
@@ -104,6 +105,7 @@
     <ClCompile Include="BackendDescriptorStore.cpp" />
     <ClCompile Include="CatmullRomEffectDrawer.cpp" />
     <ClCompile Include="CompSwapchainPresenter.cpp" />
+    <ClCompile Include="CursorDrawer2.cpp" />
     <ClCompile Include="CursorManager.cpp" />
     <ClCompile Include="CursorDrawer.cpp" />
     <ClCompile Include="DDSHelper.cpp" />

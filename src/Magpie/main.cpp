@@ -23,7 +23,6 @@
 #include "Win32Helper.h"
 #ifdef _DEBUG
 #include <d3d12sdklayers.h>
-#include <dxgidebug.h>
 #endif
 #include <dxgi1_6.h>
 
@@ -54,14 +53,6 @@ static void InitializeLogger(const wchar_t* logFilePath) noexcept {
 
 static void InitializeDirectX() noexcept {
 #ifdef _DEBUG
-	winrt::com_ptr<IDXGIInfoQueue> dxgiInfoQueue;
-	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiInfoQueue)))) {
-		// 发生错误时中断
-		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true);
-		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true);
-		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_WARNING, true);
-	}
-
 	{
 		winrt::com_ptr<ID3D12Debug1> debugController;
 		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {

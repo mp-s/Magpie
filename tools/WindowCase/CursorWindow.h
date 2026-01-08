@@ -13,7 +13,7 @@ private:
 
 	void _UpdateButtonPos() noexcept;
 
-	HCURSOR _hCursor = NULL;
+	wil::unique_hcursor _hCursor = NULL;
 
 	HWND _hwndBtn1 = NULL;
 	HWND _hwndBtn2 = NULL;

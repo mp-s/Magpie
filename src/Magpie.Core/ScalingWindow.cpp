@@ -327,7 +327,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	}
 
 	_cursorManager = std::make_unique<class CursorManager>();
-	const RECT& outputRect = _renderer->GetOutputRect();
+	RECT outputRect = (RECT)_renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,
@@ -391,7 +391,7 @@ void ScalingWindow::SwitchToolbarState() noexcept {
 	}*/
 }
 
-void ScalingWindow::Render() noexcept {
+void ScalingWindow::Render(bool onDeviceLost) noexcept {
 	bool isSrcRepositioning = false;
 	if (!_UpdateSrcState(isSrcRepositioning)) {
 		Logger::Get().Info("源窗口状态改变");
@@ -413,8 +413,8 @@ void ScalingWindow::Render() noexcept {
 			_Show();
 		}
 	} else {
-		if (state == ComponentState::DeviceLost) {
-			// 设备丢失重新创建 Renderer
+		// 设备再次丢失则不再尝试恢复
+		if (state == ComponentState::DeviceLost && !onDeviceLost) {
 			_renderer.reset();
 			_renderer = std::make_unique<Renderer2>();
 
@@ -431,14 +431,9 @@ void ScalingWindow::Render() noexcept {
 				return;
 			}
 
-			// 如果设备再次丢失不再尝试恢复
-			if (_renderer->Render() != ComponentState::NoError) {
-				_DelayedStop();
-				return;
-			}
+			Render(true);
 		} else {
 			_DelayedStop();
-			return;
 		}
 	}
 }
@@ -1346,7 +1341,7 @@ void ScalingWindow::_HandleResize() noexcept {
 	_renderer->OnResized(
 		Size{ uint32_t(_rendererRect.right - _rendererRect.left), uint32_t(_rendererRect.bottom - _rendererRect.top) });
 
-	const RECT& outputRect = _renderer->GetOutputRect();
+	RECT outputRect = (RECT)_renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,
@@ -1359,7 +1354,7 @@ void ScalingWindow::_HandleResize() noexcept {
 }
 
 void ScalingWindow::_HandleMove() noexcept {
-	const RECT& outputRect = _renderer->GetOutputRect();
+	RECT outputRect = (RECT)_renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,
@@ -1504,7 +1499,7 @@ void ScalingWindow::_UpdateWindowProps() const noexcept {
 	SetProp(hWnd, L"Magpie.SrcRight", (HANDLE)(INT_PTR)srcRect.right);
 	SetProp(hWnd, L"Magpie.SrcBottom", (HANDLE)(INT_PTR)srcRect.bottom);
 
-	const RECT& outputRect = _renderer->GetOutputRect();
+	RECT outputRect = (RECT)_renderer->GetOutputRect();
 	SetProp(hWnd, L"Magpie.DestLeft", (HANDLE)(INT_PTR)(_rendererRect.left + outputRect.left));
 	SetProp(hWnd, L"Magpie.DestTop", (HANDLE)(INT_PTR)(_rendererRect.top + outputRect.top));
 	SetProp(hWnd, L"Magpie.DestRight", (HANDLE)(INT_PTR)(_rendererRect.left + outputRect.right));
@@ -1835,7 +1830,7 @@ static LRESULT CALLBACK BkgWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 RECT ScalingWindow::_CalcSrcTouchRect() const noexcept {
 	const RECT& srcRect = _srcTracker.SrcRect();
 
-	const RECT& outputRect = _renderer->GetOutputRect();
+	RECT outputRect = (RECT)_renderer->GetOutputRect();
 	const RECT destRect = {
 		_rendererRect.left + outputRect.left,
 		_rendererRect.top + outputRect.top,

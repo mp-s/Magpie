@@ -78,7 +78,7 @@ void FrameProducer::OnResizedAsync(
 	Size& outputSize,
 	SimpleTask<HRESULT>& task
 ) noexcept {
-	_dispatcher.TryEnqueue([&] {
+	_dispatcher.TryEnqueue([&, rendererSize] {
 		HRESULT hr = S_OK;
 		auto se = wil::scope_exit([&] {
 			// 同步 outputSize
@@ -211,7 +211,7 @@ void FrameProducer::_ProducerThreadProc(
 	RECT srcRect,
 	Size rendererSize,
 	Size& outputSize,
-	SimpleTask<bool>& task
+	SimpleTask<bool>& initializeTask
 ) noexcept {
 #ifdef _DEBUG
 	SetThreadDescription(GetCurrentThread(), L"Magpie-缩放生产者线程");
@@ -219,10 +219,10 @@ void FrameProducer::_ProducerThreadProc(
 
 	if (_Initialize(colorInfo, hMonSrc, srcRect, rendererSize, outputSize)) {
 		// 同步 outputSize
-		task.SetResult(true, std::memory_order_release);
+		initializeTask.SetResult(true, std::memory_order_release);
 	} else {
 		Logger::Get().Error("_Initialize 失败");
-		task.SetResult(false);
+		initializeTask.SetResult(false);
 		return;
 	}
 

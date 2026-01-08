@@ -673,27 +673,6 @@ HRESULT GraphicsCaptureFrameSource::OnCursorVisibilityChanged(bool isVisible, bo
 	return S_OK;
 }
 
-static bool IsDebugLayersAvailable() noexcept {
-#ifdef _DEBUG
-	static bool result = SUCCEEDED(D3D11CreateDevice(
-		nullptr,
-		D3D_DRIVER_TYPE_NULL,       // There is no need to create a real hardware device.
-		nullptr,
-		D3D11_CREATE_DEVICE_DEBUG,  // Check for the SDK layers.
-		nullptr,                    // Any feature level will do.
-		0,
-		D3D11_SDK_VERSION,
-		nullptr,                    // No need to keep the D3D device reference.
-		nullptr,                    // No need to know the feature level.
-		nullptr                     // No need to keep the D3D device context reference.
-	));
-	return result;
-#else
-	// Relaese 配置不使用调试层
-	return false;
-#endif
-}
-
 bool GraphicsCaptureFrameSource::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept {
 	// 查找源窗口所在屏幕连接的适配器
 	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
@@ -729,9 +708,9 @@ bool GraphicsCaptureFrameSource::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept
 	const UINT nFeatureLevels = ARRAYSIZE(featureLevels);
 
 	UINT createDeviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-	if (IsDebugLayersAvailable()) {
-		createDeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
-	}
+#ifdef _DEBUG
+	createDeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
 
 	winrt::com_ptr<ID3D11Device> d3dDevice;
 	winrt::com_ptr<ID3D11DeviceContext> d3dDC;
@@ -780,7 +759,16 @@ bool GraphicsCaptureFrameSource::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept
 		return false;
 	}
 
-	winrt::com_ptr<IDXGIDevice> dxgiDevice = _d3d11Device.try_as<IDXGIDevice>();
+#ifdef _DEBUG
+	// 调试层汇报错误或警告时中断
+	if (winrt::com_ptr<ID3D11InfoQueue> infoQueue = d3dDevice.try_as<ID3D11InfoQueue>()) {
+		infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+		infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, TRUE);
+		infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_WARNING, TRUE);
+	}
+#endif
+	
+	winrt::com_ptr<IDXGIDevice> dxgiDevice = d3dDevice.try_as<IDXGIDevice>();
 	if (!dxgiDevice) {
 		Logger::Get().Error("获取 IDXGIDevice 失败");
 		return false;
@@ -806,6 +794,15 @@ bool GraphicsCaptureFrameSource::_CreateBridgeDeviceResources(IDXGIAdapter1* dxg
 	}
 
 	Logger::Get().Info("已创建 D3D12 设备");
+
+#ifdef _DEBUG
+	// 调试层汇报错误或警告时中断
+	if (winrt::com_ptr<ID3D12InfoQueue> infoQueue = _bridgeDevice.try_as<ID3D12InfoQueue>()) {
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
+		infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+	}
+#endif
 
 	// 不应使用集成显卡捕获，集成显卡没有高速的专用显存，捕获延迟很高
 	{

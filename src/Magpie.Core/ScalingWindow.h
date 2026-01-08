@@ -38,11 +38,7 @@ public:
 
 	void SwitchToolbarState() noexcept;
 
-	void Render() noexcept;
-
-	const RECT& RendererRect() const noexcept {
-		return _rendererRect;
-	}
+	void Render(bool onDeviceLost = false) noexcept;
 
 	const ScalingOptions& Options() const noexcept {
 		return _options;
@@ -50,6 +46,11 @@ public:
 
 	HWND SrcHandle() const noexcept {
 		return _srcTracker.Handle();
+	}
+
+#pragma region 弃用
+	const RECT& RendererRect() const noexcept {
+		return _rendererRect;
 	}
 
 	class SrcTracker& SrcTracker() noexcept {
@@ -75,6 +76,7 @@ public:
 	const class CursorManager& CursorManager() const noexcept {
 		return *_cursorManager;
 	}
+#pragma endregion
 
 	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
 

@@ -96,6 +96,11 @@ ScalingError Renderer2::Initialize(
 	_frameProducer.InitializeAsync(
 		_graphicsContext, _colorInfo, hMonitor, srcRect, size, outputSize, task);
 
+	if (!_cursorDrawer.Initialize(_graphicsContext)) {
+		Logger::Get().Error("CursorDrawer2::Initialize 失败");
+		return ScalingError::ScalingFailedGeneral;
+	}
+
 	_presenter = std::make_unique<SwapChainPresenter>();
 	if (!_presenter->Initialize(_graphicsContext, hwndAttach, size, _colorInfo)) {
 		Logger::Get().Error("SwapChainPresenter::Initialize 失败");
@@ -172,6 +177,11 @@ void Renderer2::OnResized(Size size) noexcept {
 		return;
 	}
 
+	// 确保消费者不再使用环形缓冲区
+	if (!_CheckResult(_graphicsContext.WaitForGpu(), "GraphicsContext::WaitForGpu 失败")) {
+		return;
+	}
+
 	Size outputSize;
 	SimpleTask<HRESULT> task;
 	_frameProducer.OnResizedAsync(size, outputSize, task);
@@ -186,8 +196,6 @@ void Renderer2::OnResized(Size size) noexcept {
 	}
 
 	_UpdateOutputRect(outputSize);
-
-	_CheckResult(_RenderImpl(true), "_RenderImpl 失败");
 }
 
 void Renderer2::OnMsgDisplayChanged() noexcept {
@@ -339,22 +347,29 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 		return S_OK;
 	}
 
+	// 确保消费者不再使用环形缓冲区
+	HRESULT hr = _graphicsContext.WaitForGpu();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+		return hr;
+	}
+
 	SimpleTask<HRESULT> task;
 	_frameProducer.OnColorInfoChangedAsync(_colorInfo, task);
 
-	HRESULT hr = _presenter->OnColorInfoChanged(_colorInfo);
+	hr = _presenter->OnColorInfoChanged(_colorInfo);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("SwapChainPresenter::OnColorInfoChanged 失败", hr);
 		return hr;
 	}
 
 	hr = task.GetResult();
-	if (!_CheckResult(hr, "FrameProducer::OnColorInfoChangedAsync 失败")) {
+	if (FAILED(hr)) {
+		Logger::Get().ComError("FrameProducer::OnColorInfoChangedAsync 失败", hr);
 		return hr;
 	}
 
-	_CheckResult(_RenderImpl(true), "_RenderImpl 失败");
-
+	ScalingWindow::Get().Render();
 	return S_OK;
 }
 
@@ -383,41 +398,77 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
-	if (const Size size = _presenter->GetSize(); _outputRect == RECT{ 0,0,(LONG)size.width,(LONG)size.height }) {
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
+		commandList->ResourceBarrier(1, &barrier);
+	}
+
+	if (Size size = _presenter->GetSize(); _outputRect == Rect{ 0,0,size.width,size.height }) {
+		commandList->CopyResource(frameTex, curBuffer);
+
 		{
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
+				frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
 			commandList->ResourceBarrier(1, &barrier);
 		}
-
-		commandList->CopyResource(frameTex, curBuffer);
 	} else {
+		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
+		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
+		commandList->CopyTextureRegion(&dest, _outputRect.left, _outputRect.top, 0, &src, nullptr);
+
 		{
 			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+				frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
 			commandList->ResourceBarrier(1, &barrier);
 		}
 
 		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
 		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
-		static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
-		commandList->ClearRenderTargetView(rtvHandle, BLACK, 0, nullptr);
+		{
+			SmallVector<D3D12_RECT, 4> rects;
+			if (_outputRect.left > 0) {
+				rects.push_back({
+					0,
+					0,
+					(LONG)_outputRect.left,
+					(LONG)size.height
+				});
+			}
+			if (_outputRect.top > 0) {
+				rects.push_back({
+					(LONG)_outputRect.left,
+					0,
+					(LONG)_outputRect.right,
+					(LONG)_outputRect.top
+				});
+			}
+			if (_outputRect.right < size.width) {
+				rects.push_back({
+					(LONG)_outputRect.right,
+					0,
+					(LONG)size.width,
+					(LONG)size.height
+				});
+			}
+			if (_outputRect.bottom < size.height) {
+				rects.push_back({
+					(LONG)_outputRect.left,
+					(LONG)_outputRect.bottom,
+					(LONG)_outputRect.right,
+					(LONG)size.height
+				});
+			}
+
+			static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
+			commandList->ClearRenderTargetView(rtvHandle, BLACK, (UINT)rects.size(), rects.data());
+		}
 
 		{
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0);
+				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT, 0);
 			commandList->ResourceBarrier(1, &barrier);
 		}
-
-		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
-		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
-		commandList->CopyTextureRegion(&dest, _outputRect.left, _outputRect.top, 0, &src, nullptr);
-	}
-
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
-		commandList->ResourceBarrier(1, &barrier);
 	}
 
 	hr = commandList->Close();
@@ -480,8 +531,8 @@ void Renderer2::_UpdateOutputRect(Size outputSize) noexcept {
 		_outputRect.bottom = rendererSize.height;
 	}
 
-	assert(_outputRect.left + (LONG)outputSize.width == _outputRect.right);
-	assert(_outputRect.top + (LONG)outputSize.height == _outputRect.bottom);
+	assert(_outputRect.left + outputSize.width == _outputRect.right);
+	assert(_outputRect.top + outputSize.height == _outputRect.bottom);
 }
 
 bool Renderer2::_CheckResult(bool success, std::string_view errorMsg) noexcept {
