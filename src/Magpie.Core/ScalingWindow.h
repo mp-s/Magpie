@@ -40,6 +40,10 @@ public:
 
 	void Render(bool onDeviceLost = false) noexcept;
 
+	std::chrono::steady_clock::time_point GetLastRenderTime() const noexcept {
+		return _lastRenderTime;
+	}
+
 	const ScalingOptions& Options() const noexcept {
 		return _options;
 	}
@@ -76,17 +80,6 @@ public:
 	const class CursorManager& CursorManager() const noexcept {
 		return *_cursorManager;
 	}
-#pragma endregion
-
-	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
-
-	bool IsSrcRepositioning() const noexcept {
-		return _isSrcRepositioning;
-	}
-
-	void RestartAfterSrcRepositioned() noexcept;
-
-	void CleanAfterSrcRepositioned() noexcept;
 
 	bool IsResizing() const noexcept {
 		return _isResizing;
@@ -99,6 +92,21 @@ public:
 	bool IsResizingOrMoving() const noexcept {
 		return _isResizing || _isMoving;
 	}
+#pragma endregion
+
+	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
+
+	void OnCursorVirtualizationStarted() noexcept;
+
+	void OnCursorVirtualizationEnded() noexcept;
+
+	bool IsSrcRepositioning() const noexcept {
+		return _isSrcRepositioning;
+	}
+
+	void RestartAfterSrcRepositioned() noexcept;
+
+	void CleanAfterSrcRepositioned() noexcept;
 
 	winrt::hstring GetLocalizedString(std::wstring_view resName) const;
 
@@ -208,6 +216,8 @@ private:
 
 	// 窗口缩放时切换到全屏缩放或最小化前保存尺寸供以后恢复
 	LONG _lastWindowedRendererWidth = 0;
+
+	std::chrono::steady_clock::time_point _lastRenderTime;
 
 	// 第一帧渲染完成后再显示
 	bool _isFirstFrame = false;

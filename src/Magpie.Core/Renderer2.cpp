@@ -118,7 +118,12 @@ ScalingError Renderer2::Initialize(
 	return ScalingError::NoError;
 }
 
-ComponentState Renderer2::Render(bool waitForGpu, bool* waitingForFirstFrame) noexcept {
+ComponentState Renderer2::Render(
+	HCURSOR hCursor,
+	POINT cursorPos,
+	bool waitForGpu,
+	bool* waitingForFirstFrame
+) noexcept {
 	assert(!waitingForFirstFrame || !*waitingForFirstFrame);
 
 	if (_state != ComponentState::NoError) {
@@ -131,19 +136,23 @@ ComponentState Renderer2::Render(bool waitForGpu, bool* waitingForFirstFrame) no
 	}
 
 	{
-		uint64_t latestProducerFrameNumber = _frameProducer.GetLatestFrameNumber();
-		if (latestProducerFrameNumber == _lastProducerFrameNumber) {
+		const uint64_t latestProducerFrameNumber = _frameProducer.GetLatestFrameNumber();
+		if (latestProducerFrameNumber == 0) {
 			if (waitingForFirstFrame && latestProducerFrameNumber == 0) {
 				*waitingForFirstFrame = true;
 			}
-
 			return _state;
-		} else {
-			_lastProducerFrameNumber = latestProducerFrameNumber;
 		}
+
+		if (latestProducerFrameNumber == _lastProducerFrameNumber &&
+			!_cursorDrawer.NeedRedraw(hCursor, cursorPos)) {
+			return _state;
+		}
+
+		_lastProducerFrameNumber = latestProducerFrameNumber;
 	}
 
-	_CheckResult(_RenderImpl(waitForGpu), "_RenderImpl 失败");
+	_CheckResult(_RenderImpl(hCursor, cursorPos, waitForGpu), "_RenderImpl 失败");
 	return _state;
 }
 
@@ -196,6 +205,30 @@ void Renderer2::OnResized(Size size) noexcept {
 	}
 
 	_UpdateOutputRect(outputSize);
+}
+
+void Renderer2::OnMoveStarted() noexcept {
+	_cursorDrawer.OnMoveStarted();
+}
+
+void Renderer2::OnMoveEnded() noexcept {
+	_cursorDrawer.OnMoveEnded();
+}
+
+void Renderer2::OnCursorVirtualizationStarted() noexcept {
+	_cursorDrawer.OnCursorVirtualizationStarted();
+}
+
+void Renderer2::OnCursorVirtualizationEnded() noexcept {
+	_cursorDrawer.OnCursorVirtualizationEnded();
+}
+
+void Renderer2::OnSrcMoveStarted() noexcept {
+	_cursorDrawer.OnSrcMoveStarted();
+}
+
+void Renderer2::OnSrcMoveEnded() noexcept {
+	_cursorDrawer.OnSrcMoveEnded();
 }
 
 void Renderer2::OnMsgDisplayChanged() noexcept {
@@ -373,7 +406,7 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 	return S_OK;
 }
 
-HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
+HRESULT Renderer2::_RenderImpl(HCURSOR hCursor, POINT cursorPos, bool waitForGpu) noexcept {
 	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
 	UINT64 fenceValueToSignal;
@@ -398,28 +431,18 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
-		commandList->ResourceBarrier(1, &barrier);
-	}
-
 	if (Size size = _presenter->GetSize(); _outputRect == Rect{ 0,0,size.width,size.height }) {
-		commandList->CopyResource(frameTex, curBuffer);
-
 		{
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
+				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
 			commandList->ResourceBarrier(1, &barrier);
 		}
-	} else {
-		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
-		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
-		commandList->CopyTextureRegion(&dest, _outputRect.left, _outputRect.top, 0, &src, nullptr);
 
+		commandList->CopyResource(frameTex, curBuffer);
+	} else {
 		{
 			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
 			commandList->ResourceBarrier(1, &barrier);
 		}
 
@@ -466,9 +489,19 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 		{
 			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT, 0);
+				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0);
 			commandList->ResourceBarrier(1, &barrier);
 		}
+
+		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
+		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
+		commandList->CopyTextureRegion(&dest, _outputRect.left, _outputRect.top, 0, &src, nullptr);
+	}
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
+		commandList->ResourceBarrier(1, &barrier);
 	}
 
 	hr = commandList->Close();

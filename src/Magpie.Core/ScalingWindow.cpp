@@ -71,6 +71,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 #endif
 
 	_runtimeError = ScalingError::NoError;
+	_lastRenderTime = {};
 	_isFirstFrame = true;
 	_isResizing = false;
 	_isMoving = false;
@@ -392,6 +393,8 @@ void ScalingWindow::SwitchToolbarState() noexcept {
 }
 
 void ScalingWindow::Render(bool onDeviceLost) noexcept {
+	_lastRenderTime = std::chrono::steady_clock::now();
+
 	bool isSrcRepositioning = false;
 	if (!_UpdateSrcState(isSrcRepositioning)) {
 		Logger::Get().Info("源窗口状态改变");
@@ -402,10 +405,15 @@ void ScalingWindow::Render(bool onDeviceLost) noexcept {
 	// 虽然可以在第一帧渲染完成后再隐藏系统光标，但某些设备上显示窗口时光标状态会变成忙，
 	// 提前隐藏光标可以提高观感。缩放窗口显示后再隐藏光标还可能造成光标闪烁两次，第一次是
 	// 创建 D3D 设备后（可能是 OS bug），第二次是我们隐藏系统光标。
-	_cursorManager->Update();
+	auto [hCursor, cursorPos] = _cursorManager->Update();
+
+	// 转换到渲染器本地坐标系，可能在渲染矩形外
+	cursorPos.x -= _rendererRect.left;
+	cursorPos.y -= _rendererRect.top;
 
 	bool waitingForFirstFrame = false;
-	ComponentState state = _renderer->Render(_shouldWaitForGpu || _isFirstFrame, &waitingForFirstFrame);
+	ComponentState state = _renderer->Render(
+		hCursor, cursorPos, _shouldWaitForGpu || _isFirstFrame, &waitingForFirstFrame);
 	if (state == ComponentState::NoError) {
 		// 第一帧渲染完成后显示缩放窗口
 		if (_isFirstFrame && !waitingForFirstFrame) {
@@ -440,6 +448,14 @@ void ScalingWindow::Render(bool onDeviceLost) noexcept {
 
 void ScalingWindow::OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept {
 	_renderer->OnCursorVisibilityChanged(isVisible, onDestory);
+}
+
+void ScalingWindow::OnCursorVirtualizationStarted() noexcept {
+	_renderer->OnCursorVirtualizationStarted();
+}
+
+void ScalingWindow::OnCursorVirtualizationEnded() noexcept {
+	_renderer->OnCursorVirtualizationEnded();
 }
 
 void ScalingWindow::RestartAfterSrcRepositioned() noexcept {
@@ -546,6 +562,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 			_renderer->OnResizeStarted();
 		} else {
 			_cursorManager->OnMoveStarted();
+			_renderer->OnMoveStarted();
 		}
 
 		if (_options.IsTouchSupportEnabled()) {
@@ -567,6 +584,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 			_renderer->OnResizeEnded();
 		} else {
 			_cursorManager->OnMoveEnded();
+			_renderer->OnMoveEnded();
 		}
 
 		if (!_srcTracker.MoveOnEndResizeMove()) {
@@ -933,9 +951,8 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 			_exclModeMutex.reset();
 		}
 
-		for (wil::unique_hwnd& hWnd : _hwndTouchHoles) {
-			hWnd.reset();
-		}
+		std::fill(_hwndResizeHelpers.begin(), _hwndResizeHelpers.end(), nullptr);
+		std::fill(_hwndTouchHoles.begin(), _hwndTouchHoles.end(), nullptr);
 
 		_cursorManager.reset();
 		Logger::Get().Info("CursorManager 已析构");
@@ -1412,8 +1429,11 @@ bool ScalingWindow::_UpdateSrcState(bool& isSrcRepositioning) noexcept {
 
 		if (_srcTracker.IsMoving()) {
 			_cursorManager->OnSrcMoveStarted();
+			_renderer->OnSrcMoveStarted();
 		} else {
 			_cursorManager->OnSrcMoveEnded();
+			_renderer->OnSrcMoveEnded();
+
 			_EnsureCaptionVisibleOnScreen();
 		}
 

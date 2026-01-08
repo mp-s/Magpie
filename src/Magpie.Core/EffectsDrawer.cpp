@@ -79,7 +79,16 @@ bool EffectsDrawer::Initialize(
 	_effectsDescriptorCpuBase = descriptorCpuHandle;
 	_effectsDescriptorGpuBase = descriptorGpuHandle;
 
-	_outputSize = rendererSize;
+	if (ScalingWindow::Get().Options().IsWindowedMode()) {
+		_outputSize = rendererSize;
+	} else {
+		const float fillScale = std::min(
+			float(rendererSize.width) / inputSize.width,
+			float(rendererSize.height) / inputSize.height
+		);
+		_outputSize.width = std::lroundf(inputSize.width * fillScale);
+		_outputSize.height = std::lroundf(inputSize.height * fillScale);
+	}
 
 	{
 		EffectColorSpace colorSpace = colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?

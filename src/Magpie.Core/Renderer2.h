@@ -24,7 +24,12 @@ public:
 		OverlayOptions& overlayOptions
 	) noexcept;
 
-	ComponentState Render(bool waitForGpu = false, bool* waitingForFirstFrame = nullptr) noexcept;
+	ComponentState Render(
+		HCURSOR hCursor,
+		POINT cursorPos,
+		bool waitForGpu = false,
+		bool* waitingForFirstFrame = nullptr
+	) noexcept;
 
 	const Rect& GetOutputRect() const noexcept {
 		return _outputRect;
@@ -38,6 +43,18 @@ public:
 
 	void OnResized(Size size) noexcept;
 
+	void OnMoveStarted() noexcept;
+
+	void OnMoveEnded() noexcept;
+
+	void OnCursorVirtualizationStarted() noexcept;
+
+	void OnCursorVirtualizationEnded() noexcept;
+
+	void OnSrcMoveStarted() noexcept;
+
+	void OnSrcMoveEnded() noexcept;
+
 	void OnMsgDisplayChanged() noexcept;
 
 	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
@@ -49,7 +66,7 @@ private:
 
 	HRESULT _UpdateColorSpace() noexcept;
 
-	HRESULT _RenderImpl(bool waitForGpu = false) noexcept;
+	HRESULT _RenderImpl(HCURSOR hCursor, POINT cursorPos, bool waitForGpu = false) noexcept;
 
 	void _UpdateOutputRect(Size outputSize) noexcept;
 

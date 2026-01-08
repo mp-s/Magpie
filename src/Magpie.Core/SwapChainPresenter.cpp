@@ -317,7 +317,7 @@ HRESULT SwapChainPresenter::OnResizeEnded() noexcept {
 	_bufferCount = _graphicContext->GetMaxInFlightFrameCount() + 1;
 
 	if (_bufferCount != oldBufferCount) {
-		// 调用此方法前不会等待 GPU
+		// 调用此方法前没等待 GPU
 		HRESULT hr = _graphicContext->WaitForGpu();
 		if (FAILED(hr)) {
 			Logger::Get().ComError("GraphicsContext::WaitForGPU", hr);

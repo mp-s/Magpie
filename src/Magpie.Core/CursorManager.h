@@ -12,7 +12,7 @@ public:
 
 	~CursorManager() noexcept;
 
-	void Update() noexcept;
+	std::pair<HCURSOR, POINT> Update() noexcept;
 
 	void OnResizeStarted() noexcept;
 
@@ -36,16 +36,16 @@ public:
 
 	// 光标不在缩放窗口上或隐藏时为 NULL
 	HCURSOR CursorHandle() const noexcept {
-		return _hCursor;
+		return NULL;
 	}
 
 	// 屏幕坐标
 	POINT CursorPos() const noexcept {
-		return _cursorPos;
+		return {};
 	}
 
 	bool IsCursorCaptured() const noexcept {
-		return _isUnderCapture;
+		return _isVirtualized;
 	}
 
 	bool IsCursorCapturedOnForeground() const noexcept {
@@ -97,9 +97,9 @@ private:
 
 	void _UpdateCursorPos() noexcept;
 
-	void _StartCapture(POINT& cursorPos) noexcept;
+	void _StartVirtualization(POINT& cursorPos) noexcept;
 
-	bool _StopCapture(POINT& cursorPos, bool onDestroy = false) noexcept;
+	bool _StopVirtualization(POINT& cursorPos, bool onDestroy = false) noexcept;
 
 	void _SetClipCursor(const RECT& clipRect, bool is3DGameMode = false) noexcept;
 
@@ -133,7 +133,7 @@ private:
 	bool _isSrcMoving = false;
 	bool _isSrcFocused = false;
 
-	bool _isUnderCapture = false;
+	bool _isVirtualized = false;
 	// 当缩放后的光标位置在交换链窗口上且没有被其他窗口挡住时应绘制光标
 	bool _shouldDrawCursor = false;
 	
