@@ -1,16 +1,9 @@
 #pragma once
 #include "EffectDrawerBase.h"
-#include "SmallVector.h"
 
 namespace Magpie {
 
 class GraphicsContext;
-
-enum class EffectColorSpace {
-	linear_sRGB,
-	sRGB,
-	scRGB
-};
 
 class CatmullRomEffectDrawer : public EffectDrawerBase {
 public:

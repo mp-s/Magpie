@@ -172,9 +172,10 @@ void ScalingRuntime::_ScalingThreadProc() noexcept {
 			const auto now = steady_clock::now();
 			// 限制检测光标移动的频率
 			const milliseconds timeout(scalingWindow.Options().Is3DGameMode() ? 8 : 2);
-			const nanoseconds rest = timeout - (now - scalingWindow.GetLastRenderTime());
-			if (rest.count() <= 0) {
+			nanoseconds rest = timeout - (now - scalingWindow.GetLastRenderTime());
+			if (rest < 1us) {
 				scalingWindow.Render();
+				rest = timeout;
 			}
 			
 			// 值为 1000000

@@ -22,6 +22,9 @@
     <Filter Include="EffectDrawer">
       <UniqueIdentifier>{ae93c055-e8c1-41c3-ba76-3422dac27328}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Services">
+      <UniqueIdentifier>{1ca5aed2-f451-476c-92cb-a0a4d6f3412e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
@@ -171,6 +174,21 @@
     <ClInclude Include="CursorDrawer2.h">
       <Filter>Render</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderEffectDrawer.h">
+      <Filter>EffectDrawer</Filter>
+    </ClInclude>
+    <ClInclude Include="include\EffectInfo.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ShaderEffectParser.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderEffectCompilerService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
+    <ClInclude Include="ShaderEffectDesc.h">
+      <Filter>EffectDrawer</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -291,6 +309,13 @@
     </ClCompile>
     <ClCompile Include="CursorDrawer2.cpp">
       <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderEffectDrawer.cpp">
+      <Filter>EffectDrawer</Filter>
+    </ClCompile>
+    <ClCompile Include="ShaderEffectParser.cpp" />
+    <ClCompile Include="ShaderEffectCompilerService.cpp">
+      <Filter>Services</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -1,6 +1,6 @@
 [requires]
-fmt/12.0.0
-spdlog/1.16.0
+fmt/12.1.0
+spdlog/1.17.0
 parallel-hashmap/2.0.0
 rapidjson/cci.20230929
 kuba-zip/0.3.2

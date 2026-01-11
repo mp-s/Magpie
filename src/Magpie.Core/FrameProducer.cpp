@@ -331,7 +331,8 @@ bool FrameProducer::_Initialize(
 		_dispatcher = dqc.DispatcherQueue();
 	}
 
-	const uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
+	const ScalingOptions& options = ScalingWindow::Get().Options();
+	const uint32_t maxInFlightFrameCount = options.maxProducerInFlightFrames;
 	if (!_graphicsContext.InitializeAfterCopyDevice(
 		maxInFlightFrameCount,
 		D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
@@ -346,38 +347,6 @@ bool FrameProducer::_Initialize(
 	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
 		Logger::Get().Error("初始化 GraphicsCaptureFrameSource 失败");
 		return false;
-	}
-
-	{
-		std::optional<float> maxFrameRate;
-		if (!_frameSource->ShouldWaitMessageForNewFrame()) {
-			// 某些捕获方式不会限制捕获帧率，因此将捕获帧率限制为屏幕刷新率
-			const HMONITOR hMon = hMonSrc;
-
-			MONITORINFOEX mi{ { sizeof(MONITORINFOEX) } };
-			GetMonitorInfo(hMon, &mi);
-
-			DEVMODE dm{ .dmSize = sizeof(DEVMODE) };
-			EnumDisplaySettings(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm);
-
-			if (dm.dmDisplayFrequency > 0) {
-				Logger::Get().Info(fmt::format("屏幕刷新率: {}", dm.dmDisplayFrequency));
-				maxFrameRate = float(dm.dmDisplayFrequency);
-			}
-		}
-
-		const ScalingOptions& options = ScalingWindow::Get().Options();
-		if (options.maxFrameRate) {
-			if (!maxFrameRate || *options.maxFrameRate < *maxFrameRate) {
-				maxFrameRate = options.maxFrameRate;
-			}
-		}
-
-		// 测试着色器性能时最小帧率应设为无限大，但由于 /fp:fast 下无限大不可靠，因此改为使用 max()，
-		// 和无限大效果相同。
-		const float minFrameRate = options.IsBenchmarkMode()
-			? std::numeric_limits<float>::max() : options.minFrameRate;
-		_stepTimer.Initialize(minFrameRate, maxFrameRate);
 	}
 
 	{
@@ -408,6 +377,13 @@ bool FrameProducer::_Initialize(
 	}
 
 	_monitorThread = std::thread(&FrameProducer::_MonitorThreadProc, this);
+
+	if (options.IsBenchmarkMode()) {
+		// 不要使用无限大，/fp:fast 下无限大值不可靠
+		_stepTimer.Initialize(std::numeric_limits<float>::max(), std::nullopt);
+	} else {
+		_stepTimer.Initialize(options.minFrameRate, options.maxFrameRate);
+	}
 
 	// 最后启动捕获以尽可能推迟显示黄色边框 (Win10) 或禁用圆角 (Win11)
 	if (!_frameSource->Start()) {

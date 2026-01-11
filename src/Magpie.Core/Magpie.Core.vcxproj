@@ -69,6 +69,11 @@
     <ClInclude Include="ExclModeHelper.h" />
     <ClInclude Include="FrameProducer.h" />
     <ClInclude Include="FrameSourceBase.h" />
+    <ClInclude Include="include\EffectInfo.h" />
+    <ClInclude Include="include\ShaderEffectParser.h" />
+    <ClInclude Include="ShaderEffectCompilerService.h" />
+    <ClInclude Include="ShaderEffectDesc.h" />
+    <ClInclude Include="ShaderEffectDrawer.h" />
     <ClInclude Include="GDIFrameSource.h" />
     <ClInclude Include="GraphicsCaptureFrameSource.h" />
     <ClInclude Include="GraphicsContext.h" />
@@ -123,6 +128,8 @@
     <ClCompile Include="ExclModeHelper.cpp" />
     <ClCompile Include="FrameProducer.cpp" />
     <ClCompile Include="FrameSourceBase.cpp" />
+    <ClCompile Include="ShaderEffectCompilerService.cpp" />
+    <ClCompile Include="ShaderEffectDrawer.cpp" />
     <ClCompile Include="GDIFrameSource.cpp" />
     <ClCompile Include="GraphicsCaptureFrameSource.cpp" />
     <ClCompile Include="GraphicsContext.cpp" />
@@ -142,6 +149,7 @@
     <ClCompile Include="ScalingWindow.cpp" />
     <ClCompile Include="ScreenshotHelper.cpp" />
     <ClCompile Include="FrameRingBuffer.cpp" />
+    <ClCompile Include="ShaderEffectParser.cpp" />
     <ClCompile Include="SrcTracker.cpp" />
     <ClCompile Include="StepTimer.cpp" />
     <ClCompile Include="AdaptivePresenter.cpp" />

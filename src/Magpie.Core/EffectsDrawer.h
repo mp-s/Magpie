@@ -1,5 +1,6 @@
 #pragma once
 #include "CatmullRomEffectDrawer.h"
+#include "SmallVector.h"
 
 namespace Magpie {
 

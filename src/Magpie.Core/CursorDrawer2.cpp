@@ -11,17 +11,18 @@ bool CursorDrawer2::Initialize(GraphicsContext& graphicsContext) noexcept {
 	return true;
 }
 
-bool CursorDrawer2::NeedRedraw(HCURSOR& hCursor, POINT cursorPos) const noexcept {
-	bool isCursorActive = false;
+bool CursorDrawer2::NeedRedraw(HCURSOR& /*hCursor*/, POINT /*cursorPos*/) const noexcept {
+	/*bool isCursorActive = false;
 	_GetCursorState(hCursor, cursorPos, isCursorActive);
 
 	// 检查光标是否在视口内
 	
 	// 光标形状或位置变化时需要重新绘制
-	return hCursor != _lastCursorHandle || (hCursor && cursorPos != _lastCursorPos);
+	return hCursor != _lastCursorHandle || (hCursor && cursorPos != _lastCursorPos);*/
+	return false;
 }
 
-void CursorDrawer2::Draw(HCURSOR hCursor, POINT cursorPos) noexcept {
+void CursorDrawer2::Draw(HCURSOR /*hCursor*/, POINT /*cursorPos*/) noexcept {
 
 }
 
