@@ -32,7 +32,7 @@ static void SetGpuPriority() noexcept {
 ScalingError Renderer2::Initialize(
 	HWND hwndAttach,
 	HMONITOR hMonitor,
-	Size size,
+	const RECT& rendererRect,
 	const RECT& srcRect,
 	OverlayOptions& /*overlayOptions*/
 ) noexcept {
@@ -91,18 +91,18 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
+	const Size rendererSize = {
+		uint32_t(rendererRect.right - rendererRect.left),
+		uint32_t(rendererRect.bottom - rendererRect.top)
+	};
+
 	Size outputSize;
 	SimpleTask<bool> task;
 	_frameProducer.InitializeAsync(
-		_graphicsContext, _colorInfo, hMonitor, srcRect, size, outputSize, task);
-
-	if (!_cursorDrawer.Initialize(_graphicsContext)) {
-		Logger::Get().Error("CursorDrawer2::Initialize 失败");
-		return ScalingError::ScalingFailedGeneral;
-	}
+		_graphicsContext, _colorInfo, hMonitor, srcRect, rendererSize, outputSize, task);
 
 	_presenter = std::make_unique<SwapChainPresenter>();
-	if (!_presenter->Initialize(_graphicsContext, hwndAttach, size, _colorInfo)) {
+	if (!_presenter->Initialize(_graphicsContext, hwndAttach, rendererSize, _colorInfo)) {
 		Logger::Get().Error("SwapChainPresenter::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -114,6 +114,17 @@ ScalingError Renderer2::Initialize(
 	}
 
 	_UpdateOutputRect(outputSize);
+
+	const RECT destRect = {
+		rendererRect.left + (LONG)_outputRect.left,
+		rendererRect.top + (LONG)_outputRect.top,
+		rendererRect.left + (LONG)_outputRect.right,
+		rendererRect.top + (LONG)_outputRect.bottom
+	};
+	if (!_cursorDrawer.Initialize(_graphicsContext, destRect)) {
+		Logger::Get().Error("CursorDrawer2::Initialize 失败");
+		return ScalingError::ScalingFailedGeneral;
+	}
 
 	return ScalingError::NoError;
 }
@@ -145,14 +156,14 @@ ComponentState Renderer2::Render(
 		}
 
 		if (latestProducerFrameNumber == _lastProducerFrameNumber &&
-			!_cursorDrawer.NeedRedraw(hCursor, cursorPos)) {
+			!_cursorDrawer.CheckForRedraw(hCursor, cursorPos)) {
 			return _state;
 		}
 
 		_lastProducerFrameNumber = latestProducerFrameNumber;
 	}
 
-	_CheckResult(_RenderImpl(hCursor, cursorPos, waitForGpu), "_RenderImpl 失败");
+	_CheckResult(_RenderImpl(waitForGpu), "_RenderImpl 失败");
 	return _state;
 }
 
@@ -229,6 +240,10 @@ void Renderer2::OnSrcMoveStarted() noexcept {
 
 void Renderer2::OnSrcMoveEnded() noexcept {
 	_cursorDrawer.OnSrcMoveEnded();
+}
+
+void Renderer2::OnDestRectChanged(const RECT& destRect) noexcept {
+	_cursorDrawer.OnDestRectChanged(destRect);
 }
 
 void Renderer2::OnMsgDisplayChanged() noexcept {
@@ -406,7 +421,7 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 	return S_OK;
 }
 
-HRESULT Renderer2::_RenderImpl(HCURSOR /*hCursor*/, POINT /*cursorPos*/, bool waitForGpu) noexcept {
+HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
 	ID3D12Resource* curBuffer;
 	UINT64 fenceValueToSignal;

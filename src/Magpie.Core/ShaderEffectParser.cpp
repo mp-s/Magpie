@@ -50,7 +50,7 @@ private:
 	std::wstring _localDir;
 };
 
-bool ShaderEffectParser::ParseForInfo(std::string&& name, std::string&& source, EffectInfo& effectInfo) noexcept {
+bool ShaderEffectParser::ParseForInfo(std::string&& name, std::string&& /*source*/, EffectInfo& effectInfo) noexcept {
 	effectInfo.name = std::move(name);
 
 	return false;
@@ -58,13 +58,14 @@ bool ShaderEffectParser::ParseForInfo(std::string&& name, std::string&& source, 
 
 bool ShaderEffectParser::ParseForDesc(
 	std::string&& name,
-	std::string&& source,
+	std::string&& /*source*/,
 	std::string&& workingFolder,
-	const ShaderEffectParserOptions& options,
+	const ShaderEffectParserOptions& /*options*/,
 	struct ShaderEffectDesc& effectDesc,
 	ShaderEffectSource& effectSource
 ) noexcept {
 	effectDesc.name = std::move(name);
+	effectSource.workingFolder = std::move(workingFolder);
 	return false;
 }
 

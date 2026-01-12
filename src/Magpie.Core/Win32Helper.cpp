@@ -231,7 +231,7 @@ int16_t Win32Helper::AdvancedWindowHitTest(HWND hWnd, POINT ptScreen, UINT timeo
 
 			// 检查是否在窗口内
 			RECT windowRect;
-			if (!GetWindowRect(hWnd, &windowRect) || !PtInRect(&windowRect, data->ptScreen)) {
+			if (!GetWindowRect(hWnd, &windowRect) || !PtInRect(windowRect, data->ptScreen)) {
 				return TRUE;
 			}
 

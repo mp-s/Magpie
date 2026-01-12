@@ -134,7 +134,7 @@ private:
 	bool _isSrcFocused = false;
 
 	bool _isVirtualized = false;
-	// 当缩放后的光标位置在交换链窗口上且没有被其他窗口挡住时应绘制光标
+	// 当缩放后的光标位置在渲染矩形内且没有被其他窗口挡住时应绘制光标
 	bool _shouldDrawCursor = false;
 	
 	bool _isCapturedOnForeground = false;

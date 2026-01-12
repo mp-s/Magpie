@@ -1049,49 +1049,43 @@ void CursorManager::_ClipCursorOnSrcMoving() noexcept {
 }
 
 void CursorManager::_UpdateCursorPos() noexcept {
-	if (_shouldDrawCursor) {
-		CURSORINFO ci{ .cbSize = sizeof(CURSORINFO) };
-		if (!GetCursorInfo(&ci)) {
-			_hCursor = NULL;
-			return;
-		}
+	CURSORINFO ci = { .cbSize = sizeof(CURSORINFO) };
+	if (!_shouldDrawCursor || !GetCursorInfo(&ci)) {
+		_hCursor = NULL;
+		// 光标在渲染矩形外也检索光标位置，叠加层可能需要
+		GetCursorPos(&_cursorPos);
+		return;
+	}
 
-		if (ci.flags == CURSOR_SHOWING) {
-			if (ScalingWindow::Get().Options().IsWindowedMode()) {
-				_hCursor = ci.hCursor;
-			} else {
-				// 全屏模式缩放时我们阻止了源窗口四周可调整尺寸的区域，这使得鼠标从客户区移到边框
-				// 的过程中会有一瞬间的闪烁。为了解决这个问题，这里特别处理调整尺寸时的光标形状。
-				if (ci.hCursor == _hDiagonalSize1Cursor || ci.hCursor == _hDiagonalSize2Cursor ||
-					ci.hCursor == _hHorizontalSizeCursor || ci.hCursor == _hVerticalSizeCursor) {
-					if (_hCursor != ci.hCursor) {
-						using std::chrono::steady_clock;
+	_cursorPos = ci.ptScreenPos;
 
-						if (_sizeCursorStartTime == steady_clock::time_point{}) {
-							_sizeCursorStartTime = steady_clock::now();
-						} else {
-							// 延迟 50ms 更新以防止闪烁
-							if (steady_clock::now() - _sizeCursorStartTime > 50ms) {
-								_hCursor = ci.hCursor;
-							}
-						}
-					}
+	if (ci.flags != CURSOR_SHOWING) {
+		_hCursor = NULL;
+		return;
+	}
+
+	if (ScalingWindow::Get().Options().IsWindowedMode()) {
+		_hCursor = ci.hCursor;
+	} else {
+		// 全屏模式缩放时我们阻止了源窗口四周可调整尺寸的区域，这使得鼠标从客户区移到边框
+		// 的过程中会有一瞬间的闪烁。为了解决这个问题，这里特别处理调整尺寸时的光标形状。
+		if (ci.hCursor == _hDiagonalSize1Cursor || ci.hCursor == _hDiagonalSize2Cursor ||
+			ci.hCursor == _hHorizontalSizeCursor || ci.hCursor == _hVerticalSizeCursor) {
+			if (_hCursor != ci.hCursor) {
+				using std::chrono::steady_clock;
+
+				if (_sizeCursorStartTime == steady_clock::time_point{}) {
+					_sizeCursorStartTime = steady_clock::now();
 				} else {
-					_sizeCursorStartTime = {};
-					_hCursor = ci.hCursor;
+					// 延迟 50ms 更新以防止闪烁
+					if (steady_clock::now() - _sizeCursorStartTime > 50ms) {
+						_hCursor = ci.hCursor;
+					}
 				}
 			}
 		} else {
-			_hCursor = NULL;
-		}
-
-		_cursorPos = ci.ptScreenPos;
-	} else {
-		_hCursor = NULL;
-
-		// 光标在缩放窗口外也检索光标位置，叠加层可能需要
-		if (!GetCursorPos(&_cursorPos)) {
-			return;
+			_sizeCursorStartTime = {};
+			_hCursor = ci.hCursor;
 		}
 	}
 

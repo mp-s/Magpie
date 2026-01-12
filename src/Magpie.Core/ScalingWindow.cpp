@@ -318,7 +318,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	ScalingError error = _renderer->Initialize(
 		_hwndRenderer,
 		_srcTracker.Monitor(),
-		Size{ uint32_t(_rendererRect.right - _rendererRect.left),uint32_t(_rendererRect.bottom - _rendererRect.top) },
+		_rendererRect,
 		_srcTracker.SrcRect(),
 		_options.overlayOptions
 	);
@@ -407,10 +407,6 @@ void ScalingWindow::Render(bool onDeviceLost) noexcept {
 	// 创建 D3D 设备后（可能是 OS bug），第二次是我们隐藏系统光标。
 	auto [hCursor, cursorPos] = _cursorManager->Update();
 
-	// 转换到渲染器本地坐标系，可能在渲染矩形外
-	cursorPos.x -= _rendererRect.left;
-	cursorPos.y -= _rendererRect.top;
-
 	bool waitingForFirstFrame = false;
 	ComponentState state = _renderer->Render(
 		hCursor, cursorPos, _shouldWaitForGpu || _isFirstFrame, &waitingForFirstFrame);
@@ -429,7 +425,7 @@ void ScalingWindow::Render(bool onDeviceLost) noexcept {
 			ScalingError error = _renderer->Initialize(
 				_hwndRenderer,
 				_srcTracker.Monitor(),
-				Size{ uint32_t(_rendererRect.right - _rendererRect.left),uint32_t(_rendererRect.bottom - _rendererRect.top) },
+				_rendererRect,
 				_srcTracker.SrcRect(),
 				_options.overlayOptions
 			);
@@ -1366,6 +1362,7 @@ void ScalingWindow::_HandleResize() noexcept {
 		_rendererRect.top + outputRect.bottom
 	};
 	_cursorManager->OnResized(destRect, _rendererRect);
+	_renderer->OnDestRectChanged(destRect);
 
 	Render();
 }
@@ -1379,6 +1376,7 @@ void ScalingWindow::_HandleMove() noexcept {
 		_rendererRect.top + outputRect.bottom
 	};
 	_cursorManager->OnMoved(destRect, _rendererRect);
+	_renderer->OnDestRectChanged(destRect);
 }
 
 bool ScalingWindow::_UpdateSrcState(bool& isSrcRepositioning) noexcept {

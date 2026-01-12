@@ -19,7 +19,7 @@ public:
 	ScalingError Initialize(
 		HWND hwndAttach,
 		HMONITOR hMonitor,
-		Size size,
+		const RECT& rendererRect,
 		const RECT& srcRect,
 		OverlayOptions& overlayOptions
 	) noexcept;
@@ -55,6 +55,8 @@ public:
 
 	void OnSrcMoveEnded() noexcept;
 
+	void OnDestRectChanged(const RECT& destRect) noexcept;
+
 	void OnMsgDisplayChanged() noexcept;
 
 	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
@@ -66,7 +68,7 @@ private:
 
 	HRESULT _UpdateColorSpace() noexcept;
 
-	HRESULT _RenderImpl(HCURSOR hCursor, POINT cursorPos, bool waitForGpu = false) noexcept;
+	HRESULT _RenderImpl(bool waitForGpu = false) noexcept;
 
 	void _UpdateOutputRect(Size outputSize) noexcept;
 

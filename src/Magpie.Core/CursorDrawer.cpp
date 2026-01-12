@@ -92,7 +92,7 @@ void CursorDrawer::Draw(ID3D11Texture2D* backBuffer, POINT drawOffset) noexcept 
 
 	if (isCursorActive) {
 		// 启用自动隐藏时光标形状或位置变化后应记录新的形状、位置和变化时间。位置由
-		// _lastCursorPos 记录。
+		// _curCursorPos 记录。
 		_lastRawCursorHandle = scalingWindow.CursorManager().CursorHandle();
 		_lastCursorActiveTime = std::chrono::steady_clock::now();
 	}

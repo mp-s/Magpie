@@ -33,6 +33,10 @@ struct Win32Helper {
 		return result.left < result.right && result.top < result.bottom;
 	}
 
+	static bool PtInRect(const RECT& rect, POINT pt) {
+		return pt.x >= rect.left && pt.x < rect.right && pt.y >= rect.top && pt.y < rect.bottom;
+	}
+
 	static std::wstring GetWindowClassName(HWND hWnd) noexcept;
 
 	static std::wstring GetWindowTitle(HWND hWnd) noexcept;
