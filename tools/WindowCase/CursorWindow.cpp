@@ -1,6 +1,26 @@
 #include "pch.h"
 #include "CursorWindow.h"
 
+// https://learn.microsoft.com/en-us/windows/win32/menurc/about-cursors
+static const std::pair<LPCWSTR, const wchar_t*> STANDARD_CURSORS[] = {
+	{IDC_ARROW, L"Arrow"},
+	{IDC_IBEAM, L"IBeam"},
+	{IDC_WAIT, L"Wait"},
+	{IDC_CROSS, L"Crosshair"},
+	{IDC_UPARROW, L"UpArrow"},
+	{IDC_SIZENWSE, L"SizeNWSE"},
+	{IDC_SIZENESW, L"SizeNESW"},
+	{IDC_SIZEWE, L"SizeWE"},
+	{IDC_SIZENS, L"SizeNS"},
+	{IDC_SIZEALL, L"SizeAll"},
+	{IDC_NO, L"No"},
+	{IDC_HAND, L"Hand"},
+	{IDC_APPSTARTING, L"AppStarting"},
+	{IDC_HELP, L"Help"},
+	{IDC_PIN, L"Pin"},
+	{IDC_PERSON, L"Person"}
+};
+
 static wil::unique_hcursor CreateCursorFromBitmaps(HBITMAP hColorBitmap, HBITMAP hMaskBitmap) noexcept {
 	ICONINFO iconInfo = {
 		.fIcon = FALSE,
@@ -97,8 +117,6 @@ static wil::unique_hcursor CreateMaskedColorCursor() noexcept {
 
 bool CursorWindow::Create() noexcept {
 	static const wchar_t* WINDOW_NAME = L"CursorWindow";
-	
-	_hCursor = CreateColorCursor();
 
 	WNDCLASSEXW wcex = {
 		.cbSize = sizeof(WNDCLASSEX),
@@ -142,17 +160,22 @@ LRESULT CursorWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) no
 		const LRESULT ret = base_type::_MessageHandler(msg, wParam, lParam);
 
 		const HMODULE hInst = wil::GetModuleInstanceHandle();
-		_hwndBtn1 = CreateWindow(L"BUTTON", L"彩色光标",
+		_hwndBtn1 = CreateWindow(L"BUTTON", nullptr,
 			WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, Handle(), (HMENU)1, hInst, 0);
-		_hwndBtn2 = CreateWindow(L"BUTTON", L"单色光标",
+		_hwndBtn2 = CreateWindow(L"BUTTON", L"彩色光标",
 			WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, Handle(), (HMENU)2, hInst, 0);
-		_hwndBtn3 = CreateWindow(L"BUTTON", L"彩色掩码光标",
+		_hwndBtn3 = CreateWindow(L"BUTTON", L"单色光标",
 			WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, Handle(), (HMENU)3, hInst, 0);
+		_hwndBtn4 = CreateWindow(L"BUTTON", L"彩色掩码光标",
+			WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, Handle(), (HMENU)4, hInst, 0);
 		_UpdateButtonPos();
 
 		SendMessage(_hwndBtn1, WM_SETFONT, (WPARAM)_UIFont(), TRUE);
 		SendMessage(_hwndBtn2, WM_SETFONT, (WPARAM)_UIFont(), TRUE);
 		SendMessage(_hwndBtn3, WM_SETFONT, (WPARAM)_UIFont(), TRUE);
+		SendMessage(_hwndBtn4, WM_SETFONT, (WPARAM)_UIFont(), TRUE);
+
+		_UpdateStandardCursor(true);
 
 		return ret;
 	}
@@ -160,11 +183,14 @@ LRESULT CursorWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) no
 	{
 		if (HIWORD(wParam) == BN_CLICKED) {
 			const WORD btnId = LOWORD(wParam);
-			if (btnId == 1) {
+
+			_UpdateStandardCursor(btnId == 1);
+
+			if (btnId == 2) {
 				_hCursor = CreateColorCursor();
-			} else if (btnId == 2) {
+			} else if (btnId == 3) {
 				_hCursor = CreateMonochromeCursor();
-			} else {
+			} else if (btnId == 4) {
 				_hCursor = CreateMaskedColorCursor();
 			}
 
@@ -227,16 +253,36 @@ void CursorWindow::_UpdateButtonPos() noexcept {
 	GetClientRect(Handle(), &clientRect);
 
 	const double dpiScale = _DpiScale();
-	const SIZE btnSize = { std::lround(160 * dpiScale),std::lround(40 * dpiScale) };
-	const LONG spacing = std::lround(8 * dpiScale);
+	const SIZE btnSize = { std::lround(180 * dpiScale),std::lround(40 * dpiScale) };
+	const LONG halfSpacing = std::lround(4 * dpiScale);
 
 	const LONG btnLeft = ((clientRect.right - clientRect.left) - btnSize.cx) / 2;
 	const LONG windowCenterY = (clientRect.bottom - clientRect.top) / 2;
 
-	SetWindowPos(_hwndBtn1, NULL, btnLeft, windowCenterY - 3 * btnSize.cy / 2 - spacing,
+	SetWindowPos(_hwndBtn1, NULL, btnLeft, windowCenterY - 2 * btnSize.cy - halfSpacing * 3,
 		btnSize.cx, btnSize.cy, SWP_NOACTIVATE);
-	SetWindowPos(_hwndBtn2, NULL, btnLeft, windowCenterY - btnSize.cy / 2,
+	SetWindowPos(_hwndBtn2, NULL, btnLeft, windowCenterY - btnSize.cy - halfSpacing,
 		btnSize.cx, btnSize.cy, SWP_NOACTIVATE);
-	SetWindowPos(_hwndBtn3, NULL, btnLeft, windowCenterY + btnSize.cy / 2 + spacing,
+	SetWindowPos(_hwndBtn3, NULL, btnLeft, windowCenterY + halfSpacing,
 		btnSize.cx, btnSize.cy, SWP_NOACTIVATE);
+	SetWindowPos(_hwndBtn4, NULL, btnLeft, windowCenterY + btnSize.cy + halfSpacing * 3,
+		btnSize.cx, btnSize.cy, SWP_NOACTIVATE);
+}
+
+void CursorWindow::_UpdateStandardCursor(bool useStandardCursor) noexcept {
+	if (useStandardCursor) {
+		// 切换标准光标
+		if (_curStandardCursorIdx == std::numeric_limits<uint32_t>::max()) {
+			_curStandardCursorIdx = 0;
+		} else {
+			_curStandardCursorIdx = (_curStandardCursorIdx + 1) % (uint32_t)std::size(STANDARD_CURSORS);
+		}
+
+		_hCursor.reset(LoadCursor(NULL, STANDARD_CURSORS[_curStandardCursorIdx].first));
+
+		SetWindowText(_hwndBtn1, (L"系统光标 - "s + STANDARD_CURSORS[_curStandardCursorIdx].second).c_str());
+	} else if (_curStandardCursorIdx != std::numeric_limits<uint32_t>::max()) {
+		_curStandardCursorIdx = std::numeric_limits<uint32_t>::max();
+		SetWindowText(_hwndBtn1, L"系统光标");
+	}
 }
