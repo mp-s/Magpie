@@ -78,7 +78,12 @@ private:
 		Size resourceSize;
 	};
 
-	const _CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos) noexcept;
+	const _CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
+
+	wil::unique_hcursor _TryResolveStandardCursor(
+		HCURSOR hCursor,
+		uint32_t preferedWidth
+	) const noexcept;
 
 	GraphicsContext* _graphicsContext = nullptr;
 	RECT _destRect{};

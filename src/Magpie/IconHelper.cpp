@@ -181,7 +181,7 @@ static HICON GetHIconOfWnd(HWND hWnd, LONG preferredSize) noexcept {
 	return GetHIconOfWnd(hwndOwner, preferredSize);
 }
 
-SoftwareBitmap IconHelper::ExtractIconFormWnd(HWND hWnd, uint32_t preferredSize) {
+SoftwareBitmap IconHelper::ExtractIconFromWindow(HWND hWnd, uint32_t preferredSize) {
 	if (HICON hIcon = GetHIconOfWnd(hWnd, (LONG)preferredSize)) {
 		return HIcon2SoftwareBitmap(hIcon);
 	}
@@ -269,7 +269,7 @@ SoftwareBitmap IconHelper::ExtractAppSmallIcon() {
 SoftwareBitmap IconHelper::ExtractAppIcon(uint32_t preferredSize) {
 	/// LoadImage 比 SHDefExtractIcon 快两倍左右
 	wil::unique_hicon hIcon((HICON)LoadImage(
-		GetModuleHandle(nullptr),
+		wil::GetModuleInstanceHandle(),
 		MAKEINTRESOURCE(IDI_APP),
 		IMAGE_ICON,
 		preferredSize,

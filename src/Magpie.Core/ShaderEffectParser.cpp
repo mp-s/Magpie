@@ -7,9 +7,9 @@
 namespace Magpie {
 
 // 当前 MagpieFX 版本
-static constexpr uint32_t MAGPIE_FX_VERSION = 4;
+// static constexpr uint32_t MAGPIE_FX_VERSION = 4;
 
-static const char* META_INDICATOR = "//!";
+// static const char* META_INDICATOR = "//!";
 
 class PassInclude : public ID3DInclude {
 public:

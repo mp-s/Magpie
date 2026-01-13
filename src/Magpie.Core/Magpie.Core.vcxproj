@@ -69,6 +69,7 @@
     <ClInclude Include="ExclModeHelper.h" />
     <ClInclude Include="FrameProducer.h" />
     <ClInclude Include="FrameSourceBase.h" />
+    <ClInclude Include="CursorHelper.h" />
     <ClInclude Include="include\EffectInfo.h" />
     <ClInclude Include="include\ShaderEffectParser.h" />
     <ClInclude Include="ShaderEffectCompilerService.h" />
@@ -128,6 +129,7 @@
     <ClCompile Include="ExclModeHelper.cpp" />
     <ClCompile Include="FrameProducer.cpp" />
     <ClCompile Include="FrameSourceBase.cpp" />
+    <ClCompile Include="CursorHelper.cpp" />
     <ClCompile Include="ShaderEffectCompilerService.cpp" />
     <ClCompile Include="ShaderEffectDrawer.cpp" />
     <ClCompile Include="GDIFrameSource.cpp" />
