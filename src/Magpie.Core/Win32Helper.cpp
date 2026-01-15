@@ -314,8 +314,8 @@ bool Win32Helper::ReadFile(const wchar_t* fileName, std::vector<uint8_t>& result
 	DWORD size = GetFileSize(hFile.get(), nullptr);
 	result.resize(size);
 
-	DWORD readed;
-	if (!::ReadFile(hFile.get(), result.data(), size, &readed, nullptr)) {
+	DWORD bytesRead;
+	if (!::ReadFile(hFile.get(), result.data(), size, &bytesRead, nullptr)) {
 		Logger::Get().Error("读取文件失败");
 		return false;
 	}

@@ -9,38 +9,27 @@
 
 namespace Magpie {
 
+using FnGetCursorFrameInfo = HCURSOR WINAPI(
+	HCURSOR hcur,
+	LPWSTR  lpName,
+	int     iFrame,
+	LPDWORD pjifRate,
+	LPINT   pccur
+);
+
+static FnGetCursorFrameInfo* GetCursorFrameInfo = nullptr;
+
 // 系统 DPI 在程序的生命周期内不会改变，而且使用 GetIconInfo 获得的位图尺寸
 // 和此值有关。
 static UINT SYSTEM_DPI;
 
 struct StandardCursorInfo {
 	HCURSOR handle;
-	const wchar_t* regValue;
+	const wchar_t* regValueName;
 	int resId;
 };
 
-// 不包含已废弃的光标, 见 https://learn.microsoft.com/en-us/windows/win32/menurc/about-cursors
-static const StandardCursorInfo STANDARD_CURSORS[] = {
-	{LoadCursor(NULL, IDC_ARROW), L"Arrow", 0},
-	{LoadCursor(NULL, IDC_IBEAM), L"IBeam", 0},
-	// Wait 和 AppStarting 在“指针大小” 为 1 时是动态光标，否则是静态光标
-	{LoadCursor(NULL, IDC_WAIT), L"Wait", 0},
-	{LoadCursor(NULL, IDC_CROSS), L"Crosshair", 0},
-	{LoadCursor(NULL, IDC_UPARROW), L"UpArrow", 0},
-	{LoadCursor(NULL, IDC_SIZENWSE), L"SizeNWSE", 0},
-	{LoadCursor(NULL, IDC_SIZENESW), L"SizeNESW", 0},
-	{LoadCursor(NULL, IDC_SIZEWE), L"SizeWE", 0},
-	{LoadCursor(NULL, IDC_SIZENS), L"SizeNS", 0},
-	{LoadCursor(NULL, IDC_SIZEALL), L"SizeAll", 0},
-	{LoadCursor(NULL, IDC_NO), L"No", 0},
-	{LoadCursor(NULL, IDC_HAND), L"Hand", 0},
-	{LoadCursor(NULL, IDC_APPSTARTING), L"AppStarting", 0},
-	{LoadCursor(NULL, IDC_HELP), L"Help", 0},
-	// Pin 和 Person 只在“指针大小”选项大于 1 时使用注册表中路径，否则使用
-	// user32.dll 中的光标资源，ID 分别是 117 和 118。
-	{LoadCursor(NULL, IDC_PIN), L"Pin", 117},
-	{LoadCursor(NULL, IDC_PERSON), L"Person", 118}
-};
+static std::array<StandardCursorInfo, 16> STANDARD_CURSORS;
 
 static DWORD GetCursorBaseSize() noexcept {
 	DWORD cursorBaseSize = 32;
@@ -59,8 +48,33 @@ bool CursorDrawer2::Initialize(GraphicsContext& graphicsContext, const RECT& des
 	_graphicsContext = &graphicsContext;
 	_destRect = destRect;
 
-	[[maybe_unused]] static Ignore _ = []() {
+	[[maybe_unused]] static Ignore _ = [] {
+		GetCursorFrameInfo = Win32Helper::LoadFunction<FnGetCursorFrameInfo>(
+			L"user32.dll", "GetCursorFrameInfo");
+
 		SYSTEM_DPI = GetDpiForSystem();
+
+		// 不包含已废弃的光标, 见 https://learn.microsoft.com/en-us/windows/win32/menurc/about-cursors
+		STANDARD_CURSORS[0] = { LoadCursor(NULL, IDC_ARROW), L"Arrow", 0 };
+		STANDARD_CURSORS[1] = { LoadCursor(NULL, IDC_IBEAM), L"IBeam", 0 };
+		// Wait 和 AppStarting 在“指针大小” 为 1 时是动态光标，否则是静态光标
+		STANDARD_CURSORS[2] = { LoadCursor(NULL, IDC_WAIT), L"Wait", 0 };
+		STANDARD_CURSORS[3] = { LoadCursor(NULL, IDC_CROSS), L"Crosshair", 0 };
+		STANDARD_CURSORS[4] = { LoadCursor(NULL, IDC_UPARROW), L"UpArrow", 0 };
+		STANDARD_CURSORS[5] = { LoadCursor(NULL, IDC_SIZENWSE), L"SizeNWSE", 0 };
+		STANDARD_CURSORS[6] = { LoadCursor(NULL, IDC_SIZENESW), L"SizeNESW", 0 };
+		STANDARD_CURSORS[7] = { LoadCursor(NULL, IDC_SIZEWE), L"SizeWE", 0 };
+		STANDARD_CURSORS[8] = { LoadCursor(NULL, IDC_SIZENS), L"SizeNS", 0 };
+		STANDARD_CURSORS[9] = { LoadCursor(NULL, IDC_SIZEALL), L"SizeAll", 0 };
+		STANDARD_CURSORS[10] = { LoadCursor(NULL, IDC_NO), L"No", 0 };
+		STANDARD_CURSORS[11] = { LoadCursor(NULL, IDC_HAND), L"Hand", 0 };
+		STANDARD_CURSORS[12] = { LoadCursor(NULL, IDC_APPSTARTING), L"AppStarting", 0 };
+		STANDARD_CURSORS[13] = { LoadCursor(NULL, IDC_HELP), L"Help", 0 };
+		// Pin 和 Person 只在“指针大小”选项大于 1 时使用注册表中路径，否则使用
+		// user32.dll 中的光标资源，ID 分别是 117 和 118。
+		STANDARD_CURSORS[14] = { LoadCursor(NULL, IDC_PIN), L"Pin", 117 };
+		STANDARD_CURSORS[15] = { LoadCursor(NULL, IDC_PERSON), L"Person", 118 };
+
 		return Ignore();
 	}();
 
@@ -153,22 +167,25 @@ static Size CalcCursorSize(
 	Size cursorBmpSize,
 	uint32_t cursorDpi,
 	uint32_t monitorDpi,
-	uint32_t cursorBaseSize/*,
-	const RECT& srcRect,
-	const RECT& destRect*/
+	uint32_t cursorBaseSize
 ) noexcept {
-	/*double cursorScale = ScalingWindow::Get().Options().cursorScaling;
-	if (cursorScale < FLOAT_EPSILON<float>) {
-		// 光标缩放和源窗口相同
-		double xScale = double(destRect.right - destRect.left) / (srcRect.right - srcRect.left);
-		double yScale = double(destRect.bottom - destRect.top) / (srcRect.bottom - srcRect.top);
-		cursorScale = (xScale + yScale) / 2;
-	}*/
-
 	const double scale = (GetSystemMetricsForDpi(SM_CXCURSOR, monitorDpi) * cursorBaseSize) /
 		double(GetSystemMetricsForDpi(SM_CXCURSOR, cursorDpi) * 32);
 	return { (uint32_t)std::lround(cursorBmpSize.width * scale),
 		(uint32_t)std::lround(cursorBmpSize.height * scale) };
+}
+
+static bool GetCursorSizeFromBmps(HBITMAP hColorBmp, HBITMAP hMaskBmp, Size& size) noexcept {
+	BITMAP bmp{};
+	if (!GetObject(hColorBmp ? hColorBmp : hMaskBmp, sizeof(bmp), &bmp)) {
+		Logger::Get().Win32Error("GetObject 失败");
+		return false;
+	}
+
+	size.width = uint32_t(bmp.bmWidth);
+	// 单色光标的掩码位图高度是光标实际高度的两倍
+	size.height = uint32_t(hColorBmp ? bmp.bmHeight : bmp.bmHeight / 2);
+	return true;
 }
 
 const CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
@@ -177,6 +194,15 @@ const CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 	bool isAni
 ) noexcept {
 	assert(hCursor);
+
+	/*if (GetCursorFrameInfo) {
+		DWORD jifRate;
+		int stepCount;
+		HCURSOR hTmpCursor = GetCursorFrameInfo(hCursor, nullptr, 0, &jifRate, &stepCount);
+		if (hTmpCursor && hTmpCursor != hCursor) {
+			hCursor = hTmpCursor;
+		}
+	}*/
 
 	// 检索光标所在屏幕的 DPI
 	const HMONITOR hCurMon = MonitorFromPoint(
@@ -208,8 +234,8 @@ const CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 	wil::unique_hbitmap hColorBmp(iconInfoEx.hbmColor);
 	wil::unique_hbitmap hMaskBmp(iconInfoEx.hbmMask);
 
-	if (!CursorHelper::GetCursorSize(hColorBmp.get(), hMaskBmp.get(), cursorInfo.resourceSize)) {
-		Logger::Get().Error("CursorHelper::GetCursorSize 失败");
+	if (!GetCursorSizeFromBmps(hColorBmp.get(), hMaskBmp.get(), cursorInfo.resourceSize)) {
+		Logger::Get().Error("GetCursorSizeFromBmps 失败");
 		return nullptr;
 	}
 	
@@ -238,8 +264,8 @@ const CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 		wil::unique_hbitmap hMaskBmpDpi96(iconInfoDpi96.hbmMask);
 
 		Size bmpSizeDpi96;
-		if (!CursorHelper::GetCursorSize(hColorBmpDpi96.get(), hMaskBmpDpi96.get(), bmpSizeDpi96)) {
-			Logger::Get().Error("CursorHelper::GetCursorSize 失败");
+		if (!GetCursorSizeFromBmps(hColorBmpDpi96.get(), hMaskBmpDpi96.get(), bmpSizeDpi96)) {
+			Logger::Get().Error("GetCursorSizeFromBmps 失败");
 			return nullptr;
 		}
 
@@ -258,8 +284,21 @@ const CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 		}
 	}
 
-	wil::unique_hcursor hResCursor =
-		_TryResolveStandardCursor(hCursor, cursorInfo.size.width);
+	wil::unique_hcursor hResCursor;
+
+	const auto it1 = std::find_if(
+		STANDARD_CURSORS.begin(),
+		STANDARD_CURSORS.end(),
+		[&](const StandardCursorInfo& info) {
+			return info.handle == hCursor;
+		}
+	);
+	if (it1 == STANDARD_CURSORS.end()) {
+		hResCursor = _TryResolveCursorResource(iconInfoEx, cursorInfo.size.width);
+	} else {
+		hResCursor = _TryResolveStandardCursor(it1->regValueName, it1->resId, cursorInfo.size.width);
+	}
+
 	if (hResCursor) {
 		ICONINFO iconInfo{};
 		if (!GetIconInfo(hCursor, &iconInfo)) {
@@ -269,8 +308,8 @@ const CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 
 		hColorBmp.reset(iconInfo.hbmColor);
 		hMaskBmp.reset(iconInfo.hbmMask);
-		if (!CursorHelper::GetCursorSize(hColorBmp.get(), hMaskBmp.get(), cursorInfo.resourceSize)) {
-			Logger::Get().Error("CursorHelper::GetCursorSize 失败");
+		if (!GetCursorSizeFromBmps(hColorBmp.get(), hMaskBmp.get(), cursorInfo.resourceSize)) {
+			Logger::Get().Error("GetCursorSizeFromBmps 失败");
 			return nullptr;
 		}
 	}
@@ -279,32 +318,69 @@ const CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 		std::move(cursorInfo)).first->second;
 }
 
-wil::unique_hcursor CursorDrawer2::_TryResolveStandardCursor(
-	HCURSOR hCursor,
+wil::unique_hcursor CursorDrawer2::_TryResolveCursorResource(
+	const ICONINFOEX& iconInfoEx,
 	uint32_t preferedWidth
 ) const noexcept {
 	wil::unique_hcursor result;
 
-	const auto it = std::find_if(
-		std::begin(STANDARD_CURSORS),
-		std::end(STANDARD_CURSORS),
-		[&](const StandardCursorInfo& info) {
-			return info.handle == hCursor;
-		}
-	);
-	if (it == std::end(STANDARD_CURSORS)) {
+	if (StrHelper::StrLen(iconInfoEx.szModName) == 0) {
 		return result;
 	}
 
-	if (_cursorBaseSize == 32 && it->resId != 0) {
+	HMODULE hModule = LoadLibraryEx(iconInfoEx.szModName, NULL, LOAD_LIBRARY_AS_DATAFILE);
+	if (hModule) {
+		LPCWSTR resName = iconInfoEx.wResID != 0 ?
+			MAKEINTRESOURCE(iconInfoEx.wResID) : iconInfoEx.szResName;
+		result = CursorHelper::ExtractCursorFromModule(hModule, resName, preferedWidth);
+		FreeLibrary(hModule);
+	} else {
+		Logger::Get().Win32Error("LoadLibraryEx 失败");
+	}
+	
+	return result;
+}
+
+wil::unique_hcursor CursorDrawer2::_TryResolveStandardCursor(
+	const wchar_t* regValueName,
+	int resId,
+	uint32_t preferedWidth
+) const noexcept {
+	wil::unique_hcursor result;
+
+	if (_cursorBaseSize == 32 && resId != 0) {
 		HMODULE hUser32 = GetModuleHandle(L"user32.dll");
 		result = CursorHelper::ExtractCursorFromModule(
-			hUser32, MAKEINTRESOURCE(it->resId), preferedWidth);
+			hUser32, MAKEINTRESOURCE(resId), preferedWidth);
 		if (!result) {
 			Logger::Get().Error("CursorHelper::ExtractCursorFromModule 失败");
 		}
 	} else {
+		wil::unique_bstr regValue;
+		HRESULT hr = wil::reg::get_value_nothrow(
+			HKEY_CURRENT_USER, L"Control Panel\\Cursors", regValueName, &regValue);
+		// 失败不视为错误
+		if (FAILED(hr)) {
+			return result;
+		}
 
+		// 可能为空
+		if (SysStringLen(regValue.get()) == 0) {
+			return result;
+		}
+
+		// 路径中可能包含环境变量字符串
+		std::wstring curPath;
+		hr = wil::ExpandEnvironmentStringsW(regValue.get(), curPath);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("wil::ExpandEnvironmentStringsW 失败", hr);
+			return result;
+		}
+		
+		result = CursorHelper::ExtractCursorFromCurFile(curPath.c_str(), preferedWidth);
+		if (!result) {
+			Logger::Get().Error("CursorHelper::ExtractCursorFromCurFile 失败");
+		}
 	}
 
 	return result;

@@ -80,8 +80,14 @@ private:
 
 	const _CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
 
+	wil::unique_hcursor _TryResolveCursorResource(
+		const ICONINFOEX& iconInfoEx,
+		uint32_t preferedWidth
+	) const noexcept;
+
 	wil::unique_hcursor _TryResolveStandardCursor(
-		HCURSOR hCursor,
+		const wchar_t* regValueName,
+		int resId,
 		uint32_t preferedWidth
 	) const noexcept;
 

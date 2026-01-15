@@ -5,22 +5,14 @@
 
 namespace Magpie {
 
-bool CursorHelper::GetCursorSize(HBITMAP hColorBmp, HBITMAP hMaskBmp, Size& size) noexcept {
-	BITMAP bmp{};
-	if (!GetObject(hColorBmp ? hColorBmp : hMaskBmp, sizeof(bmp), &bmp)) {
-		Logger::Get().Win32Error("GetObject 失败");
-		return false;
-	}
-
-	size.width = uint32_t(bmp.bmWidth);
-	// 单色光标的掩码位图高度是光标实际高度的两倍
-	size.height = uint32_t(hColorBmp ? bmp.bmHeight : bmp.bmHeight / 2);
-	return true;
+static WORD GetRealIconSize(WORD size) noexcept {
+	// 0 等价于 256
+	return size == 0 ? (WORD)256 : size;
 }
 
 wil::unique_hcursor CursorHelper::ExtractCursorFromModule(
 	HMODULE hModule,
-	LPWSTR resName,
+	LPCWSTR resName,
 	uint32_t preferredWidth
 ) noexcept {
 	HRSRC hRes = FindResource(hModule, resName, RT_GROUP_CURSOR);
@@ -57,21 +49,21 @@ wil::unique_hcursor CursorHelper::ExtractCursorFromModule(
 #pragma pack(pop)
 
 	const NEWHEADER& header = *(const NEWHEADER*)LockResource(hResLoad);
-	if (header.ResType != 2) {
+	if (header.Reserved != 0 || header.ResType != 2) {
 		Logger::Get().Error("不是光标资源");
 		return nullptr;
 	}
 
 	const uint32_t resCount = header.ResCount;
-	if (resCount == 0) {
+	if (resCount == 0 || resCount > 256) {
 		Logger::Get().Error("无可用光标资源");
 		return nullptr;
 	}
 
 	struct IconInfo {
-		uint16_t width;
-		uint16_t bitCount;
-		uint16_t id;
+		WORD width;
+		WORD bitCount;
+		WORD id;
 	};
 	SmallVector<IconInfo, 0> iconInfos(resCount);
 
@@ -79,7 +71,7 @@ wil::unique_hcursor CursorHelper::ExtractCursorFromModule(
 		const RESDIR& entry = header.entries[i];
 		// 宽度和高度的 0 等价于 256
 		iconInfos[i] = IconInfo{
-			entry.Width == 0 ? (uint16_t)256 : (uint16_t)entry.Width,
+			GetRealIconSize(entry.Width),
 			entry.BitCount,
 			entry.IconCursorId
 		};
@@ -91,20 +83,20 @@ wil::unique_hcursor CursorHelper::ExtractCursorFromModule(
 	});
 
 	// 寻找完美匹配或更大的资源
-	uint16_t targetResId;
+	WORD targetResId;
 	{
-		auto it1 = std::upper_bound(
+		auto it = std::lower_bound(
 			iconInfos.begin(),
 			iconInfos.end(),
 			preferredWidth,
-			[](uint32_t target, const IconInfo& iconInfo) {
-				return target < iconInfo.width;
+			[](const IconInfo& iconInfo, uint32_t target) {
+				return iconInfo.width < target;
 			}
 		);
-		if (it1 == iconInfos.end()) {
+		if (it == iconInfos.end()) {
 			targetResId = iconInfos.back().id;
 		} else {
-			targetResId = it1->id;
+			targetResId = it->id;
 		}
 	}
 
@@ -131,10 +123,129 @@ wil::unique_hcursor CursorHelper::ExtractCursorFromModule(
 }
 
 wil::unique_hcursor CursorHelper::ExtractCursorFromCurFile(
-	std::wstring /*fileName*/,
-	uint32_t /*preferredWidth*/
+	const wchar_t* fileName,
+	uint32_t preferredWidth
 ) noexcept {
-	return wil::unique_hcursor();
+	CREATEFILE2_EXTENDED_PARAMETERS extendedParams{
+		.dwSize = sizeof(CREATEFILE2_EXTENDED_PARAMETERS),
+		.dwFileAttributes = FILE_ATTRIBUTE_NORMAL,
+		.dwFileFlags = FILE_FLAG_SEQUENTIAL_SCAN
+	};
+	wil::unique_hfile hFile(CreateFile2(
+		fileName, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &extendedParams));
+	if (!hFile) {
+		Logger::Get().Win32Error("CreateFile2 失败");
+		return nullptr;
+	}
+
+	// 解析 cur 文件，参考自
+	// https://learn.microsoft.com/en-us/previous-versions/ms997538(v=msdn.10)
+	// https://en.wikipedia.org/wiki/ICO_(file_format)#File_structure
+#pragma pack(push, 2)
+	struct ICONDIR {
+		WORD idReserved;
+		WORD idType;
+		WORD idCount;
+	};
+
+	struct ICONDIRENTRY {
+		BYTE bWidth;
+		BYTE bHeight;
+		BYTE bColorCount;
+		BYTE bReserved;
+		WORD xHotSpot;
+		WORD yHotSpot;
+		DWORD dwBytesInRes;
+		DWORD dwImageOffset;
+	};
+
+	struct LOCALHEADER {
+		WORD xHotSpot;
+		WORD yHotSpot;
+	};
+#pragma pack(pop)
+
+	ICONDIR header{};
+	DWORD bytesRead;
+	if (!ReadFile(hFile.get(), &header, sizeof(header), &bytesRead, nullptr) ||
+		bytesRead != sizeof(header)) {
+		Logger::Get().Win32Error("ReadFile 失败");
+		return nullptr;
+	}
+
+	if (header.idReserved != 0 || header.idType != 2) {
+		Logger::Get().Error("不是光标资源");
+		return nullptr;
+	}
+
+	const uint32_t resCount = header.idCount;
+	if (resCount == 0 || resCount > 256) {
+		Logger::Get().Error("无可用光标资源");
+		return nullptr;
+	}
+
+	const uint32_t entiesByteCount = sizeof(ICONDIRENTRY) * resCount;
+	auto entriesData = std::make_unique<ICONDIRENTRY[]>(resCount);
+	if (!ReadFile(hFile.get(), entriesData.get(), entiesByteCount, &bytesRead, nullptr) ||
+		bytesRead != entiesByteCount) {
+		Logger::Get().Win32Error("ReadFile 失败");
+		return nullptr;
+	}
+
+	std::vector<const ICONDIRENTRY*> entries(resCount);
+
+	for (uint32_t i = 0; i < resCount; ++i) {
+		entries[i] = &entriesData[i];
+	}
+
+	// 尺寸从小到大排序；和资源不同，cur 文件不区分色深
+	std::sort(entries.begin(), entries.end(), [](const ICONDIRENTRY* l, const ICONDIRENTRY* r) {
+		return GetRealIconSize(l->bWidth) < GetRealIconSize(r->bWidth);
+	});
+
+	// 寻找完美匹配或更大的资源
+	const ICONDIRENTRY* targetEntry;
+	{
+		auto it = std::lower_bound(
+			entries.begin(),
+			entries.end(),
+			preferredWidth,
+			[](const ICONDIRENTRY* entry, uint32_t target) {
+				return GetRealIconSize(entry->bWidth) < target;
+			}
+		);
+		if (it == entries.end()) {
+			targetEntry = entries.back();
+		} else {
+			targetEntry = *it;
+		}
+	}
+
+	if (!SetFilePointer(hFile.get(), targetEntry->dwImageOffset, 0, FILE_BEGIN)) {
+		Logger::Get().Win32Error("SetFilePointer 失败");
+		return nullptr;
+	}
+
+	// RT_CURSOR 结构为 LOCALHEADER 后跟位图数据
+	// https://learn.microsoft.com/en-us/windows/win32/menurc/resource-file-formats#cursor-and-icon-resources
+	auto cursorData = std::make_unique<uint8_t[]>(sizeof(LOCALHEADER) + targetEntry->dwBytesInRes);
+	// 设置热点
+	*(LOCALHEADER*)cursorData.get() = { targetEntry->xHotSpot, targetEntry->yHotSpot };
+	// 读取位图数据
+	if (!ReadFile(hFile.get(), cursorData.get() + sizeof(LOCALHEADER), targetEntry->dwBytesInRes, &bytesRead, nullptr) ||
+		bytesRead != targetEntry->dwBytesInRes) {
+		Logger::Get().Win32Error("ReadFile 失败");
+		return nullptr;
+	}
+
+	HICON hIcon = CreateIconFromResourceEx(cursorData.get(),
+		sizeof(LOCALHEADER) + targetEntry->dwBytesInRes, FALSE, 0x30000, 0, 0, LR_DEFAULTCOLOR);
+	if (!hIcon) {
+		Logger::Get().Win32Error("CreateIconFromResourceEx 失败");
+		return nullptr;
+	}
+
+	return wil::unique_hcursor(hIcon);
 }
 
 }
