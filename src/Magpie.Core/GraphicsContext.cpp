@@ -45,9 +45,33 @@ bool GraphicsContext::Initialize(
 		_rootSignatureVersion = featureData.HighestVersion;
 	}
 
-	// 检查是否支持 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED
+	// 检查是否是集成显卡
+	{
+		D3D12_FEATURE_DATA_ARCHITECTURE1 data{};
+		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &data, sizeof(data)))) {
+			_isUMA = data.UMA;
+		}
+	}
+
+	// 检查 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 支持
 	// https://devblogs.microsoft.com/directx/coming-to-directx-12-more-control-over-memory-allocation/
 	_isHeapFlagCreateNotZeroedSupported = (bool)_device.try_as<ID3D12Device8>();
+
+	// 检查 Resizable BAR 支持
+	{
+		D3D12_FEATURE_DATA_D3D12_OPTIONS16 data{};
+		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &data, sizeof(data)))) {
+			_isGPUUploadHeapSupported = data.GPUUploadHeapSupported;
+		}
+	}
+
+	// 检查 shader model 6.0 支持
+	{
+		D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = D3D_SHADER_MODEL_6_0 };
+		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)))) {
+			_isSM6Supported = data.HighestShaderModel == D3D_SHADER_MODEL_6_0;
+		}
+	}
 
 	if (!_InitializeDeviceResources(maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");

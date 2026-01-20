@@ -1,6 +1,7 @@
 #pragma once
 #include <wil/registry.h>
 #include <parallel_hashmap/phmap.h>
+#include "ByteBuffer.h"
 
 namespace Magpie {
 
@@ -14,9 +15,9 @@ public:
 
 	bool Initialize(GraphicsContext& graphicsContext, const RECT& destRect) noexcept;
 
-	bool CheckForRedraw(HCURSOR& hCursor, POINT cursorPos) noexcept;
+	bool CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept;
 
-	void Draw() noexcept;
+	HRESULT Draw() noexcept;
 
 	void OnCursorVirtualizationStarted() noexcept {
 		_isCursorVirtualized = true;
@@ -74,11 +75,15 @@ private:
 		_CursorType type;
 		Size size;
 		Point hotspot;
-		winrt::com_ptr<ID3D12Resource> resource;
-		Size resourceSize;
+		winrt::com_ptr<ID3D12Resource> texture;
+
+		Size originSize;
+		ByteBuffer originPixels;
+		winrt::com_ptr<ID3D12Resource> originUploadBuffer;
+		winrt::com_ptr<ID3D12Resource> originTexture;
 	};
 
-	const _CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
+	_CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
 
 	wil::unique_hcursor _TryResolveCursorResource(
 		const ICONINFOEX& iconInfoEx,
@@ -90,6 +95,10 @@ private:
 		int resId,
 		uint32_t preferedWidth
 	) const noexcept;
+
+	bool _ResolveCursorPixels(_CursorInfo& cursorInfo, HBITMAP hColorBmp, HBITMAP hMaskBmp) noexcept;
+
+	HRESULT _InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept;
 
 	GraphicsContext* _graphicsContext = nullptr;
 	RECT _destRect{};

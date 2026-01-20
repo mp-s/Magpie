@@ -292,6 +292,8 @@ HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 }
 
 HRESULT SwapChainPresenter::OnResized(Size size) noexcept {
+	assert(size.width > 0 && size.height > 0 && size != _size);
+
 	_size = size;
 	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
 	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;

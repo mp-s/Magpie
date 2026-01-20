@@ -515,7 +515,19 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT, 0);
+			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+		commandList->ResourceBarrier(1, &barrier);
+	}
+
+	hr = _cursorDrawer.Draw();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CursorDrawer2::Draw 失败", hr);
+		return hr;
+	}
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT, 0);
 		commandList->ResourceBarrier(1, &barrier);
 	}
 
