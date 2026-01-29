@@ -119,6 +119,6 @@ Thanks go to these wonderful people:
 
 This project follows the [all-contributors](https://allcontributors.org/) specification. Contributions of any kind are welcome!
 
-## Copyright
+## License
 
-Copyright 2026 Blinue. This project is not authorized for posting on Steam.
+This project is licensed under GPLv3.
