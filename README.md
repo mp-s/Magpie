@@ -118,3 +118,7 @@ Thanks go to these wonderful people:
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 This project follows the [all-contributors](https://allcontributors.org/) specification. Contributions of any kind are welcome!
+
+## Copyright
+
+Copyright 2026 Blinue. This project is not authorized for posting on Steam.
