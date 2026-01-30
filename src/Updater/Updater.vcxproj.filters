@@ -35,9 +35,9 @@
     <Natvis Include="$(MSBuildThisFileDirectory)..\..\natvis\wil.natstepfilter" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
+    <Text Include="conanfile.txt" />
   </ItemGroup>
   <ItemGroup>
-    <Text Include="conanfile.txt" />
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>

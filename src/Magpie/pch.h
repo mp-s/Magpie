@@ -27,6 +27,10 @@
 #include <chrono>
 
 // WIL
+// 防止 cppwinrt_authoring.h 中编译失败
+#define WIL_ENABLE_EXCEPTIONS
+#include <wil/result_macros.h>
+#undef WIL_ENABLE_EXCEPTIONS
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
 #include <wil/filesystem.h>
