@@ -2,12 +2,6 @@
 
 namespace Magpie {
 
-enum class EffectColorSpace {
-	linear_sRGB,
-	sRGB,
-	scRGB
-};
-
 class EffectDrawerBase {
 public:
 	EffectDrawerBase() = default;

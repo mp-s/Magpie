@@ -2,6 +2,7 @@
 #include "CursorDrawer2.h"
 #include "FrameProducer.h"
 #include "GraphicsContext.h"
+#include "DynamicDescriptorHeap.h"
 #include "ScalingOptions.h"
 
 namespace Magpie {
@@ -84,6 +85,8 @@ private:
 
 	Rect _outputRect{};
 
+	// 由多个 GraphicsContext 共享
+	DynamicDescriptorHeap _dynamicDescriptorHeap;
 	GraphicsContext _graphicsContext;
 	FrameProducer _frameProducer;
 	CursorDrawer2 _cursorDrawer;
@@ -93,6 +96,9 @@ private:
 	ColorInfo _colorInfo;
 
 	uint64_t _lastProducerFrameNumber = 0;
+
+	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _pipelineState;
 };
 
 }

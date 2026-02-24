@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "EffectsDrawer.h"
-#include "CatmullRomEffectDrawer.h"
+#include "CatmullRomDrawer.h"
+#include "DynamicDescriptorHeap.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
@@ -13,7 +14,6 @@ bool EffectsDrawer::Initialize(
 	const ColorInfo& colorInfo,
 	Size inputSize,
 	Size rendererSize,
-	const SmallVectorImpl<ID3D12Resource*>& inputResources,
 	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
 ) noexcept {
 	_graphicsContext = &graphicsContext;
@@ -34,51 +34,6 @@ bool EffectsDrawer::Initialize(
 		}
 	}
 
-	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-	const uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	assert((uint32_t)inputResources.size() == maxInFlightFrameCount);
-
-	{
-		// 输入 SRV + 输出 UAV
-		uint32_t descriptorCount = maxInFlightFrameCount + (maxInFlightFrameCount + 1);
-		descriptorCount += CatmullRomEffectDrawer::CalcDescriptorCount(true, true);
-
-		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {
-			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-			.NumDescriptors = descriptorCount,
-			.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
-		};
-		HRESULT hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_descriptorHeap));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
-			return false;
-		}
-	}
-
-	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle(
-		_descriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle(
-		_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
-	_inputDescriptorCpuBase = _descriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	_inputDescriptorGpuBase = _descriptorHeap->GetGPUDescriptorHandleForHeapStart();
-
-	HRESULT hr = _CreateInputResources(inputResources);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateInputResources 失败", hr);
-		return false;
-	}
-
-	descriptorCpuHandle.Offset(maxInFlightFrameCount, _descriptorSize);
-	descriptorGpuHandle.Offset(maxInFlightFrameCount, _descriptorSize);
-	_outputDescriptorCpuBase = descriptorCpuHandle;
-	_outputDescriptorGpuBase = descriptorGpuHandle;
-
-	descriptorCpuHandle.Offset(maxInFlightFrameCount + 1, _descriptorSize);
-	descriptorGpuHandle.Offset(maxInFlightFrameCount + 1, _descriptorSize);
-	_effectsDescriptorCpuBase = descriptorCpuHandle;
-	_effectsDescriptorGpuBase = descriptorGpuHandle;
-
 	if (ScalingWindow::Get().Options().IsWindowedMode()) {
 		_outputSize = rendererSize;
 	} else {
@@ -90,17 +45,11 @@ bool EffectsDrawer::Initialize(
 		_outputSize.height = std::lroundf(inputSize.height * fillScale);
 	}
 
-	{
-		EffectColorSpace colorSpace = colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-			EffectColorSpace::sRGB : EffectColorSpace::scRGB;
-		
-		hr = _catmullRom.Initialize(graphicsContext, _inputSize, _outputSize,
-			colorSpace, colorSpace, descriptorCpuHandle, descriptorGpuHandle,
-			_descriptorSize, nullptr, nullptr);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CatmullRomEffectDrawer::Initialize 失败", hr);
-			return false;
-		}
+	_catmullRomDrawer.emplace();
+	HRESULT hr = _catmullRomDrawer->Initialize(graphicsContext);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CatmullRomDrawer::Initialize 失败", hr);
+		return false;
 	}
 	
 	hr = _CreateOutputResources(outputResources);
@@ -111,7 +60,7 @@ bool EffectsDrawer::Initialize(
 
 	{
 		// 每帧两个时间戳
-		const uint32_t timestampCount = 2 * maxInFlightFrameCount;
+		const uint32_t timestampCount = 2 * ScalingWindow::Get().Options().maxProducerInFlightFrames;
 
 		D3D12_QUERY_HEAP_DESC queryHeapDesc = {
 			.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
@@ -149,7 +98,11 @@ bool EffectsDrawer::Initialize(
 	return true;
 }
 
-HRESULT EffectsDrawer::Draw(uint32_t frameIndex, uint32_t inputIndx, uint32_t outputIndex) noexcept {
+HRESULT EffectsDrawer::Draw(
+	uint32_t frameIndex,
+	D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
+	D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
+) noexcept {
 	// 获取渲染时间
 	const uint32_t queryHeapIndex = 2 * frameIndex;
 	{
@@ -169,18 +122,16 @@ HRESULT EffectsDrawer::Draw(uint32_t frameIndex, uint32_t inputIndx, uint32_t ou
 	}
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
 
 	{
-		ID3D12DescriptorHeap* t = _descriptorHeap.get();
+		ID3D12DescriptorHeap* t = dynamicDescriptorHeap.GetHeap();
 		commandList->SetDescriptorHeaps(1, &t);
 	}
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
 
-	_catmullRom.Draw(
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(_inputDescriptorGpuBase, inputIndx, _descriptorSize),
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(_outputDescriptorGpuBase, outputIndex, _descriptorSize)
-	);
+	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvHandle, outputUavHandle, !_isScRGB);
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
 	commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,
@@ -200,67 +151,23 @@ HRESULT EffectsDrawer::OnResized(
 		Logger::Get().ComError("_CreateOutputResources 失败", hr);
 		return hr;
 	}
-
-	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle = _effectsDescriptorCpuBase;
-	CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle = _effectsDescriptorGpuBase;
-	_catmullRom.OnResized(_inputSize, _outputSize, descriptorCpuHandle,
-		descriptorGpuHandle, _descriptorSize, nullptr, nullptr);
 	
 	return S_OK;
 }
 
 HRESULT EffectsDrawer::OnColorInfoChanged(
 	const ColorInfo& colorInfo,
-	const SmallVectorImpl<ID3D12Resource*>& inputResources,
 	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
 ) noexcept {
 	const bool wasScRGB = _isScRGB;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	if (_isScRGB != wasScRGB) {
-		HRESULT hr = _CreateInputResources(inputResources);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("_CreateInputResources 失败", hr);
-			return hr;
-		}
-
-		hr = _CreateOutputResources(outputResources);
+		HRESULT hr = _CreateOutputResources(outputResources);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("_CreateOutputResources 失败", hr);
 			return hr;
 		}
-	}
-
-	EffectColorSpace colorSpace = colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-		EffectColorSpace::sRGB : EffectColorSpace::scRGB;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle = _effectsDescriptorCpuBase;
-	CD3DX12_GPU_DESCRIPTOR_HANDLE descriptorGpuHandle = _effectsDescriptorGpuBase;
-	HRESULT hr = _catmullRom.OnColorInfoChanged(colorSpace, colorSpace, descriptorCpuHandle,
-		descriptorGpuHandle, _descriptorSize, nullptr, nullptr);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CatmullRomEffectDrawer::OnColorInfoChanged 失败", hr);
-		return hr;
-	}
-
-	return S_OK;
-}
-
-HRESULT EffectsDrawer::_CreateInputResources(
-	const SmallVectorImpl<ID3D12Resource*>& inputResources
-) const noexcept {
-	ID3D12Device5* device = _graphicsContext->GetDevice();
-
-	const uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	assert((uint32_t)inputResources.size() == maxInFlightFrameCount);
-
-	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
-		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, 1);
-
-	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle = _inputDescriptorCpuBase;
-
-	for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
-		device->CreateShaderResourceView(inputResources[i], &srvDesc, descriptorCpuHandle);
-		descriptorCpuHandle.Offset(_descriptorSize);
 	}
 
 	return S_OK;
@@ -268,7 +175,7 @@ HRESULT EffectsDrawer::_CreateInputResources(
 
 HRESULT EffectsDrawer::_CreateOutputResources(
 	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
-) const noexcept {
+) noexcept {
 	ID3D12Device5* device = _graphicsContext->GetDevice();
 
 	const uint32_t maxInFlightFrameCount =
@@ -288,11 +195,6 @@ HRESULT EffectsDrawer::_CreateOutputResources(
 		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
 	);
 
-	CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc = CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(
-		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM);
-
-	CD3DX12_CPU_DESCRIPTOR_HANDLE outputDescriptorCpuHandle = _outputDescriptorCpuBase;
-
 	for (winrt::com_ptr<ID3D12Resource>& resource : outputResources) {
 		HRESULT hr = device->CreateCommittedResource(&heapProperties, heapFlag,
 			&texDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&resource));
@@ -300,10 +202,6 @@ HRESULT EffectsDrawer::_CreateOutputResources(
 			Logger::Get().ComError("CreateCommittedResource 失败", hr);
 			return hr;
 		}
-
-		device->CreateUnorderedAccessView(
-			resource.get(), nullptr, &uavDesc, outputDescriptorCpuHandle);
-		outputDescriptorCpuHandle.Offset(_descriptorSize);
 	}
 
 	return S_OK;

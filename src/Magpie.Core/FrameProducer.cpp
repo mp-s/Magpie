@@ -2,10 +2,10 @@
 #include "FrameProducer.h"
 #include "CommonSharedConstants.h"
 #include "DuplicateFrameChecker.h"
+#include "DynamicDescriptorHeap.h"
 #include "GraphicsCaptureFrameSource.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
-#include "StrHelper.h"
 #include <dispatcherqueue.h>
 
 namespace Magpie {
@@ -105,6 +105,7 @@ void FrameProducer::OnResizedAsync(
 		outputSize = _effectsDrawer.GetOutputSize();
 
 		_frameRingBuffer.UpdateResources(outputResources);
+		_CreateOutputUavs();
 
 		hr = _Render();
 		if (!_CheckResult(hr, "_Render 失败")) {
@@ -135,6 +136,8 @@ void FrameProducer::OnColorInfoChangedAsync(
 			return;
 		}
 
+		_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+
 		hr = _graphicsContext.WaitForGpu();
 		if (!_CheckResult(hr, "GraphicsContext::WaitForGpu 失败")) {
 			return;
@@ -146,23 +149,17 @@ void FrameProducer::OnColorInfoChangedAsync(
 		}
 
 		{
-			const uint32_t maxInFlightFrameCount =
-				ScalingWindow::Get().Options().maxProducerInFlightFrames;
-
-			SmallVector<ID3D12Resource*, 3> inputResources;
-			for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
-				inputResources.push_back(_frameSource->GetOutput(i));
-			}
+			_CreateInputSrvs();
 
 			SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
-
-			hr = _effectsDrawer.OnColorInfoChanged(colorInfo, inputResources, outputResources);
+			hr = _effectsDrawer.OnColorInfoChanged(colorInfo, outputResources);
 			if (!_CheckResult(hr, "EffectsDrawer::OnColorInfoChanged 失败")) {
 				return;
 			}
 
 			if (!outputResources.empty()) {
 				_frameRingBuffer.UpdateResources(outputResources);
+				_CreateOutputUavs();
 			}
 		}
 
@@ -343,6 +340,8 @@ bool FrameProducer::_Initialize(
 		return false;
 	}
 
+	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+
 	_frameSource = std::make_unique<GraphicsCaptureFrameSource>();
 	if (!_frameSource->Initialize(_graphicsContext, srcRect, hMonSrc, colorInfo)) {
 		Logger::Get().Error("初始化 GraphicsCaptureFrameSource 失败");
@@ -355,15 +354,10 @@ bool FrameProducer::_Initialize(
 			uint32_t(srcRect.bottom - srcRect.top)
 		};
 
-		SmallVector<ID3D12Resource*, 3> inputResources;
-		for (uint32_t i = 0; i < maxInFlightFrameCount; ++i) {
-			inputResources.push_back(_frameSource->GetOutput(i));
-		}
-
 		SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
 
 		if (!_effectsDrawer.Initialize(_graphicsContext, colorInfo, inputSize,
-			rendererSize, inputResources, outputResources)) {
+			rendererSize, outputResources)) {
 			Logger::Get().Error("EffectsDrawer::Initialize 失败");
 			return false;
 		}
@@ -374,6 +368,24 @@ bool FrameProducer::_Initialize(
 			Logger::Get().Error("初始化 FrameRingBuffer 失败");
 			return false;
 		}
+	}
+
+	{
+		auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+		HRESULT hr = dynamicDescriptorHeap.Alloc(maxInFlightFrameCount, _inputSrvBaseOffset);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("DynamicDescriptorHeap::Alloc", hr);
+			return false;
+		}
+
+		hr = dynamicDescriptorHeap.Alloc(maxInFlightFrameCount + 1, _outputUavBaseOffset);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("DynamicDescriptorHeap::Alloc", hr);
+			return false;
+		}
+
+		_CreateInputSrvs();
+		_CreateOutputUavs();
 	}
 
 	_monitorThread = std::thread(&FrameProducer::_MonitorThreadProc, this);
@@ -392,6 +404,43 @@ bool FrameProducer::_Initialize(
 	}
 
 	return true;
+}
+
+void FrameProducer::_CreateInputSrvs() noexcept {
+	ID3D12Device5* device = _graphicsContext.GetDevice();
+	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
+
+	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
+		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, 1);
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle =
+		dynamicDescriptorHeap.GetCpuHandle(_inputSrvBaseOffset);
+
+	const uint32_t bufferCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
+	for (uint32_t i = 0; i < bufferCount; ++i) {
+		device->CreateShaderResourceView(_frameSource->GetOutput(i), &srvDesc, descriptorCpuHandle);
+		descriptorCpuHandle.Offset(descriptorSize);
+	}
+}
+
+void FrameProducer::_CreateOutputUavs() noexcept {
+	ID3D12Device5* device = _graphicsContext.GetDevice();
+	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
+
+	CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc = CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(
+		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM);
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle =
+		dynamicDescriptorHeap.GetCpuHandle(_outputUavBaseOffset);
+
+	const uint32_t bufferCount = ScalingWindow::Get().Options().maxProducerInFlightFrames + 1;
+	for (uint32_t i = 0; i < bufferCount; ++i) {
+		device->CreateUnorderedAccessView(
+			_frameRingBuffer.GetBuffer(i), nullptr, &uavDesc, descriptorCpuHandle);
+		descriptorCpuHandle.Offset(descriptorSize);
+	}
 }
 
 HRESULT FrameProducer::_Render() noexcept {
@@ -437,7 +486,13 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
-	hr = _effectsDrawer.Draw(frameIndex, frameSourceOutputIdx, frameRingBufferIdx);
+	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+
+	hr = _effectsDrawer.Draw(
+		frameIndex,
+		dynamicDescriptorHeap.GetGpuHandle(_inputSrvBaseOffset + frameSourceOutputIdx),
+		dynamicDescriptorHeap.GetGpuHandle(_outputUavBaseOffset + frameRingBufferIdx)
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("EffectsDrawer::Draw 失败", hr);
 		return hr;

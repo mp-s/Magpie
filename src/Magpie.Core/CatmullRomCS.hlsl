@@ -7,7 +7,7 @@ cbuffer RootConstants : register(b0) {
 	float2 outputPt;
 };
 
-Texture2D<float4> input : register(t0);
+Texture2D<float4> inputTex : register(t0);
 
 RWTexture2D<unorm float4> output : register(u0);
 
@@ -56,19 +56,19 @@ float4 CatmullRom(float2 pos) {
 	int2 coord_top_left = int2(max(uv0 * inputSize, 0.5f));
 	int2 coord_bottom_right = int2(min(uv3 * inputSize, inputSize - 0.5f));
 
-	float3 top = input.Load(int3(coord_top_left, 0)).rgb * rowtaps.x;
-	top += input.SampleLevel(linearSampler, float2(u_middle, uv0.y), 0).rgb * u_weight_sum;
-	top += input.Load(int3(coord_bottom_right.x, coord_top_left.y, 0)).rgb * rowtaps.w;
+	float3 top = inputTex.Load(int3(coord_top_left, 0)).rgb * rowtaps.x;
+	top += inputTex.SampleLevel(linearSampler, float2(u_middle, uv0.y), 0).rgb * u_weight_sum;
+	top += inputTex.Load(int3(coord_bottom_right.x, coord_top_left.y, 0)).rgb * rowtaps.w;
 	float3 total = top * coltaps.x;
 
-	float3 middle = input.SampleLevel(linearSampler, float2(uv0.x, v_middle), 0).rgb * rowtaps.x;
-	middle += input.SampleLevel(linearSampler, float2(u_middle, v_middle), 0).rgb * u_weight_sum;
-	middle += input.SampleLevel(linearSampler, float2(uv3.x, v_middle), 0).rgb * rowtaps.w;
+	float3 middle = inputTex.SampleLevel(linearSampler, float2(uv0.x, v_middle), 0).rgb * rowtaps.x;
+	middle += inputTex.SampleLevel(linearSampler, float2(u_middle, v_middle), 0).rgb * u_weight_sum;
+	middle += inputTex.SampleLevel(linearSampler, float2(uv3.x, v_middle), 0).rgb * rowtaps.w;
 	total += middle * v_weight_sum;
 
-	float3 bottom = input.Load(int3(coord_top_left.x, coord_bottom_right.y, 0)).rgb * rowtaps.x;
-	bottom += input.SampleLevel(linearSampler, float2(u_middle, uv3.y), 0).rgb * u_weight_sum;
-	bottom += input.Load(int3(coord_bottom_right, 0)).rgb * rowtaps.w;
+	float3 bottom = inputTex.Load(int3(coord_top_left.x, coord_bottom_right.y, 0)).rgb * rowtaps.x;
+	bottom += inputTex.SampleLevel(linearSampler, float2(u_middle, uv3.y), 0).rgb * u_weight_sum;
+	bottom += inputTex.Load(int3(coord_bottom_right, 0)).rgb * rowtaps.w;
 	total += bottom * coltaps.w;
 
 #ifdef MP_SRGB
@@ -99,6 +99,6 @@ void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 	output[gxy] = CatmullRom(pos);
 
 	gxy.x += 8u;
-    pos.x += 8 * outputPt.x;
+	pos.x += 8 * outputPt.x;
 	output[gxy] = CatmullRom(pos);
 }

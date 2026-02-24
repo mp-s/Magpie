@@ -158,7 +158,7 @@
     <ClInclude Include="EffectDrawerBase.h">
       <Filter>EffectDrawer</Filter>
     </ClInclude>
-    <ClInclude Include="CatmullRomEffectDrawer.h">
+    <ClInclude Include="CatmullRomDrawer.h">
       <Filter>EffectDrawer</Filter>
     </ClInclude>
     <ClInclude Include="DuplicateFrameChecker.h">
@@ -191,6 +191,9 @@
     </ClInclude>
     <ClInclude Include="CursorHelper.h">
       <Filter>Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="DynamicDescriptorHeap.h">
+      <Filter>Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -298,7 +301,7 @@
     <ClCompile Include="FrameRingBuffer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
-    <ClCompile Include="CatmullRomEffectDrawer.cpp">
+    <ClCompile Include="CatmullRomDrawer.cpp">
       <Filter>EffectDrawer</Filter>
     </ClCompile>
     <ClCompile Include="DuplicateFrameChecker.cpp">
@@ -322,6 +325,9 @@
     </ClCompile>
     <ClCompile Include="CursorHelper.cpp">
       <Filter>Helpers</Filter>
+    </ClCompile>
+    <ClCompile Include="DynamicDescriptorHeap.cpp">
+      <Filter>Render</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -353,6 +359,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\FullscreenVS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

@@ -5,6 +5,8 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "SwapChainPresenter.h"
+#include "shaders/FullscreenVS.h"
+#include "shaders/SimplePS.h"
 #include "GraphicsCaptureFrameSource.h"
 #include <d3dkmthk.h>
 #include <windows.graphics.display.interop.h>
@@ -45,16 +47,17 @@ ScalingError Renderer2::Initialize(
 		options.graphicsCardId,
 		options.Is3DGameMode() ? 2 : 6,
 		D3D12_COMMAND_QUEUE_PRIORITY_HIGH,
-		D3D12_COMMAND_LIST_TYPE_DIRECT
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		_dynamicDescriptorHeap
 	)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 
+	ID3D12Device5* device = _graphicsContext.GetDevice();
+
 #ifdef MP_DEBUG_INFO
 	{
-		ID3D12Device5* device = _graphicsContext.GetDevice();
-
 		// 禁用动态时钟频率调整
 		if (DEBUG_INFO.enableStablePower) {
 			HRESULT hr = device->SetStablePowerState(TRUE);
@@ -105,6 +108,75 @@ ScalingError Renderer2::Initialize(
 	if (!_presenter->Initialize(_graphicsContext, hwndAttach, rendererSize, _colorInfo)) {
 		Logger::Get().Error("SwapChainPresenter::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
+	}
+
+	{
+		winrt::com_ptr<ID3DBlob> signature;
+
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		D3D12_ROOT_PARAMETER1 rootParams[] = {
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 2
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange
+				}
+			}
+		};
+		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
+			.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
+			.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+			.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+			.ShaderRegister = 0
+		};
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc, _graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
+		if (FAILED(hr)) {
+			return ScalingError::ScalingFailedGeneral;
+		}
+
+		hr = device->CreateRootSignature(
+			0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
+		if (FAILED(hr)) {
+			return ScalingError::ScalingFailedGeneral;
+		}
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+			.pRootSignature = _rootSignature.get(),
+			.VS = CD3DX12_SHADER_BYTECODE(FullscreenVS, sizeof(FullscreenVS)),
+			.PS = CD3DX12_SHADER_BYTECODE(SimplePS, sizeof(SimplePS)),
+			.BlendState = {
+				.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
+			},
+			.SampleMask = UINT_MAX,
+			.RasterizerState = {
+				.FillMode = D3D12_FILL_MODE_SOLID,
+				.CullMode = D3D12_CULL_MODE_NONE
+			},
+			.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+			.NumRenderTargets = 1,
+			.RTVFormats = { _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
+				DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
+			.SampleDesc = { .Count = 1 }
+		};
+		hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
+		if (FAILED(hr)) {
+			return ScalingError::ScalingFailedGeneral;
+		}
 	}
 
 	// 同步点，使生产者线程的修改可见
@@ -438,13 +510,38 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	_presenter->BeginFrame(&frameTex, rtvHandle);
 
 	uint32_t frameIndex;
-	HRESULT hr = _graphicsContext.BeginFrame(frameIndex, nullptr);
+	HRESULT hr = _graphicsContext.BeginFrame(frameIndex, _pipelineState.get());
 	if (FAILED(hr)) {
 		Logger::Get().ComError("GraphicsContext::BeginFrame 失败", hr);
 		return hr;
 	}
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
+
+	/*commandList->SetGraphicsRootSignature(_rootSignature.get());
+	commandList->SetGraphicsRootDescriptorTable(1, );
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+		commandList->ResourceBarrier(1, &barrier);
+	}
+
+	const Size rendererSize = _presenter->GetSize();
+
+	{
+		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)rendererSize.width, (float)rendererSize.height);
+		commandList->RSSetViewports(1, &viewport);
+	}
+	{
+		CD3DX12_RECT scissorRect(0, 0, (LONG)rendererSize.width, (LONG)rendererSize.height);
+		commandList->RSSetScissorRects(1, &scissorRect);
+	}
+
+	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	commandList->DrawInstanced(3, 1, 0, 0);*/
 
 	if (Size size = _presenter->GetSize(); _outputRect == Rect{ 0,0,size.width,size.height }) {
 		{

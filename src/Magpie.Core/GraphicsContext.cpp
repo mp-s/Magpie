@@ -4,6 +4,7 @@
 #include "Logger.h"
 #include "DirectXHelper.h"
 #include "StrHelper.h"
+#include "DynamicDescriptorHeap.h"
 
 namespace Magpie {
 
@@ -12,8 +13,11 @@ bool GraphicsContext::Initialize(
 	uint32_t maxInFlightFrameCount,
 	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
+	DynamicDescriptorHeap& dynamicDescriptorHeap,
 	bool disableFrameFenceTracking
 ) noexcept {
+	_dynamicDescriptorHeap = &dynamicDescriptorHeap;
+
 	HRESULT hr = _CreateDXGIFactory();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("_CreateDXGIFactory 失败", hr);
@@ -78,10 +82,16 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 
+	if (!_dynamicDescriptorHeap->Initialize(_device.get())) {
+		Logger::Get().Error("DynamicDescriptorHeap::Initialize 失败");
+		return false;
+	}
+
 	return true;
 }
 
 void GraphicsContext::CopyDevice(const GraphicsContext& other) {
+	_dynamicDescriptorHeap = other._dynamicDescriptorHeap;
 	_device = other._device;
 	_rootSignatureVersion = other._rootSignatureVersion;
 	_isHeapFlagCreateNotZeroedSupported = other._isHeapFlagCreateNotZeroedSupported;

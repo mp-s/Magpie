@@ -62,6 +62,10 @@ private:
 		Size& outputSize
 	) noexcept;
 
+	void _CreateInputSrvs() noexcept;
+
+	void _CreateOutputUavs() noexcept;
+
 	HRESULT _Render() noexcept;
 
 	void _MonitorThreadProc() noexcept;
@@ -80,6 +84,11 @@ private:
 	StepTimer _stepTimer;
 	std::unique_ptr<GraphicsCaptureFrameSource> _frameSource;
 	EffectsDrawer _effectsDrawer;
+
+	uint32_t _inputSrvBaseOffset = 0;
+	uint32_t _outputUavBaseOffset = 0;
+
+	bool _isScRGB = false;
 };
 
 }
