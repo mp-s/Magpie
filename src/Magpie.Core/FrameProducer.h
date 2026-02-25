@@ -31,7 +31,7 @@ public:
 
 	uint64_t GetLatestFrameNumber() const noexcept;
 
-	bool ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept;
+	bool ConsumerBeginFrame(ID3D12Resource*& buffer, D3D12_GPU_DESCRIPTOR_HANDLE& srvHandle, UINT64& fenceValueToSignal) noexcept;
 
 	HRESULT ConsumerEndFrame(
 		ID3D12CommandQueue* commandQueue,
@@ -62,9 +62,9 @@ private:
 		Size& outputSize
 	) noexcept;
 
-	void _CreateInputSrvs() noexcept;
+	void _CreateInputDescriptors() noexcept;
 
-	void _CreateOutputUavs() noexcept;
+	void _CreateOutputDescriptors() noexcept;
 
 	HRESULT _Render() noexcept;
 
@@ -87,6 +87,7 @@ private:
 
 	uint32_t _inputSrvBaseOffset = 0;
 	uint32_t _outputUavBaseOffset = 0;
+	uint32_t _outputSrvBaseOffset = 0;
 
 	bool _isScRGB = false;
 };

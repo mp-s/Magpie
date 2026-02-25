@@ -13,8 +13,7 @@ bool EffectsDrawer::Initialize(
 	GraphicsContext& graphicsContext,
 	const ColorInfo& colorInfo,
 	Size inputSize,
-	Size rendererSize,
-	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
+	Size rendererSize
 ) noexcept {
 	_graphicsContext = &graphicsContext;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
@@ -49,12 +48,6 @@ bool EffectsDrawer::Initialize(
 	HRESULT hr = _catmullRomDrawer->Initialize(graphicsContext);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CatmullRomDrawer::Initialize 失败", hr);
-		return false;
-	}
-	
-	hr = _CreateOutputResources(outputResources);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateOutputResources 失败", hr);
 		return false;
 	}
 
@@ -122,16 +115,15 @@ HRESULT EffectsDrawer::Draw(
 	}
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
-	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
 
 	{
-		ID3D12DescriptorHeap* t = dynamicDescriptorHeap.GetHeap();
+		ID3D12DescriptorHeap* t = _graphicsContext->GetDynamicDescriptorHeap().GetHeap();
 		commandList->SetDescriptorHeaps(1, &t);
 	}
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
 
-	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvHandle, outputUavHandle, !_isScRGB);
+	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvHandle, outputUavHandle, false);
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
 	commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,
@@ -140,70 +132,13 @@ HRESULT EffectsDrawer::Draw(
 	return S_OK;
 }
 
-HRESULT EffectsDrawer::OnResized(
-	Size rendererSize,
-	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
-) noexcept {
+HRESULT EffectsDrawer::OnResized(Size rendererSize) noexcept {
 	_outputSize = rendererSize;
-
-	HRESULT hr = _CreateOutputResources(outputResources);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateOutputResources 失败", hr);
-		return hr;
-	}
-	
 	return S_OK;
 }
 
-HRESULT EffectsDrawer::OnColorInfoChanged(
-	const ColorInfo& colorInfo,
-	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
-) noexcept {
-	const bool wasScRGB = _isScRGB;
+HRESULT EffectsDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
-
-	if (_isScRGB != wasScRGB) {
-		HRESULT hr = _CreateOutputResources(outputResources);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("_CreateOutputResources 失败", hr);
-			return hr;
-		}
-	}
-
-	return S_OK;
-}
-
-HRESULT EffectsDrawer::_CreateOutputResources(
-	SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
-) noexcept {
-	ID3D12Device5* device = _graphicsContext->GetDevice();
-
-	const uint32_t maxInFlightFrameCount =
-		ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	outputResources.resize(size_t(maxInFlightFrameCount + 1));
-
-	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
-
-	D3D12_HEAP_FLAGS heapFlag = _graphicsContext->IsHeapFlagCreateNotZeroedSupported() ?
-		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-
-	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
-		_outputSize.width,
-		_outputSize.height,
-		1, 1, 1, 0,
-		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-	);
-
-	for (winrt::com_ptr<ID3D12Resource>& resource : outputResources) {
-		HRESULT hr = device->CreateCommittedResource(&heapProperties, heapFlag,
-			&texDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&resource));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
-			return hr;
-		}
-	}
-
 	return S_OK;
 }
 

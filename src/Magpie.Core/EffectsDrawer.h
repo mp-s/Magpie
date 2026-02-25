@@ -14,8 +14,7 @@ public:
 		GraphicsContext& graphicsContext,
 		const ColorInfo& colorInfo,
 		Size inputSize,
-		Size rendererSize,
-		SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
+		Size rendererSize
 	) noexcept;
 
 	HRESULT Draw(
@@ -28,21 +27,11 @@ public:
 		return _outputSize;
 	}
 
-	HRESULT OnResized(
-		Size rendererSize,
-		SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
-	) noexcept;
+	HRESULT OnResized(Size rendererSize) noexcept;
 
-	HRESULT OnColorInfoChanged(
-		const ColorInfo& colorInfo,
-		SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
-	) noexcept;
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
-	HRESULT _CreateOutputResources(
-		SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& outputResources
-	) noexcept;
-
 	GraphicsContext* _graphicsContext = nullptr;
 
 	Size _inputSize{};

@@ -13,7 +13,8 @@ public:
 
 	bool Initialize(
 		GraphicsContext& graphicsContext,
-		SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& resources
+		Size size,
+		const ColorInfo& colorInfo
 	) noexcept;
 
 	ID3D12Resource* GetBuffer(uint32_t index) noexcept;
@@ -22,7 +23,7 @@ public:
 
 	HRESULT ProducerEndFrame(ID3D12CommandQueue* commandQueue) noexcept;
 
-	bool ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept;
+	bool ConsumerBeginFrame(uint32_t& bufferIdx, ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept;
 
 	HRESULT ConsumerEndFrame(
 		ID3D12CommandQueue* commandQueue,
@@ -33,9 +34,13 @@ public:
 
 	uint64_t GetLatestFrameNumber() const noexcept;
 
-	void UpdateResources(SmallVectorImpl<winrt::com_ptr<ID3D12Resource>>& resources) noexcept;
+	HRESULT OnResized(Size size) noexcept;
+
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
+	HRESULT _CreateBuffers() noexcept;
+
 	// 只在生产者线程访问
 	GraphicsContext* _graphicsContext = nullptr;
 
@@ -58,6 +63,9 @@ private:
 	winrt::com_ptr<ID3D12Fence1> _consumerFence;
 	uint64_t _curConsumerFenceValue = 0;
 	winrt::com_ptr<ID3D12Fence1> _producerFence;
+
+	Size _size{};
+	bool _isScRGB = false;
 };
 
 }

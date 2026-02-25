@@ -62,8 +62,19 @@ uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
 	return _frameRingBuffer.GetLatestFrameNumber();
 }
 
-bool FrameProducer::ConsumerBeginFrame(ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept {
-	return _frameRingBuffer.ConsumerBeginFrame(buffer, fenceValueToSignal);
+bool FrameProducer::ConsumerBeginFrame(
+	ID3D12Resource*& buffer,
+	D3D12_GPU_DESCRIPTOR_HANDLE& srvHandle,
+	UINT64& fenceValueToSignal
+) noexcept {
+	uint32_t bufferIdx;
+	if (!_frameRingBuffer.ConsumerBeginFrame(bufferIdx, buffer, fenceValueToSignal)) {
+		return false;
+	}
+
+	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+	srvHandle = dynamicDescriptorHeap.GetGpuHandle(_outputSrvBaseOffset + bufferIdx);
+	return true;
 }
 
 HRESULT FrameProducer::ConsumerEndFrame(
@@ -96,16 +107,19 @@ void FrameProducer::OnResizedAsync(
 			return;
 		}
 
-		SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
-		hr = _effectsDrawer.OnResized(rendererSize, outputResources);
+		hr = _effectsDrawer.OnResized(rendererSize);
 		if (!_CheckResult(hr, "EffectsDrawer::OnResized 失败")) {
 			return;
 		}
 
 		outputSize = _effectsDrawer.GetOutputSize();
 
-		_frameRingBuffer.UpdateResources(outputResources);
-		_CreateOutputUavs();
+		hr = _frameRingBuffer.OnResized(outputSize);
+		if (!_CheckResult(hr, "FrameRingBuffer::OnResized 失败")) {
+			return;
+		}
+
+		_CreateOutputDescriptors();
 
 		hr = _Render();
 		if (!_CheckResult(hr, "_Render 失败")) {
@@ -148,21 +162,16 @@ void FrameProducer::OnColorInfoChangedAsync(
 			return;
 		}
 
-		{
-			_CreateInputSrvs();
-
-			SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
-			hr = _effectsDrawer.OnColorInfoChanged(colorInfo, outputResources);
-			if (!_CheckResult(hr, "EffectsDrawer::OnColorInfoChanged 失败")) {
-				return;
-			}
-
-			if (!outputResources.empty()) {
-				_frameRingBuffer.UpdateResources(outputResources);
-				_CreateOutputUavs();
-			}
+		hr = _effectsDrawer.OnColorInfoChanged(colorInfo);
+		if (!_CheckResult(hr, "EffectsDrawer::OnColorInfoChanged 失败")) {
+			return;
 		}
 
+		_frameRingBuffer.OnColorInfoChanged(colorInfo);
+
+		_CreateInputDescriptors();
+		_CreateOutputDescriptors();
+		
 		// 等待新帧
 		while (true) {
 			bool isNewFrameAvailable;
@@ -354,17 +363,14 @@ bool FrameProducer::_Initialize(
 			uint32_t(srcRect.bottom - srcRect.top)
 		};
 
-		SmallVector<winrt::com_ptr<ID3D12Resource>, 4> outputResources;
-
-		if (!_effectsDrawer.Initialize(_graphicsContext, colorInfo, inputSize,
-			rendererSize, outputResources)) {
+		if (!_effectsDrawer.Initialize(_graphicsContext, colorInfo, inputSize, rendererSize)) {
 			Logger::Get().Error("EffectsDrawer::Initialize 失败");
 			return false;
 		}
 
 		outputSize = _effectsDrawer.GetOutputSize();
 
-		if (!_frameRingBuffer.Initialize(_graphicsContext, outputResources)) {
+		if (!_frameRingBuffer.Initialize(_graphicsContext, outputSize, colorInfo)) {
 			Logger::Get().Error("初始化 FrameRingBuffer 失败");
 			return false;
 		}
@@ -372,20 +378,27 @@ bool FrameProducer::_Initialize(
 
 	{
 		auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+
 		HRESULT hr = dynamicDescriptorHeap.Alloc(maxInFlightFrameCount, _inputSrvBaseOffset);
 		if (FAILED(hr)) {
-			Logger::Get().ComError("DynamicDescriptorHeap::Alloc", hr);
+			Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
 			return false;
 		}
 
 		hr = dynamicDescriptorHeap.Alloc(maxInFlightFrameCount + 1, _outputUavBaseOffset);
 		if (FAILED(hr)) {
-			Logger::Get().ComError("DynamicDescriptorHeap::Alloc", hr);
+			Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
 			return false;
 		}
 
-		_CreateInputSrvs();
-		_CreateOutputUavs();
+		hr = dynamicDescriptorHeap.Alloc(maxInFlightFrameCount + 1, _outputSrvBaseOffset);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
+			return false;
+		}
+
+		_CreateInputDescriptors();
+		_CreateOutputDescriptors();
 	}
 
 	_monitorThread = std::thread(&FrameProducer::_MonitorThreadProc, this);
@@ -406,7 +419,7 @@ bool FrameProducer::_Initialize(
 	return true;
 }
 
-void FrameProducer::_CreateInputSrvs() noexcept {
+void FrameProducer::_CreateInputDescriptors() noexcept {
 	ID3D12Device5* device = _graphicsContext.GetDevice();
 	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
 	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
@@ -424,22 +437,30 @@ void FrameProducer::_CreateInputSrvs() noexcept {
 	}
 }
 
-void FrameProducer::_CreateOutputUavs() noexcept {
+void FrameProducer::_CreateOutputDescriptors() noexcept {
 	ID3D12Device5* device = _graphicsContext.GetDevice();
 	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
 	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
 
 	CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc = CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM);
+	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
+		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM, 1);
 
-	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle =
+	CD3DX12_CPU_DESCRIPTOR_HANDLE uavCpuHandle =
 		dynamicDescriptorHeap.GetCpuHandle(_outputUavBaseOffset);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE srvCpuHandle =
+		dynamicDescriptorHeap.GetCpuHandle(_outputSrvBaseOffset);
 
 	const uint32_t bufferCount = ScalingWindow::Get().Options().maxProducerInFlightFrames + 1;
 	for (uint32_t i = 0; i < bufferCount; ++i) {
-		device->CreateUnorderedAccessView(
-			_frameRingBuffer.GetBuffer(i), nullptr, &uavDesc, descriptorCpuHandle);
-		descriptorCpuHandle.Offset(descriptorSize);
+		ID3D12Resource* buffer = _frameRingBuffer.GetBuffer(i);
+
+		device->CreateUnorderedAccessView(buffer, nullptr, &uavDesc, uavCpuHandle);
+		uavCpuHandle.Offset(descriptorSize);
+
+		device->CreateShaderResourceView(buffer, &srvDesc, srvCpuHandle);
+		srvCpuHandle.Offset(descriptorSize);
 	}
 }
 
@@ -481,7 +502,7 @@ HRESULT FrameProducer::_Render() noexcept {
 			CD3DX12_RESOURCE_BARRIER::Transition(
 				input, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, 0),
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				output, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0)
+				output, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0)
 		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
@@ -503,7 +524,7 @@ HRESULT FrameProducer::_Render() noexcept {
 			CD3DX12_RESOURCE_BARRIER::Transition(
 				input, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON, 0),
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
+				output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON, 0)
 		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}

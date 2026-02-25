@@ -494,10 +494,11 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 }
 
 HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
-	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
+	// 处于 COMMON 状态，依赖隐式状态转换
 	ID3D12Resource* curBuffer;
+	D3D12_GPU_DESCRIPTOR_HANDLE srvHandle;
 	UINT64 fenceValueToSignal;
-	if (!_frameProducer.ConsumerBeginFrame(curBuffer, fenceValueToSignal)) {
+	if (!_frameProducer.ConsumerBeginFrame(curBuffer, srvHandle, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -518,8 +519,13 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
-	/*commandList->SetGraphicsRootSignature(_rootSignature.get());
-	commandList->SetGraphicsRootDescriptorTable(1, );
+	{
+		ID3D12DescriptorHeap* t = _graphicsContext.GetDynamicDescriptorHeap().GetHeap();
+		commandList->SetDescriptorHeaps(1, &t);
+	}
+
+	commandList->SetGraphicsRootSignature(_rootSignature.get());
+	commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -541,80 +547,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	commandList->DrawInstanced(3, 1, 0, 0);*/
-
-	if (Size size = _presenter->GetSize(); _outputRect == Rect{ 0,0,size.width,size.height }) {
-		{
-			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST, 0);
-			commandList->ResourceBarrier(1, &barrier);
-		}
-
-		commandList->CopyResource(frameTex, curBuffer);
-	} else {
-		{
-			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
-			commandList->ResourceBarrier(1, &barrier);
-		}
-
-		// 存在黑边时应填充背景。使用交换链呈现时需要这个操作，因为我们指定了 
-		// DXGI_SWAP_EFFECT_FLIP_DISCARD，同时也是为了和 RTSS 兼容。
-		{
-			SmallVector<D3D12_RECT, 4> rects;
-			if (_outputRect.left > 0) {
-				rects.push_back({
-					0,
-					0,
-					(LONG)_outputRect.left,
-					(LONG)size.height
-				});
-			}
-			if (_outputRect.top > 0) {
-				rects.push_back({
-					(LONG)_outputRect.left,
-					0,
-					(LONG)_outputRect.right,
-					(LONG)_outputRect.top
-				});
-			}
-			if (_outputRect.right < size.width) {
-				rects.push_back({
-					(LONG)_outputRect.right,
-					0,
-					(LONG)size.width,
-					(LONG)size.height
-				});
-			}
-			if (_outputRect.bottom < size.height) {
-				rects.push_back({
-					(LONG)_outputRect.left,
-					(LONG)_outputRect.bottom,
-					(LONG)_outputRect.right,
-					(LONG)size.height
-				});
-			}
-
-			static constexpr FLOAT BLACK[4] = { 0.0f,0.0f,0.0f,1.0f };
-			commandList->ClearRenderTargetView(rtvHandle, BLACK, (UINT)rects.size(), rects.data());
-		}
-
-		{
-			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST, 0);
-			commandList->ResourceBarrier(1, &barrier);
-		}
-
-		CD3DX12_TEXTURE_COPY_LOCATION src(curBuffer, 0);
-		CD3DX12_TEXTURE_COPY_LOCATION dest(frameTex, 0);
-		commandList->CopyTextureRegion(&dest, _outputRect.left, _outputRect.top, 0, &src, nullptr);
-	}
-
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
-		commandList->ResourceBarrier(1, &barrier);
-	}
+	commandList->DrawInstanced(3, 1, 0, 0);
 
 	hr = _cursorDrawer.Draw();
 	if (FAILED(hr)) {
