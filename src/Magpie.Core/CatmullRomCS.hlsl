@@ -1,4 +1,4 @@
-// 移植自 https://github.com/obsproject/obs-studio/blob/master/libobs/data/bicubic_scale.effect
+// 基于 https://github.com/obsproject/obs-studio/blob/master/libobs/data/bicubic_scale.effect
 
 cbuffer RootConstants : register(b0) {
 	uint2 inputSize;

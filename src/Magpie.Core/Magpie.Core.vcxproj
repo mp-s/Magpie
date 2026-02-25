@@ -175,7 +175,7 @@
     <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>
-    <FxCompile Include="shaders\FullscreenVS.hlsl">
+    <FxCompile Include="shaders\CopyFrameVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
     <FxCompile Include="shaders\ImGuiImplPS.hlsl">

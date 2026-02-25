@@ -5,7 +5,7 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "SwapChainPresenter.h"
-#include "shaders/FullscreenVS.h"
+#include "shaders/CopyFrameVS.h"
 #include "shaders/SimplePS.h"
 #include "GraphicsCaptureFrameSource.h"
 #include <d3dkmthk.h>
@@ -119,9 +119,9 @@ ScalingError Renderer2::Initialize(
 			{
 				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
 				.Constants = {
-					.Num32BitValues = 2
+					.Num32BitValues = 4
 				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
 			},
 			{
 				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
@@ -137,6 +137,7 @@ ScalingError Renderer2::Initialize(
 			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
 			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
 			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+			// 边界外使用黑色填充
 			.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
 			.ShaderRegister = 0
 		};
@@ -157,7 +158,7 @@ ScalingError Renderer2::Initialize(
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
 			.pRootSignature = _rootSignature.get(),
-			.VS = CD3DX12_SHADER_BYTECODE(FullscreenVS, sizeof(FullscreenVS)),
+			.VS = CD3DX12_SHADER_BYTECODE(CopyFrameVS, sizeof(CopyFrameVS)),
 			.PS = CD3DX12_SHADER_BYTECODE(SimplePS, sizeof(SimplePS)),
 			.BlendState = {
 				.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
@@ -525,6 +526,22 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	}
 
 	commandList->SetGraphicsRootSignature(_rootSignature.get());
+
+	const Size rendererSize = _presenter->GetSize();
+
+	{
+		float outputWidth = float(_outputRect.right - _outputRect.left);
+		float outputHeight = float(_outputRect.bottom - _outputRect.top);
+		// 这些参数将输出区域 uv 变换为 0~1
+		float constants[] = {
+			rendererSize.width / outputWidth,
+			rendererSize.height / outputHeight,
+			_outputRect.left / -outputWidth,
+			_outputRect.top / -outputHeight
+		};
+		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+	}
+
 	commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
 
 	{
@@ -532,8 +549,6 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
 		commandList->ResourceBarrier(1, &barrier);
 	}
-
-	const Size rendererSize = _presenter->GetSize();
 
 	{
 		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)rendererSize.width, (float)rendererSize.height);

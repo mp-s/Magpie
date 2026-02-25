@@ -361,7 +361,7 @@
     <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="shaders\FullscreenVS.hlsl">
+    <FxCompile Include="shaders\CopyFrameVS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>
