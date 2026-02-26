@@ -91,11 +91,7 @@ bool EffectsDrawer::Initialize(
 	return true;
 }
 
-HRESULT EffectsDrawer::Draw(
-	uint32_t frameIndex,
-	D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
-	D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
-) noexcept {
+HRESULT EffectsDrawer::Draw(uint32_t frameIndex, uint32_t inputSrvOffset, uint32_t outputUavOffset) noexcept {
 	// 获取渲染时间
 	const uint32_t queryHeapIndex = 2 * frameIndex;
 	{
@@ -116,14 +112,23 @@ HRESULT EffectsDrawer::Draw(
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
 
+	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
+	D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle;
 	{
-		ID3D12DescriptorHeap* t = _graphicsContext->GetDynamicDescriptorHeap().GetHeap();
-		commandList->SetDescriptorHeaps(1, &t);
+		ID3D12DescriptorHeap* heap = dynamicDescriptorHeap.GetHeapForBinding(heapGpuHandle);
+		commandList->SetDescriptorHeaps(1, &heap);
 	}
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
 
-	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvHandle, outputUavHandle, false);
+	_catmullRomDrawer->Draw(
+		_inputSize,
+		_outputSize,
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvOffset, descriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, outputUavOffset, descriptorSize),
+		false
+	);
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
 	commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,

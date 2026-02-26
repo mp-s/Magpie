@@ -6,15 +6,15 @@ namespace Magpie {
 
 static uint32_t INITIAL_CAPACITY = 1024;
 
+DynamicDescriptorHeap::~DynamicDescriptorHeap() noexcept {
+	// DEBUG 配置下退出前确保所有槽位都已释放
+	assert(_freeBlocks.size() == 1 && *_freeBlocks.begin() == std::make_pair(_capacity, _capacity));
+}
+
 bool DynamicDescriptorHeap::Initialize(ID3D12Device5* device) noexcept {
 	_device = device;
 	_capacity = INITIAL_CAPACITY;
-#ifdef _DEBUG
-	// 调试时从索引 1 开始分配以便于发现错误
-	_freeBlocks.emplace(_capacity, _capacity - 1);
-#else
 	_freeBlocks.emplace(_capacity, _capacity);
-#endif
 
 	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
@@ -54,10 +54,7 @@ static uint32_t GetBlockOffset(const std::pair<const uint32_t, uint32_t>& freeBl
 }
 
 HRESULT DynamicDescriptorHeap::Free(uint32_t offset, uint32_t count) noexcept {
-#ifdef _DEBUG
-	assert(offset != 0);
-#endif
-	assert(offset + count <= _capacity);
+	assert(offset != std::numeric_limits<uint32_t>::max() && offset + count <= _capacity);
 
 	auto lk = _lock.lock_exclusive();
 
@@ -93,19 +90,20 @@ HRESULT DynamicDescriptorHeap::Free(uint32_t offset, uint32_t count) noexcept {
 	return S_OK;
 }
 
-ID3D12DescriptorHeap* DynamicDescriptorHeap::GetHeap() noexcept {
+wil::rwlock_release_shared_scope_exit DynamicDescriptorHeap::LockForCreatingDescriptor(
+	D3D12_CPU_DESCRIPTOR_HANDLE& cpuHandle
+) noexcept {
 	auto lk = _lock.lock_shared();
+	cpuHandle = _cpuHandle;
+	return lk;
+}
+
+ID3D12DescriptorHeap* DynamicDescriptorHeap::GetHeapForBinding(
+	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+) noexcept {
+	auto lk = _lock.lock_shared();
+	gpuHandle = _gpuHandle;
 	return _curHeap.get();
-}
-
-CD3DX12_CPU_DESCRIPTOR_HANDLE DynamicDescriptorHeap::GetCpuHandle(uint32_t offset) noexcept {
-	auto lk = _lock.lock_shared();
-	return CD3DX12_CPU_DESCRIPTOR_HANDLE(_cpuHandle, offset, _descriptorSize);
-}
-
-CD3DX12_GPU_DESCRIPTOR_HANDLE DynamicDescriptorHeap::GetGpuHandle(uint32_t offset) noexcept {
-	auto lk = _lock.lock_shared();
-	return CD3DX12_GPU_DESCRIPTOR_HANDLE(_gpuHandle, offset, _descriptorSize);
 }
 
 HRESULT DynamicDescriptorHeap::_CreateHeap() noexcept {

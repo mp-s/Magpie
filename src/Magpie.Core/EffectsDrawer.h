@@ -17,11 +17,7 @@ public:
 		Size rendererSize
 	) noexcept;
 
-	HRESULT Draw(
-		uint32_t frameIndex,
-		D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
-		D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
-	) noexcept;
+	HRESULT Draw(uint32_t frameIndex, uint32_t inputSrvOffset, uint32_t outputUavOffset) noexcept;
 
 	Size GetOutputSize() const noexcept {
 		return _outputSize;

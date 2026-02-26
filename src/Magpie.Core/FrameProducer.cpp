@@ -11,6 +11,23 @@
 namespace Magpie {
 
 FrameProducer::~FrameProducer() noexcept {
+#ifdef _DEBUG
+	{
+		auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+		const uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
+
+		if (_inputSrvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+			dynamicDescriptorHeap.Free(_inputSrvBaseOffset, maxInFlightFrameCount);
+		}
+		if (_outputUavBaseOffset != std::numeric_limits<uint32_t>::max()) {
+			dynamicDescriptorHeap.Free(_outputUavBaseOffset, maxInFlightFrameCount + 1);
+		}
+		if (_outputSrvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+			dynamicDescriptorHeap.Free(_outputSrvBaseOffset, maxInFlightFrameCount + 1);
+		}
+	}
+#endif
+
 	if (_producerThread.joinable()) {
 		const HANDLE hThread = _producerThread.native_handle();
 
@@ -64,7 +81,7 @@ uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
 
 bool FrameProducer::ConsumerBeginFrame(
 	ID3D12Resource*& buffer,
-	D3D12_GPU_DESCRIPTOR_HANDLE& srvHandle,
+	uint32_t& srvOffset,
 	UINT64& fenceValueToSignal
 ) noexcept {
 	uint32_t bufferIdx;
@@ -72,8 +89,7 @@ bool FrameProducer::ConsumerBeginFrame(
 		return false;
 	}
 
-	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
-	srvHandle = dynamicDescriptorHeap.GetGpuHandle(_outputSrvBaseOffset + bufferIdx);
+	srvOffset = _outputSrvBaseOffset + bufferIdx;
 	return true;
 }
 
@@ -427,13 +443,15 @@ void FrameProducer::_CreateInputDescriptors() noexcept {
 	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, 1);
 
-	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle =
-		dynamicDescriptorHeap.GetCpuHandle(_inputSrvBaseOffset);
-
 	const uint32_t bufferCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle{};
+	auto lk = dynamicDescriptorHeap.LockForCreatingDescriptor(cpuHandle);
+	cpuHandle.Offset(_inputSrvBaseOffset, descriptorSize);
+
 	for (uint32_t i = 0; i < bufferCount; ++i) {
-		device->CreateShaderResourceView(_frameSource->GetOutput(i), &srvDesc, descriptorCpuHandle);
-		descriptorCpuHandle.Offset(descriptorSize);
+		device->CreateShaderResourceView(_frameSource->GetOutput(i), &srvDesc, cpuHandle);
+		cpuHandle.Offset(descriptorSize);
 	}
 }
 
@@ -447,12 +465,14 @@ void FrameProducer::_CreateOutputDescriptors() noexcept {
 	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM, 1);
 
-	CD3DX12_CPU_DESCRIPTOR_HANDLE uavCpuHandle =
-		dynamicDescriptorHeap.GetCpuHandle(_outputUavBaseOffset);
-	CD3DX12_CPU_DESCRIPTOR_HANDLE srvCpuHandle =
-		dynamicDescriptorHeap.GetCpuHandle(_outputSrvBaseOffset);
-
 	const uint32_t bufferCount = ScalingWindow::Get().Options().maxProducerInFlightFrames + 1;
+
+	D3D12_CPU_DESCRIPTOR_HANDLE heapCpuHandle;
+	auto lk = dynamicDescriptorHeap.LockForCreatingDescriptor(heapCpuHandle);
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE uavCpuHandle(heapCpuHandle, _outputUavBaseOffset, descriptorSize);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE srvCpuHandle(heapCpuHandle, _outputSrvBaseOffset, descriptorSize);
+
 	for (uint32_t i = 0; i < bufferCount; ++i) {
 		ID3D12Resource* buffer = _frameRingBuffer.GetBuffer(i);
 
@@ -507,12 +527,10 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
-	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
-
 	hr = _effectsDrawer.Draw(
 		frameIndex,
-		dynamicDescriptorHeap.GetGpuHandle(_inputSrvBaseOffset + frameSourceOutputIdx),
-		dynamicDescriptorHeap.GetGpuHandle(_outputUavBaseOffset + frameRingBufferIdx)
+		_inputSrvBaseOffset + frameSourceOutputIdx,
+		_outputUavBaseOffset + frameRingBufferIdx
 	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("EffectsDrawer::Draw 失败", hr);

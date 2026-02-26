@@ -10,6 +10,8 @@ public:
 	DynamicDescriptorHeap(const DynamicDescriptorHeap&) = delete;
 	DynamicDescriptorHeap(DynamicDescriptorHeap&&) = delete;
 
+	~DynamicDescriptorHeap() noexcept;
+
 	bool Initialize(ID3D12Device5* device) noexcept;
 
 	HRESULT Alloc(uint32_t count, uint32_t& offset) noexcept;
@@ -21,11 +23,13 @@ public:
 		return _descriptorSize;
 	}
 
-	ID3D12DescriptorHeap* GetHeap() noexcept;
+	wil::rwlock_release_shared_scope_exit LockForCreatingDescriptor(
+		D3D12_CPU_DESCRIPTOR_HANDLE& cpuHandle
+	) noexcept;
 
-	CD3DX12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(uint32_t offset) noexcept;
-
-	CD3DX12_GPU_DESCRIPTOR_HANDLE GetGpuHandle(uint32_t offset) noexcept;
+	ID3D12DescriptorHeap* GetHeapForBinding(
+		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+	) noexcept;
 
 private:
 	HRESULT _CreateHeap() noexcept;

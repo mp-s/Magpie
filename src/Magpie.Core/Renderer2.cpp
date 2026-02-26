@@ -497,9 +497,9 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COMMON 状态，依赖隐式状态转换
 	ID3D12Resource* curBuffer;
-	D3D12_GPU_DESCRIPTOR_HANDLE srvHandle;
+	uint32_t curBufferSrvOffset;
 	UINT64 fenceValueToSignal;
-	if (!_frameProducer.ConsumerBeginFrame(curBuffer, srvHandle, fenceValueToSignal)) {
+	if (!_frameProducer.ConsumerBeginFrame(curBuffer, curBufferSrvOffset, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -520,9 +520,12 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
+	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
+	CD3DX12_GPU_DESCRIPTOR_HANDLE heapGpuHandle{};
 	{
-		ID3D12DescriptorHeap* t = _graphicsContext.GetDynamicDescriptorHeap().GetHeap();
-		commandList->SetDescriptorHeaps(1, &t);
+		ID3D12DescriptorHeap* heap = dynamicDescriptorHeap.GetHeapForBinding(heapGpuHandle);
+		commandList->SetDescriptorHeaps(1, &heap);
 	}
 
 	commandList->SetGraphicsRootSignature(_rootSignature.get());
@@ -542,7 +545,8 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 	}
 
-	commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
+	commandList->SetGraphicsRootDescriptorTable(
+		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, curBufferSrvOffset, descriptorSize));
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
