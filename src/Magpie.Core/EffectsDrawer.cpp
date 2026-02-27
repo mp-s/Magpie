@@ -91,7 +91,7 @@ bool EffectsDrawer::Initialize(
 	return true;
 }
 
-HRESULT EffectsDrawer::Draw(uint32_t frameIndex, uint32_t inputSrvOffset, uint32_t outputUavOffset) noexcept {
+HRESULT EffectsDrawer::Draw(uint32_t frameIndex, uint32_t inputSrvIdx, uint32_t outputUavIdx) noexcept {
 	// 获取渲染时间
 	const uint32_t queryHeapIndex = 2 * frameIndex;
 	{
@@ -125,8 +125,8 @@ HRESULT EffectsDrawer::Draw(uint32_t frameIndex, uint32_t inputSrvOffset, uint32
 	_catmullRomDrawer->Draw(
 		_inputSize,
 		_outputSize,
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvOffset, descriptorSize),
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, outputUavOffset, descriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvIdx, descriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, outputUavIdx, descriptorSize),
 		false
 	);
 

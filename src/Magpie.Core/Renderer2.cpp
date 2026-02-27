@@ -497,9 +497,9 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COMMON 状态，依赖隐式状态转换
 	ID3D12Resource* curBuffer;
-	uint32_t curBufferSrvOffset;
+	uint32_t curBufferSrvIdx;
 	UINT64 fenceValueToSignal;
-	if (!_frameProducer.ConsumerBeginFrame(curBuffer, curBufferSrvOffset, fenceValueToSignal)) {
+	if (!_frameProducer.ConsumerBeginFrame(curBuffer, curBufferSrvIdx, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -546,7 +546,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	}
 
 	commandList->SetGraphicsRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, curBufferSrvOffset, descriptorSize));
+		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, curBufferSrvIdx, descriptorSize));
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
