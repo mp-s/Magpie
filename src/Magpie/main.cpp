@@ -28,7 +28,7 @@
 
 // Debug 配置下使用 Agility SDK 辅助调试
 #ifdef _DEBUG
-extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
+extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 619; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 #endif
 
@@ -60,7 +60,7 @@ static void InitializeDirectX() noexcept {
 			
 #ifdef MP_DEBUG_INFO
 			if (DEBUG_INFO.enableGPUBasedValidation) {
-				// 会产生警告消息，而且有严重内存泄露
+				// 会产生警告消息
 				debugController->SetEnableGPUBasedValidation(TRUE);
 			}
 #endif
