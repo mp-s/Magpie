@@ -34,7 +34,9 @@ public:
 	bool ConsumerBeginFrame(
 		ID3D12Resource*& buffer,
 		uint32_t& srvIdx,
-		UINT64& fenceValueToSignal
+		UINT64& fenceValueToSignal,
+		ID3D12DescriptorHeap*& heap,
+		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
 	) noexcept;
 
 	HRESULT ConsumerEndFrame(

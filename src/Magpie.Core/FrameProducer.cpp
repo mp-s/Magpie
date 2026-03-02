@@ -73,10 +73,13 @@ uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
 bool FrameProducer::ConsumerBeginFrame(
 	ID3D12Resource*& buffer,
 	uint32_t& srvIdx,
-	UINT64& fenceValueToSignal
+	UINT64& fenceValueToSignal,
+	ID3D12DescriptorHeap*& heap,
+	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
 ) noexcept {
 	uint32_t bufferIdx;
-	if (!_frameRingBuffer.ConsumerBeginFrame(bufferIdx, buffer, fenceValueToSignal)) {
+	if (!_frameRingBuffer.ConsumerBeginFrame(
+		bufferIdx, buffer, fenceValueToSignal, heap, gpuHandle)) {
 		return false;
 	}
 
@@ -462,7 +465,10 @@ HRESULT FrameProducer::_Render() noexcept {
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 
 	uint32_t frameRingBufferIdx;
-	hr = _frameRingBuffer.ProducerBeginFrame(frameRingBufferIdx, commandQueue);
+	ID3D12DescriptorHeap* heap;
+	D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle;
+	hr = _frameRingBuffer.ProducerBeginFrame(
+		commandQueue, frameRingBufferIdx, heap, heapGpuHandle);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("FrameRingBuffer::ProducerBeginFrame 失败", hr);
 		return hr;
@@ -482,6 +488,8 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
+	commandList->SetDescriptorHeaps(1, &heap);
+
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(
@@ -492,10 +500,12 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
+	const uint32_t descriptorSize = _graphicsContext.GetDynamicDescriptorHeap().GetDescriptorSize();
+
 	hr = _effectsDrawer.Draw(
 		frameIndex,
-		_inputSrvBaseIdx + frameSourceOutputIdx,
-		_outputUavBaseIdx + frameRingBufferIdx
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _inputSrvBaseIdx + frameSourceOutputIdx, descriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _outputUavBaseIdx + frameRingBufferIdx, descriptorSize)
 	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("EffectsDrawer::Draw 失败", hr);

@@ -48,7 +48,10 @@ public:
 	) noexcept;
 
 	ID3D12DescriptorHeap* GetHeapForBinding(
-		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle,
+		uint64_t completeFenceValue,
+		uint64_t curFenceValue,
+		bool isConsumer
 	) noexcept;
 
 private:
@@ -67,11 +70,16 @@ private:
 	D3D12_CPU_DESCRIPTOR_HANDLE _shaderInvisibleCpuHandle{};
 	D3D12_CPU_DESCRIPTOR_HANDLE _cpuHandle{};
 	D3D12_GPU_DESCRIPTOR_HANDLE _gpuHandle{};
+
+	uint64_t _producerCompleteFenceValue = 0;
+	uint64_t _consumerCompleteFenceValue = 0;
+	uint64_t _producerCurFenceValue = 0;
+	uint64_t _consumerCurFenceValue = 0;
 	
 	struct _RetiredHeap {
 		winrt::com_ptr<ID3D12DescriptorHeap> heap;
-		uint64_t producerFenceValue;
-		uint64_t consumerFenceValue;
+		uint64_t producerCompleteFenceValue;
+		uint64_t consumerCompleteFenceValue;
 	};
 	SmallVector<_RetiredHeap, 1> _retiredHeaps;
 

@@ -19,11 +19,22 @@ public:
 
 	ID3D12Resource* GetBuffer(uint32_t index) noexcept;
 
-	HRESULT ProducerBeginFrame(uint32_t& bufferIdx, ID3D12CommandQueue* commandQueue) noexcept;
+	HRESULT ProducerBeginFrame(
+		ID3D12CommandQueue* commandQueue,
+		uint32_t& bufferIdx,
+		ID3D12DescriptorHeap*& heap,
+		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+	) noexcept;
 
 	HRESULT ProducerEndFrame(ID3D12CommandQueue* commandQueue) noexcept;
 
-	bool ConsumerBeginFrame(uint32_t& bufferIdx, ID3D12Resource*& buffer, UINT64& fenceValueToSignal) noexcept;
+	bool ConsumerBeginFrame(
+		uint32_t& bufferIdx,
+		ID3D12Resource*& buffer,
+		UINT64& fenceValueToSignal,
+		ID3D12DescriptorHeap*& heap,
+		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+	) noexcept;
 
 	HRESULT ConsumerEndFrame(
 		ID3D12CommandQueue* commandQueue,

@@ -75,7 +75,11 @@ HRESULT DynamicDescriptorHeap::Alloc(uint32_t count, uint32_t& idx) noexcept {
 		_freeBlocks.emplace(_capacity, newSlotCount - count);
 	}
 
-	_retiredHeaps.push_back(_RetiredHeap{ .heap = std::move(_curHeap) });
+	_retiredHeaps.push_back(_RetiredHeap{
+		.heap = std::move(_curHeap),
+		.producerCompleteFenceValue = _producerCompleteFenceValue,
+		.consumerCompleteFenceValue = _consumerCompleteFenceValue
+	});
 	winrt::com_ptr<ID3D12DescriptorHeap> oldShaderInvisibleHeap = std::move(_curShaderInvisibleHeap);
 	D3D12_CPU_DESCRIPTOR_HANDLE oldShaderInvisibleCpuHandle = _shaderInvisibleCpuHandle;
 
@@ -209,10 +213,36 @@ void DynamicDescriptorHeap::CreateUnorderedAccessViews(
 }
 
 ID3D12DescriptorHeap* DynamicDescriptorHeap::GetHeapForBinding(
-	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle,
+	uint64_t completeFenceValue,
+	uint64_t curFenceValue,
+	bool isConsumer
 ) noexcept {
-	auto lk = _lock.lock_shared();
+	auto lk = _lock.lock_exclusive();
 	gpuHandle = _gpuHandle;
+
+	if (isConsumer) {
+		_consumerCompleteFenceValue = completeFenceValue;
+		_consumerCurFenceValue = curFenceValue;
+	} else {
+		_producerCompleteFenceValue = completeFenceValue;
+		_producerCurFenceValue = curFenceValue;
+	}
+
+	if (!_retiredHeaps.empty()) {
+		auto it = std::find_if(
+			_retiredHeaps.begin(),
+			_retiredHeaps.end(),
+			[&](const _RetiredHeap& retiredHeap) {
+				return retiredHeap.producerCompleteFenceValue > _producerCurFenceValue ||
+					retiredHeap.consumerCompleteFenceValue > _consumerCurFenceValue;
+			}
+		);
+		if (it != _retiredHeaps.begin()) {
+			_retiredHeaps.erase(_retiredHeaps.begin(), it);
+		}
+	}
+
 	return _curHeap.get();
 }
 
