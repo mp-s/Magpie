@@ -49,39 +49,23 @@ public:
 
 	ID3D12DescriptorHeap* GetHeapForBinding(
 		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle,
-		uint64_t completeFenceValue,
-		uint64_t curFenceValue,
+		uint64_t fenceValue,
+		uint64_t completedFenceValue,
 		bool isConsumer
 	) noexcept;
 
 private:
 	HRESULT _CreateHeap() noexcept;
 
+	// 用于同步 _capacity 和 _freeBlocks
+	wil::srwlock _allocationLock;
+	// 用于同步描述符堆相关成员的访问
+	wil::srwlock _heapLock;
+
 	ID3D12Device5* _device = nullptr;
-	
-	// 用于同步对下面所有成员的访问
-	wil::srwlock _lock;
-
 	uint32_t _descriptorSize = 0;
-	uint32_t _capacity = 0;
-
-	winrt::com_ptr<ID3D12DescriptorHeap> _curShaderInvisibleHeap;
-	winrt::com_ptr<ID3D12DescriptorHeap> _curHeap;
-	D3D12_CPU_DESCRIPTOR_HANDLE _shaderInvisibleCpuHandle{};
-	D3D12_CPU_DESCRIPTOR_HANDLE _cpuHandle{};
-	D3D12_GPU_DESCRIPTOR_HANDLE _gpuHandle{};
-
-	uint64_t _producerCompleteFenceValue = 0;
-	uint64_t _consumerCompleteFenceValue = 0;
-	uint64_t _producerCurFenceValue = 0;
-	uint64_t _consumerCurFenceValue = 0;
 	
-	struct _RetiredHeap {
-		winrt::com_ptr<ID3D12DescriptorHeap> heap;
-		uint64_t producerCompleteFenceValue;
-		uint64_t consumerCompleteFenceValue;
-	};
-	SmallVector<_RetiredHeap, 1> _retiredHeaps;
+	uint32_t _capacity = 0;
 
 	// end(idx+size) -> size
 	// 以 idx+size 作为键可以大大降低删除和插入键的频率
@@ -91,6 +75,24 @@ private:
 #else
 	phmap::btree_map<uint32_t, uint32_t> _freeBlocks;
 #endif
+
+	winrt::com_ptr<ID3D12DescriptorHeap> _curShaderInvisibleHeap;
+	winrt::com_ptr<ID3D12DescriptorHeap> _curHeap;
+	D3D12_CPU_DESCRIPTOR_HANDLE _shaderInvisibleCpuHandle{};
+	D3D12_CPU_DESCRIPTOR_HANDLE _cpuHandle{};
+	D3D12_GPU_DESCRIPTOR_HANDLE _gpuHandle{};
+
+	uint64_t _producerFenceValue = 0;
+	uint64_t _consumerFenceValue = 0;
+	uint64_t _producerCompletedFenceValue = 0;
+	uint64_t _consumerCompletedFenceValue = 0;
+	
+	struct _RetiredHeap {
+		winrt::com_ptr<ID3D12DescriptorHeap> heap;
+		uint64_t producerFenceValue;
+		uint64_t consumerFenceValue;
+	};
+	SmallVector<_RetiredHeap, 1> _retiredHeaps;
 };
 
 }

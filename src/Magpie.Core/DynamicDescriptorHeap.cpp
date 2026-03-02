@@ -31,54 +31,60 @@ static uint32_t GetBlockOffset(const std::pair<const uint32_t, uint32_t>& freeBl
 }
 
 HRESULT DynamicDescriptorHeap::Alloc(uint32_t count, uint32_t& idx) noexcept {
-	auto lk = _lock.lock_exclusive();
-	
-	for (auto it = _freeBlocks.begin(); it != _freeBlocks.end(); ++it) {
-		auto& [blockEnd, blockSize] = *it;
+	uint32_t oldCapacity;
+	{
+		auto lk = _allocationLock.lock_exclusive();
 
-		// 寻找第一个足够大的空闲块
-		if (blockSize >= count) {
-			idx = blockEnd - blockSize;
+		for (auto it = _freeBlocks.begin(); it != _freeBlocks.end(); ++it) {
+			auto& [blockEnd, blockSize] = *it;
 
-			if (blockSize == count) {
-				_freeBlocks.erase(it);
-			} else {
-				blockSize -= count;
+			// 寻找第一个足够大的空闲块
+			if (blockSize >= count) {
+				idx = blockEnd - blockSize;
+
+				if (blockSize == count) {
+					_freeBlocks.erase(it);
+				} else {
+					blockSize -= count;
+				}
+
+				return S_OK;
 			}
+		}
 
-			return S_OK;
+		// 扩容
+		oldCapacity = _capacity;
+		uint32_t newSlotCount;
+		do {
+			_capacity *= 2;
+			newSlotCount = _capacity - oldCapacity;
+		} while (newSlotCount <= count);
+
+		bool canMergeLast = false;
+		if (!_freeBlocks.empty()) {
+			auto lastIt = std::prev(_freeBlocks.end());
+			if (lastIt->first == oldCapacity) {
+				canMergeLast = true;
+				// 扩容最后一个空闲块并分配
+				idx = GetBlockOffset(*lastIt);
+				uint32_t newBlockSize = lastIt->second + newSlotCount - count;
+				_freeBlocks.erase(lastIt);
+				_freeBlocks.emplace(_capacity, newBlockSize);
+			}
+		}
+		if (!canMergeLast) {
+			idx = oldCapacity;
+			_freeBlocks.emplace(_capacity, newSlotCount - count);
 		}
 	}
 
-	// 扩容
-	const uint32_t oldCapacity = _capacity;
-	uint32_t newSlotCount;
-	do {
-		_capacity *= 2;
-		newSlotCount = _capacity - oldCapacity;
-	} while (newSlotCount <= count);
-	
-	bool canMergeLast = false;
-	if (!_freeBlocks.empty()) {
-		auto lastIt = std::prev(_freeBlocks.end());
-		if (lastIt->first == oldCapacity) {
-			canMergeLast = true;
-			// 扩容最后一个空闲块并分配
-			idx = GetBlockOffset(*lastIt);
-			uint32_t newBlockSize = lastIt->second + newSlotCount - count;
-			_freeBlocks.erase(lastIt);
-			_freeBlocks.emplace(_capacity, newBlockSize);
-		}
-	}
-	if (!canMergeLast) {
-		idx = oldCapacity;
-		_freeBlocks.emplace(_capacity, newSlotCount - count);
-	}
+	auto lk = _heapLock.lock_exclusive();
 
+	// 延迟销毁目前使用的描述符堆
 	_retiredHeaps.push_back(_RetiredHeap{
 		.heap = std::move(_curHeap),
-		.producerCompleteFenceValue = _producerCompleteFenceValue,
-		.consumerCompleteFenceValue = _consumerCompleteFenceValue
+		.producerFenceValue = _producerFenceValue,
+		.consumerFenceValue = _consumerFenceValue
 	});
 	winrt::com_ptr<ID3D12DescriptorHeap> oldShaderInvisibleHeap = std::move(_curShaderInvisibleHeap);
 	D3D12_CPU_DESCRIPTOR_HANDLE oldShaderInvisibleCpuHandle = _shaderInvisibleCpuHandle;
@@ -100,7 +106,7 @@ HRESULT DynamicDescriptorHeap::Alloc(uint32_t count, uint32_t& idx) noexcept {
 HRESULT DynamicDescriptorHeap::Free(uint32_t idx, uint32_t count) noexcept {
 	assert(idx != std::numeric_limits<uint32_t>::max() && idx + count <= _capacity);
 
-	auto lk = _lock.lock_exclusive();
+	auto lk = _allocationLock.lock_exclusive();
 
 	const auto freeBlocksEnd = _freeBlocks.end();
 
@@ -139,7 +145,7 @@ void DynamicDescriptorHeap::CreateShaderResourceView(
 	const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc,
 	uint32_t idx
 ) noexcept {
-	auto lk = _lock.lock_shared();
+	auto lk = _heapLock.lock_shared();
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(_shaderInvisibleCpuHandle, idx, _descriptorSize);
 	_device->CreateShaderResourceView(pResource, pDesc, cpuHandle);
@@ -157,7 +163,7 @@ void DynamicDescriptorHeap::CreateShaderResourceViews(
 	const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc,
 	uint32_t baseIdx
 ) noexcept {
-	auto lk = _lock.lock_shared();
+	auto lk = _heapLock.lock_shared();
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(_shaderInvisibleCpuHandle, baseIdx, _descriptorSize);
 	for (ID3D12Resource* resource : resources) {
@@ -178,7 +184,7 @@ void DynamicDescriptorHeap::CreateUnorderedAccessView(
 	const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc,
 	uint32_t idx
 ) noexcept {
-	auto lk = _lock.lock_shared();
+	auto lk = _heapLock.lock_shared();
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(_shaderInvisibleCpuHandle, idx, _descriptorSize);
 	_device->CreateUnorderedAccessView(pResource, nullptr, pDesc, cpuHandle);
@@ -196,7 +202,7 @@ void DynamicDescriptorHeap::CreateUnorderedAccessViews(
 	const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc,
 	uint32_t baseIdx
 ) noexcept {
-	auto lk = _lock.lock_shared();
+	auto lk = _heapLock.lock_shared();
 
 	CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(_shaderInvisibleCpuHandle, baseIdx, _descriptorSize);
 	for (ID3D12Resource* resource : resources) {
@@ -214,28 +220,30 @@ void DynamicDescriptorHeap::CreateUnorderedAccessViews(
 
 ID3D12DescriptorHeap* DynamicDescriptorHeap::GetHeapForBinding(
 	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle,
-	uint64_t completeFenceValue,
-	uint64_t curFenceValue,
+	uint64_t fenceValue,
+	uint64_t completedFenceValue,
 	bool isConsumer
 ) noexcept {
-	auto lk = _lock.lock_exclusive();
+	auto lk = _heapLock.lock_exclusive();
+
 	gpuHandle = _gpuHandle;
 
 	if (isConsumer) {
-		_consumerCompleteFenceValue = completeFenceValue;
-		_consumerCurFenceValue = curFenceValue;
+		_consumerFenceValue = fenceValue;
+		_consumerCompletedFenceValue = completedFenceValue;
 	} else {
-		_producerCompleteFenceValue = completeFenceValue;
-		_producerCurFenceValue = curFenceValue;
+		_producerFenceValue = fenceValue;
+		_producerCompletedFenceValue = completedFenceValue;
 	}
 
 	if (!_retiredHeaps.empty()) {
+		// 销毁已不再使用的描述符堆
 		auto it = std::find_if(
 			_retiredHeaps.begin(),
 			_retiredHeaps.end(),
 			[&](const _RetiredHeap& retiredHeap) {
-				return retiredHeap.producerCompleteFenceValue > _producerCurFenceValue ||
-					retiredHeap.consumerCompleteFenceValue > _consumerCurFenceValue;
+				return retiredHeap.producerFenceValue > _producerCompletedFenceValue ||
+					retiredHeap.consumerFenceValue > _consumerCompletedFenceValue;
 			}
 		);
 		if (it != _retiredHeaps.begin()) {

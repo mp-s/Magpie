@@ -11,14 +11,6 @@
 namespace Magpie {
 
 FrameProducer::~FrameProducer() noexcept {
-#ifdef _DEBUG
-	if (_inputSrvBaseIdx != std::numeric_limits<uint32_t>::max()) {
-		auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
-		uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-		dynamicDescriptorHeap.Free(_inputSrvBaseIdx, 3 * maxInFlightFrameCount + 2);
-	}
-#endif
-
 	if (_producerThread.joinable()) {
 		const HANDLE hThread = _producerThread.native_handle();
 
@@ -37,6 +29,14 @@ FrameProducer::~FrameProducer() noexcept {
 
 		_producerThread.join();
 	}
+
+#ifdef _DEBUG
+	if (_inputSrvBaseIdx != std::numeric_limits<uint32_t>::max()) {
+		auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+		uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
+		dynamicDescriptorHeap.Free(_inputSrvBaseIdx, 3 * maxInFlightFrameCount + 2);
+	}
+#endif
 }
 
 void FrameProducer::InitializeAsync(
