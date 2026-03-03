@@ -498,6 +498,12 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 	SimpleTask<HRESULT> task;
 	_frameProducer.OnColorInfoChangedAsync(_colorInfo, task);
 
+	hr = _cursorDrawer.OnColorInfoChanged(_colorInfo);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CursorDrawer::OnColorInfoChanged 失败", hr);
+		return hr;
+	}
+
 	hr = _presenter->OnColorInfoChanged(_colorInfo);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("SwapChainPresenter::OnColorInfoChanged 失败", hr);
@@ -531,8 +537,8 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// SwapChain::BeginFrame 和 GraphicsContext::BeginFrame 无顺序要求，不过
 	// 前者通常等待时间更久，将它放在前面可以减少等待次数。
 	ID3D12Resource* frameTex;
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	_presenter->BeginFrame(&frameTex, rtvHandle);
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle, rawRtvHandle;
+	_presenter->BeginFrame(&frameTex, rtvHandle, rawRtvHandle);
 
 	uint32_t frameIndex;
 	HRESULT hr = _graphicsContext.BeginFrame(frameIndex, _pipelineState.get());
@@ -586,6 +592,11 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 	commandList->DrawInstanced(3, 1, 0, 0);
+
+	// 为了和 OS 保持一致，SDR 下在 sRGB 空间中混合
+	if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
+		commandList->OMSetRenderTargets(1, &rawRtvHandle, FALSE, nullptr);
+	}
 
 	hr = _cursorDrawer.Draw(heapGpuHandle);
 	if (FAILED(hr)) {

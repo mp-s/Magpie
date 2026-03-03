@@ -96,16 +96,10 @@ bool SwapChainPresenter::Initialize(
 
 	dxgiFactory->MakeWindowAssociation(hwndAttach, DXGI_MWA_NO_ALT_ENTER);
 
-	{
-		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {
-			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-			.NumDescriptors = _bufferCount
-		};
-		hr = device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&_rtvHeap));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
-			return false;
-		}
+	hr = _CreateRtvHeap();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_CreateRtvHeap 失败", hr);
+		return false;
 	}
 
 	_rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -121,13 +115,22 @@ bool SwapChainPresenter::Initialize(
 	return true;
 }
 
-void SwapChainPresenter::BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept {
+void SwapChainPresenter::BeginFrame(
+	ID3D12Resource** frameTex,
+	D3D12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
+	D3D12_CPU_DESCRIPTOR_HANDLE& rawRtvHandle
+) noexcept {
 	_frameLatencyWaitableObject.wait(1000);
 
 	const uint32_t curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 	*frameTex = _frameBuffers[curBufferIndex].get();
+
 	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), curBufferIndex, _rtvDescriptorSize);
+	if (!_isScRGB) {
+		rawRtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+			rtvHandle, _bufferCount, _rtvDescriptorSize);
+	}
 }
 
 // 和 DwmFlush 效果相同但更准确
@@ -344,7 +347,13 @@ HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexc
 		return S_OK;
 	}
 
-	HRESULT hr = _RecreateBuffers();
+	HRESULT hr = _CreateRtvHeap();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_CreateRtvHeap 失败", hr);
+		return hr;
+	}
+
+	hr = _RecreateBuffers();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("_RecreateBuffers 失败", hr);
 		return hr;
@@ -357,6 +366,22 @@ HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexc
 	}
 
 	return hr;
+}
+
+HRESULT SwapChainPresenter::_CreateRtvHeap() noexcept {
+	ID3D12Device5* device = _graphicContext->GetDevice();
+
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {
+		.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+		.NumDescriptors = _isScRGB ? _bufferCount : _bufferCount * 2
+	};
+	HRESULT hr = device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&_rtvHeap));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
 }
 
 HRESULT SwapChainPresenter::_RecreateBuffers() noexcept {
@@ -400,6 +425,14 @@ HRESULT SwapChainPresenter::_CreateDisplayDependentResources() noexcept {
 			.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
 		};
 		device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc, rtvHandle);
+		
+		// 处于 sRGB 空间时创建两个 RTV
+		if (!_isScRGB) {
+			rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc,
+				CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvHandle, _bufferCount, _rtvDescriptorSize));
+		}
+
 		rtvHandle.Offset(1, _rtvDescriptorSize);
 	}
 

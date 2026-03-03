@@ -8,6 +8,9 @@ public:
 	ByteBuffer(const ByteBuffer&) = delete;
 	ByteBuffer(ByteBuffer&&) = default;
 
+	ByteBuffer& operator=(const ByteBuffer&) = delete;
+	ByteBuffer& operator=(ByteBuffer&&) = default;
+
 #ifdef _DEBUG
 	explicit ByteBuffer(uint32_t size) : _data(size) {
 		assert(size > 0);

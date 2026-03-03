@@ -59,12 +59,15 @@ public:
 		_destRect = destRect;
 	}
 
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+
 private:
-	// 所有光标纹理使用线性 RGB 空间
+	// SDR 色域下使用 sRGB 空间，否则使用线性 RGB 空间。截至 Win11 25H2，Windows 在 WCG
+	// 和 HDR 下光标的色域和透明度经常变化，没有统一标准。
 	enum class _CursorType {
 		// 彩色光标
-		// 纹理格式: DXGI_FORMAT_R8G8B8A8_UNORM
-		// 计算公式: FinalColor = ScreenColor * CursorColor.a + CursorColor.rgb
+		// 纹理格式: DXGI_FORMAT_R16G16B16A16_FLOAT
+		// 计算公式: FinalColor = CursorColor.rgb + ScreenColor * CursorColor.a
 		// 纹理中 RGB 通道已预乘 A 通道 (premultiplied alpha)，A 通道已预先取反，这是为了
 		// 减少着色器的计算量以及确保 (可能进行的) 双线性插值的准确性。
 		Color = 0,
@@ -87,7 +90,7 @@ private:
 		uint32_t _textureSrvIdx = std::numeric_limits<uint32_t>::max();
 
 		Size originSize;
-		ByteBuffer originPixels;
+		ByteBuffer originTextureData;
 		winrt::com_ptr<ID3D12Resource> originUploadBuffer;
 		winrt::com_ptr<ID3D12Resource> originTexture;
 	};
@@ -105,7 +108,7 @@ private:
 		uint32_t preferedWidth
 	) const noexcept;
 
-	bool _ResolveCursorPixels(_CursorInfo& cursorInfo, HBITMAP hColorBmp, HBITMAP hMaskBmp) noexcept;
+	bool _ResolveCursorPixels(_CursorInfo& cursorInfo, HBITMAP hColorBmp, HBITMAP hMaskBmp) const noexcept;
 
 	HRESULT _InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept;
 

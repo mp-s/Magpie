@@ -49,6 +49,7 @@
   <ItemGroup>
     <ClInclude Include="BackendDescriptorStore.h" />
     <ClInclude Include="CatmullRomDrawer.h" />
+    <ClInclude Include="ColorHelper.h" />
     <ClInclude Include="CompSwapchainPresenter.h" />
     <ClInclude Include="CursorDrawer2.h" />
     <ClInclude Include="CursorManager.h" />

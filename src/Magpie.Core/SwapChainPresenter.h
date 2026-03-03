@@ -17,7 +17,12 @@ public:
 		const ColorInfo& colorInfo
 	) noexcept;
 
-	void BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept;
+	// 处于 sRGB 空间时 rawRtvHandle 不做伽马校正，用于渲染光标
+	void BeginFrame(
+		ID3D12Resource** frameTex,
+		D3D12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
+		D3D12_CPU_DESCRIPTOR_HANDLE& rawRtvHandle
+	) noexcept;
 
 	HRESULT EndFrame(bool waitForGpu = false) noexcept;
 
@@ -32,6 +37,8 @@ public:
 	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
+	HRESULT _CreateRtvHeap() noexcept;
+
 	HRESULT _RecreateBuffers() noexcept;
 
 	HRESULT _CreateDisplayDependentResources() noexcept;

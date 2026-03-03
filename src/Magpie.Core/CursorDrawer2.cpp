@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "CursorDrawer2.h"
 #include "ByteBuffer.h"
+#include "ColorHelper.h"
 #include "CursorHelper.h"
 #include "DynamicDescriptorHeap.h"
 #include "GraphicsContext.h"
@@ -9,6 +10,7 @@
 #include "shaders/CursorVS.h"
 #include "shaders/SimplePS.h"
 #include "Win32Helper.h"
+#include <DirectXPackedVector.h>
 #include <ShellScalingApi.h>
 #include <wil/registry.h>
 
@@ -265,6 +267,12 @@ HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept 
 	return S_OK;
 }
 
+HRESULT CursorDrawer2::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
+	_colorInfo = colorInfo;
+	_colorPSO = nullptr;
+	return S_OK;
+}
+
 static Size CalcCursorSize(
 	Size cursorBmpSize,
 	uint32_t cursorDpi,
@@ -499,7 +507,7 @@ wil::unique_hcursor CursorDrawer2::_TryResolveStandardCursor(
 			Logger::Get().ComError("wil::ExpandEnvironmentStringsW 失败", hr);
 			return result;
 		}
-		
+
 		result = CursorHelper::ExtractCursorFromCurFile(curPath.c_str(), preferedWidth);
 		if (!result) {
 			Logger::Get().Error("CursorHelper::ExtractCursorFromCurFile 失败");
@@ -513,7 +521,7 @@ bool CursorDrawer2::_ResolveCursorPixels(
 	_CursorInfo& cursorInfo,
 	HBITMAP hColorBmp,
 	HBITMAP hMaskBmp
-) noexcept {
+) const noexcept {
 	const Size bmpSize = {
 		cursorInfo.originSize.width,
 		hColorBmp ? cursorInfo.originSize.height : cursorInfo.originSize.height * 2
@@ -532,9 +540,7 @@ bool CursorDrawer2::_ResolveCursorPixels(
 		}
 	};
 
-	ByteBuffer& pixels = cursorInfo.originPixels;
-	pixels.Resize(bi.bmiHeader.biSizeImage);
-
+	ByteBuffer pixels(bi.bmiHeader.biSizeImage);
 	wil::unique_hdc_window hdcScreen(wil::window_dc(GetDC(NULL)));
 	if (GetDIBits(hdcScreen.get(), hColorBmp ? hColorBmp : hMaskBmp, 0, bmpSize.height,
 		pixels.Data(), &bi, DIB_RGB_COLORS) != (int)bmpSize.height
@@ -542,7 +548,7 @@ bool CursorDrawer2::_ResolveCursorPixels(
 		Logger::Get().Win32Error("GetDIBits 失败");
 		return false;
 	}
-	
+
 	if (hColorBmp) {
 		// 彩色掩码光标和彩色光标的区别在于前者的透明通道全为 0
 		bool hasAlpha = false;
@@ -556,16 +562,32 @@ bool CursorDrawer2::_ResolveCursorPixels(
 		if (hasAlpha) {
 			// 彩色光标
 			cursorInfo.type = _CursorType::Color;
+			cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
+
+			using namespace DirectX::PackedVector;
+
+			HALF* textureData = (HALF*)cursorInfo.originTextureData.Data();
 
 			for (uint32_t i = 0; i < bi.bmiHeader.biSizeImage; i += 4) {
 				// 预乘 Alpha 通道
-				double alpha = pixels[i + 3] / 255.0f;
+				float alpha = pixels[i + 3] / 255.0f;
+				float factor = alpha / 255.0f;
 
-				uint8_t b = (uint8_t)std::lround(pixels[i] * alpha);
-				pixels[i] = (uint8_t)std::lround(pixels[i + 2] * alpha);
-				pixels[i + 1] = (uint8_t)std::lround(pixels[i + 1] * alpha);
-				pixels[i + 2] = b;
-				pixels[i + 3] = 255 - pixels[i + 3];
+				textureData[i + 3] = XMConvertFloatToHalf(1.0f - alpha);
+				
+				if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
+					textureData[i] = XMConvertFloatToHalf(pixels[i + 2] * factor);
+					textureData[i + 1] = XMConvertFloatToHalf(pixels[i + 1] * factor);
+					textureData[i + 2] = XMConvertFloatToHalf(pixels[i] * factor);
+				} else {
+					if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
+						factor *= _colorInfo.sdrWhiteLevel;
+					}
+
+					textureData[i] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i + 2]) * factor);
+					textureData[i + 1] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i + 1]) * factor);
+					textureData[i + 2] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i]) * factor);
+				}
 			}
 		} else {
 			// 彩色掩码光标。如果不需要应用 XOR 则转换成彩色光标
@@ -593,6 +615,7 @@ bool CursorDrawer2::_ResolveCursorPixels(
 			if (canConvertToColor) {
 				// 转换为彩色光标以获得更好的插值效果和渲染性能
 				cursorInfo.type = _CursorType::Color;
+				cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
 				for (uint32_t i = 0; i < bi.bmiHeader.biSizeImage; i += 4) {
 					if (maskPixels[i] == 0) {
@@ -612,6 +635,8 @@ bool CursorDrawer2::_ResolveCursorPixels(
 					std::swap(pixels[i], pixels[i + 2]);
 					pixels[i + 3] = maskPixels[i];
 				}
+
+				cursorInfo.originTextureData = std::move(pixels);
 			}
 		}
 	} else {
@@ -631,6 +656,7 @@ bool CursorDrawer2::_ResolveCursorPixels(
 		if (canConvertToColor) {
 			// 转换为彩色光标以获得更好的插值效果和渲染性能
 			cursorInfo.type = _CursorType::Color;
+			cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
 			for (uint32_t i = 0; i < halfSize; i += 4) {
 				// 上半部分是 AND 掩码，下半部分是 XOR 掩码
@@ -664,6 +690,8 @@ bool CursorDrawer2::_ResolveCursorPixels(
 				upperPtr += 4;
 				lowerPtr += 4;
 			}
+
+			cursorInfo.originTextureData = std::move(pixels);
 		}
 	}
 
@@ -678,7 +706,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
 
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM,
+		cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT,
 		cursorInfo.originSize.width, cursorInfo.originSize.height, 1, 1);
 
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT textureLayout;
@@ -688,7 +716,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 		&textureLayout, nullptr, &textureRowSizeInBytes, &textureSize);
 
 	assert(textureRowSizeInBytes == cursorInfo.originSize.width *
-		(cursorInfo.type == _CursorType::Monochrome ? 1 : 4));
+		(cursorInfo.type == _CursorType::Monochrome ? 1 : 8));
 
 	CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureSize);
 
@@ -728,12 +756,12 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	}
 
 	if (textureRowSizeInBytes == textureLayout.Footprint.RowPitch) {
-		std::memcpy(pData, cursorInfo.originPixels.Data(), textureRowSizeInBytes * cursorInfo.originSize.height);
+		std::memcpy(pData, cursorInfo.originTextureData.Data(), textureRowSizeInBytes * cursorInfo.originSize.height);
 	} else {
 		for (uint32_t i = 0; i < cursorInfo.originSize.height; ++i) {
 			std::memcpy(
 				(uint8_t*)pData + textureLayout.Footprint.RowPitch * i,
-				&cursorInfo.originPixels[(uint32_t)textureRowSizeInBytes * i],
+				&cursorInfo.originTextureData[(uint32_t)textureRowSizeInBytes * i],
 				textureRowSizeInBytes
 			);
 		}
@@ -741,7 +769,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 
 	cursorInfo.originUploadBuffer->Unmap(0, nullptr);
 
-	cursorInfo.originPixels.Clear();
+	cursorInfo.originTextureData.Clear();
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
 
@@ -833,7 +861,7 @@ HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
 		.PS = CD3DX12_SHADER_BYTECODE(SimplePS, sizeof(SimplePS)),
 		.BlendState = {
 			.RenderTarget = {{
-				// FinalColor = ScreenColor * CursorColor.a + CursorColor.rgb
+				// FinalColor = CursorColor.rgb + ScreenColor * CursorColor.a
 				.BlendEnable = TRUE,
 				.SrcBlend = D3D12_BLEND_ONE,
 				.DestBlend = D3D12_BLEND_SRC_ALPHA,
@@ -852,8 +880,8 @@ HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
 		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
 		.NumRenderTargets = 1,
 		.RTVFormats = { _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
-		.SampleDesc = {.Count = 1 }
+			DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT },
+		.SampleDesc = { .Count = 1 }
 	};
 	HRESULT hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
 		&psoDesc, IID_PPV_ARGS(&_colorPSO));
