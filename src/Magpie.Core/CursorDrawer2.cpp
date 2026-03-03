@@ -706,7 +706,8 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
 
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT,
+		cursorInfo.type == _CursorType::Color ? DXGI_FORMAT_R16G16B16A16_FLOAT :
+			(cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM),
 		cursorInfo.originSize.width, cursorInfo.originSize.height, 1, 1);
 
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT textureLayout;
@@ -716,7 +717,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 		&textureLayout, nullptr, &textureRowSizeInBytes, &textureSize);
 
 	assert(textureRowSizeInBytes == cursorInfo.originSize.width *
-		(cursorInfo.type == _CursorType::Monochrome ? 1 : 8));
+		(cursorInfo.type == _CursorType::Color ? 8 : (cursorInfo.type == _CursorType::Monochrome ? 1 : 4)));
 
 	CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureSize);
 
