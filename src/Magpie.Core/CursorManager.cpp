@@ -12,14 +12,14 @@ namespace Magpie {
 
 void CursorManager::Initialize(
 	const RECT& srcRect,
-	const RECT& destRect,
 	const RECT& rendererRect,
+	const RECT& destRect,
 	bool isSrcMoving,
 	bool isSrcFocused
 ) noexcept {
 	_srcRect = srcRect;
-	_destRect = destRect;
 	_rendererRect = rendererRect;
+	_destRect = destRect;
 	_isSrcMoving = isSrcMoving;
 	_isSrcFocused = isSrcFocused;
 }
@@ -55,9 +55,9 @@ void CursorManager::OnResizeEnded() noexcept {
 	_isResizing = false;
 }
 
-void CursorManager::OnResized(const RECT& destRect, const RECT& rendererRect) noexcept {
-	_destRect = destRect;
+void CursorManager::OnResized(const RECT& rendererRect, const RECT& destRect) noexcept {
 	_rendererRect = rendererRect;
+	_destRect = destRect;
 
 	if (_isVirtualized && !_isSrcMoving) {
 		// 确保光标的缩放后位置不变
@@ -85,8 +85,8 @@ void CursorManager::OnMoveEnded() noexcept {
 	_localCursorPosOnMoving.x = std::numeric_limits<LONG>::max();
 }
 
-void CursorManager::OnMoved(const RECT& destRect, const RECT& rendererRect) noexcept {
-	OnResized(destRect, rendererRect);
+void CursorManager::OnMoved(const RECT& rendererRect, const RECT& destRect) noexcept {
+	OnResized(rendererRect, destRect);
 }
 
 void CursorManager::OnSrcMoveStarted() noexcept {

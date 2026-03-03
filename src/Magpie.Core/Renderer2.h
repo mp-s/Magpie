@@ -20,9 +20,10 @@ public:
 	ScalingError Initialize(
 		HWND hwndAttach,
 		HMONITOR hMonitor,
-		const RECT& rendererRect,
 		const RECT& srcRect,
-		OverlayOptions& overlayOptions
+		const RECT& rendererRect,
+		OverlayOptions& overlayOptions,
+		RECT& destRect
 	) noexcept;
 
 	ComponentState Render(
@@ -42,11 +43,13 @@ public:
 
 	void OnResizeEnded() noexcept;
 
-	void OnResized(Size size) noexcept;
+	void OnResized(const RECT& rendererRect, RECT& destRect) noexcept;
 
 	void OnMoveStarted() noexcept;
 
 	void OnMoveEnded() noexcept;
+
+	void OnMoved(const RECT& rendererRect, RECT& destRect) noexcept;
 
 	void OnCursorVirtualizationStarted() noexcept;
 
@@ -55,8 +58,6 @@ public:
 	void OnSrcMoveStarted() noexcept;
 
 	void OnSrcMoveEnded() noexcept;
-
-	void OnDestRectChanged(const RECT& destRect) noexcept;
 
 	void OnMsgDisplayChanged() noexcept;
 

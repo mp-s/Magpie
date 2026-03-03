@@ -169,6 +169,9 @@
     <FxCompile Include="CatmullRomCS_sRGB.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>
+    <FxCompile Include="shaders\CursorVS.hlsl">
+      <ShaderType>Vertex</ShaderType>
+    </FxCompile>
     <FxCompile Include="shaders\DuplicateFrameCS.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>

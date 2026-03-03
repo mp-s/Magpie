@@ -20,8 +20,8 @@ private:
 	GraphicsContext* _graphicsContext = nullptr;
 
 	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
-	winrt::com_ptr<ID3D12PipelineState> _linearPipelineState;
-	winrt::com_ptr<ID3D12PipelineState> _srgbPipelineState;
+	winrt::com_ptr<ID3D12PipelineState> _linearPSO;
+	winrt::com_ptr<ID3D12PipelineState> _srgbPSO;
 };
 
 }

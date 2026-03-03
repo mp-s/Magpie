@@ -8,7 +8,13 @@ public:
 	CursorManager(const CursorManager&) = delete;
 	CursorManager(CursorManager&&) = delete;
 
-	void Initialize(const RECT& srcRect, const RECT& destRect, const RECT& rendererRect, bool isSrcMoving, bool isSrcFocused) noexcept;
+	void Initialize(
+		const RECT& srcRect,
+		const RECT& rendererRect,
+		const RECT& destRect,
+		bool isSrcMoving,
+		bool isSrcFocused
+	) noexcept;
 
 	~CursorManager() noexcept;
 
@@ -18,13 +24,13 @@ public:
 
 	void OnResizeEnded() noexcept;
 
-	void OnResized(const RECT& destRect, const RECT& rendererRect) noexcept;
+	void OnResized(const RECT& rendererRect, const RECT& destRect) noexcept;
 
 	void OnMoveStarted() noexcept;
 
 	void OnMoveEnded() noexcept;
 
-	void OnMoved(const RECT& destRect, const RECT& rendererRect) noexcept;
+	void OnMoved(const RECT& rendererRect, const RECT& destRect) noexcept;
 
 	void OnSrcMoveStarted() noexcept;
 
@@ -106,8 +112,8 @@ private:
 	void _RestoreClipCursor() noexcept;
 
 	RECT _srcRect{};
-	RECT _destRect{};
 	RECT _rendererRect{};
+	RECT _destRect{};
 
 	HCURSOR _hCursor = NULL;
 	POINT _cursorPos{ std::numeric_limits<LONG>::max() };

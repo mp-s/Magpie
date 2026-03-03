@@ -80,35 +80,35 @@ HRESULT CatmullRomDrawer::Draw(
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
 
 	if (outputSrgb) {
-		if (!_srgbPipelineState) {
+		if (!_srgbPSO) {
 			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 				.pRootSignature = _rootSignature.get(),
 				.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS_sRGB, sizeof(CatmullRomCS_sRGB))
 			};
 			HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
-				&psoDesc, IID_PPV_ARGS(&_srgbPipelineState));
+				&psoDesc, IID_PPV_ARGS(&_srgbPSO));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateComputePipelineState 失败", hr);
 				return hr;
 			}
 		}
 		
-		commandList->SetPipelineState(_srgbPipelineState.get());
+		commandList->SetPipelineState(_srgbPSO.get());
 	} else {
-		if (!_linearPipelineState) {
+		if (!_linearPSO) {
 			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 				.pRootSignature = _rootSignature.get(),
 				.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS, sizeof(CatmullRomCS))
 			};
 			HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
-				&psoDesc, IID_PPV_ARGS(&_linearPipelineState));
+				&psoDesc, IID_PPV_ARGS(&_linearPSO));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateComputePipelineState 失败", hr);
 				return hr;
 			}
 		}
 
-		commandList->SetPipelineState(_linearPipelineState.get());
+		commandList->SetPipelineState(_linearPSO.get());
 	}
 
 	commandList->SetComputeRootSignature(_rootSignature.get());

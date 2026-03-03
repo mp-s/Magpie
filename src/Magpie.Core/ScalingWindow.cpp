@@ -315,12 +315,14 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	}
 
 	_renderer = std::make_unique<Renderer2>();
+	RECT destRect;
 	ScalingError error = _renderer->Initialize(
 		_hwndRenderer,
 		_srcTracker.Monitor(),
-		_rendererRect,
 		_srcTracker.SrcRect(),
-		_options.overlayOptions
+		_rendererRect,
+		_options.overlayOptions,
+		destRect
 	);
 	if (error != ScalingError::NoError) {
 		Logger::Get().Error("初始化 Renderer 失败");
@@ -328,14 +330,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	}
 
 	_cursorManager = std::make_unique<class CursorManager>();
-	RECT outputRect = (RECT)_renderer->GetOutputRect();
-	const RECT destRect = {
-		_rendererRect.left + outputRect.left,
-		_rendererRect.top + outputRect.top,
-		_rendererRect.left + outputRect.right,
-		_rendererRect.top + outputRect.bottom
-	};
-	_cursorManager->Initialize(_srcTracker.SrcRect(), destRect, _rendererRect,
+	_cursorManager->Initialize(_srcTracker.SrcRect(), _rendererRect, destRect,
 		_srcTracker.IsMoving(), _srcTracker.IsFocused());
 
 	if (_options.IsTouchSupportEnabled()) {
@@ -422,12 +417,14 @@ void ScalingWindow::Render(bool onDeviceLost) noexcept {
 			_renderer.reset();
 			_renderer = std::make_unique<Renderer2>();
 
+			RECT destRect;
 			ScalingError error = _renderer->Initialize(
 				_hwndRenderer,
 				_srcTracker.Monitor(),
-				_rendererRect,
 				_srcTracker.SrcRect(),
-				_options.overlayOptions
+				_rendererRect,
+				_options.overlayOptions,
+				destRect
 			);
 			if (error != ScalingError::NoError) {
 				Logger::Get().Error("初始化 Renderer 失败");
@@ -1351,32 +1348,17 @@ void ScalingWindow::_Show() noexcept {
 }
 
 void ScalingWindow::_HandleResize() noexcept {
-	_renderer->OnResized(
-		Size{ uint32_t(_rendererRect.right - _rendererRect.left), uint32_t(_rendererRect.bottom - _rendererRect.top) });
-
-	RECT outputRect = (RECT)_renderer->GetOutputRect();
-	const RECT destRect = {
-		_rendererRect.left + outputRect.left,
-		_rendererRect.top + outputRect.top,
-		_rendererRect.left + outputRect.right,
-		_rendererRect.top + outputRect.bottom
-	};
-	_cursorManager->OnResized(destRect, _rendererRect);
-	_renderer->OnDestRectChanged(destRect);
+	RECT destRect;
+	_renderer->OnResized(_rendererRect, destRect);
+	_cursorManager->OnResized(_rendererRect, destRect);
 
 	Render();
 }
 
 void ScalingWindow::_HandleMove() noexcept {
-	RECT outputRect = (RECT)_renderer->GetOutputRect();
-	const RECT destRect = {
-		_rendererRect.left + outputRect.left,
-		_rendererRect.top + outputRect.top,
-		_rendererRect.left + outputRect.right,
-		_rendererRect.top + outputRect.bottom
-	};
-	_cursorManager->OnMoved(destRect, _rendererRect);
-	_renderer->OnDestRectChanged(destRect);
+	RECT destRect;
+	_renderer->OnMoved(_rendererRect, destRect);
+	_cursorManager->OnMoved(_rendererRect, destRect);
 }
 
 bool ScalingWindow::_UpdateSrcState(bool& isSrcRepositioning) noexcept {

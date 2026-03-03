@@ -34,9 +34,10 @@ static void SetGpuPriority() noexcept {
 ScalingError Renderer2::Initialize(
 	HWND hwndAttach,
 	HMONITOR hMonitor,
-	const RECT& rendererRect,
 	const RECT& srcRect,
-	OverlayOptions& /*overlayOptions*/
+	const RECT& rendererRect,
+	OverlayOptions& /*overlayOptions*/,
+	RECT& destRect
 ) noexcept {
 	_hCurMonitor = hMonitor;
 
@@ -111,8 +112,6 @@ ScalingError Renderer2::Initialize(
 	}
 
 	{
-		winrt::com_ptr<ID3DBlob> signature;
-
 		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
 			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
 		D3D12_ROOT_PARAMETER1 rootParams[] = {
@@ -128,7 +127,8 @@ ScalingError Renderer2::Initialize(
 				.DescriptorTable = {
 					.NumDescriptorRanges = 1,
 					.pDescriptorRanges = &srvRange
-				}
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
 			}
 		};
 		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
@@ -144,15 +144,18 @@ ScalingError Renderer2::Initialize(
 		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
 			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
+		winrt::com_ptr<ID3DBlob> signature;
 		HRESULT hr = D3DX12SerializeVersionedRootSignature(
 			&rootSignatureDesc, _graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
 		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
 			return ScalingError::ScalingFailedGeneral;
 		}
 
 		hr = device->CreateRootSignature(
 			0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
 		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateRootSignature 失败", hr);
 			return ScalingError::ScalingFailedGeneral;
 		}
 
@@ -176,6 +179,7 @@ ScalingError Renderer2::Initialize(
 		};
 		hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
 		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
 			return ScalingError::ScalingFailedGeneral;
 		}
 	}
@@ -188,13 +192,12 @@ ScalingError Renderer2::Initialize(
 
 	_UpdateOutputRect(outputSize);
 
-	const RECT destRect = {
-		rendererRect.left + (LONG)_outputRect.left,
-		rendererRect.top + (LONG)_outputRect.top,
-		rendererRect.left + (LONG)_outputRect.right,
-		rendererRect.top + (LONG)_outputRect.bottom
-	};
-	if (!_cursorDrawer.Initialize(_graphicsContext, destRect)) {
+	destRect.left = rendererRect.left + (LONG)_outputRect.left;
+	destRect.top = rendererRect.top + (LONG)_outputRect.top;
+	destRect.right = rendererRect.left + (LONG)_outputRect.right;
+	destRect.bottom = rendererRect.top + (LONG)_outputRect.bottom;
+
+	if (!_cursorDrawer.Initialize(_graphicsContext, rendererRect, destRect, _colorInfo)) {
 		Logger::Get().Error("CursorDrawer2::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -265,7 +268,7 @@ void Renderer2::OnResizeEnded() noexcept {
 	}
 }
 
-void Renderer2::OnResized(Size size) noexcept {
+void Renderer2::OnResized(const RECT& rendererRect, RECT& destRect) noexcept {
 	if (_state != ComponentState::NoError) {
 		return;
 	}
@@ -275,11 +278,16 @@ void Renderer2::OnResized(Size size) noexcept {
 		return;
 	}
 
+	const Size rendererSize = {
+		uint32_t(rendererRect.right - rendererRect.left),
+		uint32_t(rendererRect.bottom - rendererRect.top)
+	};
+
 	Size outputSize;
 	SimpleTask<HRESULT> task;
-	_frameProducer.OnResizedAsync(size, outputSize, task);
+	_frameProducer.OnResizedAsync(rendererSize, outputSize, task);
 
-	if (!_CheckResult(_presenter->OnResized(size), "SwapChainPresenter::OnResized 失败")) {
+	if (!_CheckResult(_presenter->OnResized(rendererSize), "SwapChainPresenter::OnResized 失败")) {
 		return;
 	}
 
@@ -289,6 +297,13 @@ void Renderer2::OnResized(Size size) noexcept {
 	}
 
 	_UpdateOutputRect(outputSize);
+
+	destRect.left = rendererRect.left + (LONG)_outputRect.left;
+	destRect.top = rendererRect.top + (LONG)_outputRect.top;
+	destRect.right = rendererRect.left + (LONG)_outputRect.right;
+	destRect.bottom = rendererRect.top + (LONG)_outputRect.bottom;
+
+	_cursorDrawer.OnResized(rendererRect, destRect);
 }
 
 void Renderer2::OnMoveStarted() noexcept {
@@ -297,6 +312,15 @@ void Renderer2::OnMoveStarted() noexcept {
 
 void Renderer2::OnMoveEnded() noexcept {
 	_cursorDrawer.OnMoveEnded();
+}
+
+void Renderer2::OnMoved(const RECT& rendererRect, RECT& destRect) noexcept {
+	destRect.left = rendererRect.left + (LONG)_outputRect.left;
+	destRect.top = rendererRect.top + (LONG)_outputRect.top;
+	destRect.right = rendererRect.left + (LONG)_outputRect.right;
+	destRect.bottom = rendererRect.top + (LONG)_outputRect.bottom;
+
+	_cursorDrawer.OnMoved(rendererRect, destRect);
 }
 
 void Renderer2::OnCursorVirtualizationStarted() noexcept {
@@ -313,10 +337,6 @@ void Renderer2::OnSrcMoveStarted() noexcept {
 
 void Renderer2::OnSrcMoveEnded() noexcept {
 	_cursorDrawer.OnSrcMoveEnded();
-}
-
-void Renderer2::OnDestRectChanged(const RECT& destRect) noexcept {
-	_cursorDrawer.OnDestRectChanged(destRect);
 }
 
 void Renderer2::OnMsgDisplayChanged() noexcept {
@@ -524,6 +544,13 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
 	commandList->SetDescriptorHeaps(1, &heap);
+	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+		commandList->ResourceBarrier(1, &barrier);
+	}
 
 	commandList->SetGraphicsRootSignature(_rootSignature.get());
 
@@ -549,12 +576,6 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, curBufferSrvIdx, descriptorSize));
 
 	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
-		commandList->ResourceBarrier(1, &barrier);
-	}
-
-	{
 		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)rendererSize.width, (float)rendererSize.height);
 		commandList->RSSetViewports(1, &viewport);
 	}
@@ -564,11 +585,9 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	}
 
 	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-
-	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	commandList->DrawInstanced(3, 1, 0, 0);
 
-	hr = _cursorDrawer.Draw();
+	hr = _cursorDrawer.Draw(heapGpuHandle);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CursorDrawer2::Draw 失败", hr);
 		return hr;

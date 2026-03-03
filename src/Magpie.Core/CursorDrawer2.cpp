@@ -1,11 +1,14 @@
 #include "pch.h"
 #include "CursorDrawer2.h"
-#include "CursorHelper.h"
-#include "ScalingWindow.h"
-#include "Win32Helper.h"
-#include "Logger.h"
 #include "ByteBuffer.h"
+#include "CursorHelper.h"
+#include "DynamicDescriptorHeap.h"
 #include "GraphicsContext.h"
+#include "Logger.h"
+#include "ScalingWindow.h"
+#include "shaders/CursorVS.h"
+#include "shaders/SimplePS.h"
+#include "Win32Helper.h"
 #include <ShellScalingApi.h>
 #include <wil/registry.h>
 
@@ -46,9 +49,25 @@ static DWORD GetCursorBaseSize() noexcept {
 	return cursorBaseSize;
 }
 
-bool CursorDrawer2::Initialize(GraphicsContext& graphicsContext, const RECT& destRect) noexcept {
+CursorDrawer2::~CursorDrawer2() noexcept {
+#ifdef _DEBUG
+	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+	for (const auto& pair : _cursorInfos) {
+		dynamicDescriptorHeap.Free(pair.second._textureSrvIdx, 1);
+	}
+#endif
+}
+
+bool CursorDrawer2::Initialize(
+	GraphicsContext& graphicsContext,
+	const RECT& rendererRect,
+	const RECT& destRect,
+	const ColorInfo& colorInfo
+) noexcept {
 	_graphicsContext = &graphicsContext;
+	_rendererRect = rendererRect;
 	_destRect = destRect;
+	_colorInfo = colorInfo;
 
 	[[maybe_unused]] static Ignore _ = [] {
 		GetCursorFrameInfo = Win32Helper::LoadFunction<FnGetCursorFrameInfo>(
@@ -95,6 +114,12 @@ bool CursorDrawer2::Initialize(GraphicsContext& graphicsContext, const RECT& des
 
 	_cursorBaseSize = GetCursorBaseSize();
 
+	HRESULT hr = _CreateRootSignature();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_CreateRootSignature 失败", hr);
+		return false;
+	}
+
 	return true;
 }
 
@@ -130,17 +155,13 @@ bool CursorDrawer2::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 	if (hCursor) {
 		if (_isCursorVisible) {
 			// 检查光标是否在视口内
-			const _CursorInfo* cursorInfo = _ResolveCursor(hCursor, cursorPos, false);
-			if (cursorInfo) {
-				const POINT drawPos = {
-					cursorPos.x - (LONG)cursorInfo->hotspot.x,
-					cursorPos.y - (LONG)cursorInfo->hotspot.y
-				};
+			_curCursorInfo = _ResolveCursor(hCursor, cursorPos, false);
+			if (_curCursorInfo) {
 				const RECT cursorRect = {
-					drawPos.x,
-					drawPos.y,
-					drawPos.x + (LONG)cursorInfo->size.width,
-					drawPos.y + (LONG)cursorInfo->size.height
+					cursorPos.x - (LONG)_curCursorInfo->hotspot.x,
+					cursorPos.y - (LONG)_curCursorInfo->hotspot.y,
+					cursorRect.left + (LONG)_curCursorInfo->size.width,
+					cursorRect.top + (LONG)_curCursorInfo->size.height
 				};
 				if (!Win32Helper::IsRectOverlap(cursorRect, _destRect)) {
 					hCursor = NULL;
@@ -165,24 +186,82 @@ bool CursorDrawer2::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 	}
 }
 
-HRESULT CursorDrawer2::Draw() noexcept {
-	if (!_hCurCursor) {
+HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept {
+	if (!_hCurCursor || !_curCursorInfo) {
 		return S_OK;
 	}
 
-	_CursorInfo* cursorInfo = _ResolveCursor(_hCurCursor, _curCursorPos, false);
-	if (!cursorInfo) {
-		assert(false);
-		return S_OK;
-	}
-
-	if (!cursorInfo->texture) {
-		HRESULT hr = _InitializeCursorTexture(*cursorInfo);
+	if (!_curCursorInfo->texture) {
+		HRESULT hr = _InitializeCursorTexture(*_curCursorInfo);
 		if (FAILED(hr)) {
 			return hr;
 		}
 	}
 
+	const RECT cursorRect = {
+		.left = _curCursorPos.x - (LONG)_curCursorInfo->hotspot.x,
+		.top = _curCursorPos.y - (LONG)_curCursorInfo->hotspot.y,
+		.right = cursorRect.left + (LONG)_curCursorInfo->size.width,
+		.bottom = cursorRect.top + (LONG)_curCursorInfo->size.height
+	};
+
+	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+	
+	//if (_curCursorInfo->type == _CursorType::Color) {
+	if (!_colorPSO) {
+		HRESULT hr = _CreateColorPSO();
+		if (FAILED(hr)) {
+			Logger::Get().ComError("_CreateColorPSO 失败", hr);
+			return hr;
+		}
+	}
+
+	commandList->SetPipelineState(_colorPSO.get());
+	//}
+
+	commandList->SetGraphicsRootSignature(_rootSignature.get());
+
+	const RECT viewportRect = {
+		_destRect.left - _rendererRect.left,
+		_destRect.top - _rendererRect.top,
+		_destRect.right - _rendererRect.left,
+		_destRect.bottom - _rendererRect.top
+	};
+	const SIZE viewportSize = Win32Helper::GetSizeOfRect(viewportRect);
+
+	{
+		// 转换到 NDC
+		float constants[] = {
+			(cursorRect.left - _destRect.left) * 2 / (float)viewportSize.cx - 1.0f,	// left
+			1.0f - (cursorRect.top - _destRect.top) * 2 / (float)viewportSize.cy,	// top
+			_curCursorInfo->size.width * 2 / (float)viewportSize.cx,	// width
+			_curCursorInfo->size.height * 2 / (float)-viewportSize.cy	// height
+		};
+		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+	}
+
+	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
+
+	commandList->SetGraphicsRootDescriptorTable(
+		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _curCursorInfo->_textureSrvIdx, descriptorSize));
+
+	{
+		CD3DX12_VIEWPORT viewport(
+			(float)viewportRect.left,
+			(float)viewportRect.top,
+			(float)viewportSize.cx,
+			(float)viewportSize.cy
+		);
+		commandList->RSSetViewports(1, &viewport);
+	}
+	{
+		CD3DX12_RECT scissorRect(viewportRect.left, viewportRect.top, viewportRect.right, viewportRect.bottom);
+		commandList->RSSetScissorRects(1, &scissorRect);
+	}
+
+	commandList->DrawInstanced(4, 1, 0, 0);
+	
 	return S_OK;
 }
 
@@ -349,6 +428,12 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 
 	if (!_ResolveCursorPixels(cursorInfo, hColorBmp.get(), hMaskBmp.get())) {
 		Logger::Get().Error("_ResolveCursorPixels 失败");
+		return nullptr;
+	}
+
+	HRESULT hr = _graphicsContext->GetDynamicDescriptorHeap().Alloc(1, cursorInfo._textureSrvIdx);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
 		return nullptr;
 	}
 
@@ -677,12 +762,106 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	}
 
 	if (cursorInfo.type != _CursorType::Color) {
+		// TODO: 必要时 Bicubic 缩放
+		cursorInfo.texture = std::move(cursorInfo.originTexture);
+	} else {
 		// 单色光标和彩色掩码光标始终使用最近邻采样，无需缩放
 		cursorInfo.texture = std::move(cursorInfo.originTexture);
-		return S_OK;
 	}
 
-	cursorInfo.texture = std::move(cursorInfo.originTexture);
+	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
+		CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
+	_graphicsContext->GetDynamicDescriptorHeap().CreateShaderResourceView(
+		cursorInfo.texture.get(), &srvDesc, cursorInfo._textureSrvIdx);
+
+	return S_OK;
+}
+
+HRESULT CursorDrawer2::_CreateRootSignature() noexcept {
+	CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+		D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+	D3D12_ROOT_PARAMETER1 rootParams[] = {
+		{
+			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+			.Constants = {
+				.Num32BitValues = 4
+			},
+			.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
+		},
+		{
+			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+			.DescriptorTable = {
+				.NumDescriptorRanges = 1,
+				.pDescriptorRanges = &srvRange
+			},
+			.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+		}
+	};
+	D3D12_STATIC_SAMPLER_DESC samplerDesc = {
+		.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
+		.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+		.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+		.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+		.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+		.ShaderRegister = 0
+	};
+	CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+		(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+	winrt::com_ptr<ID3DBlob> signature;
+	HRESULT hr = D3DX12SerializeVersionedRootSignature(
+		&rootSignatureDesc, _graphicsContext->GetRootSignatureVersion(), signature.put(), nullptr);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+		return hr;
+	}
+
+	hr = _graphicsContext->GetDevice()->CreateRootSignature(
+		0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateRootSignature 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
+}
+
+HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _rootSignature.get(),
+		.VS = CD3DX12_SHADER_BYTECODE(CursorVS, sizeof(CursorVS)),
+		.PS = CD3DX12_SHADER_BYTECODE(SimplePS, sizeof(SimplePS)),
+		.BlendState = {
+			.RenderTarget = {{
+				// FinalColor = ScreenColor * CursorColor.a + CursorColor.rgb
+				.BlendEnable = TRUE,
+				.SrcBlend = D3D12_BLEND_ONE,
+				.DestBlend = D3D12_BLEND_SRC_ALPHA,
+				.BlendOp = D3D12_BLEND_OP_ADD,
+				.SrcBlendAlpha = D3D12_BLEND_ONE,
+				.DestBlendAlpha = D3D12_BLEND_ZERO,
+				.BlendOpAlpha = D3D12_BLEND_OP_ADD,
+				.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL
+			}}
+		},
+		.SampleMask = UINT_MAX,
+		.RasterizerState = {
+			.FillMode = D3D12_FILL_MODE_SOLID,
+			.CullMode = D3D12_CULL_MODE_NONE
+		},
+		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+		.NumRenderTargets = 1,
+		.RTVFormats = { _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
+			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
+		.SampleDesc = {.Count = 1 }
+	};
+	HRESULT hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
+		&psoDesc, IID_PPV_ARGS(&_colorPSO));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
+		return hr;
+	}
+
 	return S_OK;
 }
 

@@ -13,11 +13,18 @@ public:
 	CursorDrawer2(const CursorDrawer2&) = delete;
 	CursorDrawer2(CursorDrawer2&&) = delete;
 
-	bool Initialize(GraphicsContext& graphicsContext, const RECT& destRect) noexcept;
+	~CursorDrawer2() noexcept;
+
+	bool Initialize(
+		GraphicsContext& graphicsContext,
+		const RECT& rendererRect,
+		const RECT& destRect,
+		const ColorInfo& colorInfo
+	) noexcept;
 
 	bool CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept;
 
-	HRESULT Draw() noexcept;
+	HRESULT Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept;
 
 	void OnCursorVirtualizationStarted() noexcept {
 		_isCursorVirtualized = true;
@@ -43,11 +50,12 @@ public:
 		_isSrcMoving = false;
 	}
 
-	void OnMoved(const RECT& destRect) noexcept {
-		_destRect = destRect;
+	void OnMoved(const RECT& rendererRect, const RECT& destRect) noexcept {
+		OnResized(rendererRect, destRect);
 	}
 
-	void OnDestRectChanged(const RECT& destRect) noexcept {
+	void OnResized(const RECT& rendererRect, const RECT& destRect) noexcept {
+		_rendererRect = rendererRect;
 		_destRect = destRect;
 	}
 
@@ -76,6 +84,7 @@ private:
 		Size size;
 		Point hotspot;
 		winrt::com_ptr<ID3D12Resource> texture;
+		uint32_t _textureSrvIdx = std::numeric_limits<uint32_t>::max();
 
 		Size originSize;
 		ByteBuffer originPixels;
@@ -100,8 +109,14 @@ private:
 
 	HRESULT _InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept;
 
+	HRESULT _CreateRootSignature() noexcept;
+
+	HRESULT _CreateColorPSO() noexcept;
+
 	GraphicsContext* _graphicsContext = nullptr;
+	RECT _rendererRect{};
 	RECT _destRect{};
+	ColorInfo _colorInfo;
 
 	// (HCURSOR, DPI) -> _CursorInfo
 	// DPI 为 0 表示此光标不随 DPI 缩放
@@ -113,10 +128,14 @@ private:
 	// 上次绘制的光标形状和位置
 	HCURSOR _hCurCursor = NULL;
 	POINT _curCursorPos{ std::numeric_limits<LONG>::max(), std::numeric_limits<LONG>::max() };
+	_CursorInfo* _curCursorInfo = nullptr;
 
 	// 监控“指针大小”选项变化
 	wil::unique_registry_watcher_nothrow _regWatcher;
 	DWORD _cursorBaseSize = 32;
+
+	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _colorPSO;
 
 	bool _isCursorVisible = true;
 	bool _isMoving = false;
