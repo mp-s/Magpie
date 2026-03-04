@@ -103,7 +103,7 @@ HRESULT DynamicDescriptorHeap::Alloc(uint32_t count, uint32_t& idx) noexcept {
 	return S_OK;
 }
 
-HRESULT DynamicDescriptorHeap::Free(uint32_t idx, uint32_t count) noexcept {
+void DynamicDescriptorHeap::Free(uint32_t idx, uint32_t count) noexcept {
 	assert(idx != std::numeric_limits<uint32_t>::max() && idx + count <= _capacity);
 
 	auto lk = _allocationLock.lock_exclusive();
@@ -136,8 +136,6 @@ HRESULT DynamicDescriptorHeap::Free(uint32_t idx, uint32_t count) noexcept {
 		}
 		_freeBlocks.emplace(idx + count, newBlockSize);
 	}
-
-	return S_OK;
 }
 
 void DynamicDescriptorHeap::CreateShaderResourceView(

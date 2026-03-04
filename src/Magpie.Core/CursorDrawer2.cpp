@@ -55,18 +55,21 @@ CursorDrawer2::~CursorDrawer2() noexcept {
 #ifdef _DEBUG
 	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
 	for (const auto& pair : _cursorInfos) {
-		dynamicDescriptorHeap.Free(pair.second._textureSrvIdx, 1);
+		dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
 	}
 #endif
 }
 
 bool CursorDrawer2::Initialize(
 	GraphicsContext& graphicsContext,
+	const RECT& srcRect,
 	const RECT& rendererRect,
 	const RECT& destRect,
 	const ColorInfo& colorInfo
 ) noexcept {
 	_graphicsContext = &graphicsContext;
+	_srcSize.width = uint32_t(srcRect.right - srcRect.left);
+	_srcSize.height = uint32_t(srcRect.bottom - srcRect.top);
 	_rendererRect = rendererRect;
 	_destRect = destRect;
 	_colorInfo = colorInfo;
@@ -111,6 +114,9 @@ bool CursorDrawer2::Initialize(
 			}
 
 			_cursorBaseSize = cursorBaseSize;
+			// 清空已解析的光标
+			_graphicsContext->WaitForGpu();
+			_ClearCursorInfos();
 		});
 	});
 
@@ -246,7 +252,7 @@ HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept 
 	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
 
 	commandList->SetGraphicsRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _curCursorInfo->_textureSrvIdx, descriptorSize));
+		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _curCursorInfo->textureSrvIdx, descriptorSize));
 
 	{
 		CD3DX12_VIEWPORT viewport(
@@ -267,22 +273,26 @@ HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept 
 	return S_OK;
 }
 
-HRESULT CursorDrawer2::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
-	_colorInfo = colorInfo;
-	_colorPSO = nullptr;
-	return S_OK;
+void CursorDrawer2::OnMoved(const RECT& rendererRect, const RECT& destRect) noexcept {
+	_rendererRect = rendererRect;
+	_destRect = destRect;
 }
 
-static Size CalcCursorSize(
-	Size cursorBmpSize,
-	uint32_t cursorDpi,
-	uint32_t monitorDpi,
-	uint32_t cursorBaseSize
-) noexcept {
-	const double scale = (GetSystemMetricsForDpi(SM_CXCURSOR, monitorDpi) * cursorBaseSize) /
-		double(GetSystemMetricsForDpi(SM_CXCURSOR, cursorDpi) * 32);
-	return { (uint32_t)std::lround(cursorBmpSize.width * scale),
-		(uint32_t)std::lround(cursorBmpSize.height * scale) };
+void CursorDrawer2::OnResized(const RECT& rendererRect, const RECT& destRect) noexcept {
+	_rendererRect = rendererRect;
+	_destRect = destRect;
+
+	// 光标缩放和源窗口相同则清空已解析的光标
+	if (ScalingWindow::Get().Options().cursorScale < FLOAT_EPSILON<float>) {
+		_ClearCursorInfos();
+	}
+}
+
+void CursorDrawer2::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
+	_colorInfo = colorInfo;
+	_colorPSO = nullptr;
+
+	_ClearCursorInfos();
 }
 
 static bool GetCursorSizeFromBmps(HBITMAP hColorBmp, HBITMAP hMaskBmp, Size& size) noexcept {
@@ -355,8 +365,8 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 	// 我们借助这个特性检查光标是否随 DPI 缩放，不过只在程序启动时系统 DPI 缩放不是
 	// 100% 时有效。
 	if (SYSTEM_DPI == 96) {
-		cursorInfo.size = CalcCursorSize(
-			cursorInfo.originSize, SYSTEM_DPI, monitorDpi, _cursorBaseSize);
+		cursorInfo.size = _CalcCursorSize(
+			cursorInfo.originSize, SYSTEM_DPI, monitorDpi);
 	} else {
 		ICONINFO iconInfoDpi96{};
 		{
@@ -386,7 +396,7 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 			isCursorDpiAware = false;
 			cursorInfo.size = bmpSizeDpi96;
 		} else {
-			cursorInfo.size = CalcCursorSize(bmpSizeDpi96, 96, monitorDpi, _cursorBaseSize);
+			cursorInfo.size = _CalcCursorSize(bmpSizeDpi96, 96, monitorDpi);
 		}
 
 		if (cursorInfo.size == bmpSizeDpi96) {
@@ -414,7 +424,7 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 
 	if (hResCursor) {
 		ICONINFO iconInfo{};
-		if (!GetIconInfo(hCursor, &iconInfo)) {
+		if (!GetIconInfo(hResCursor.get(), &iconInfo)) {
 			Logger::Get().Win32Error("GetIconInfo 失败");
 			return nullptr;
 		}
@@ -439,7 +449,7 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 		return nullptr;
 	}
 
-	HRESULT hr = _graphicsContext->GetDynamicDescriptorHeap().Alloc(1, cursorInfo._textureSrvIdx);
+	HRESULT hr = _graphicsContext->GetDynamicDescriptorHeap().Alloc(1, cursorInfo.textureSrvIdx);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
 		return nullptr;
@@ -447,6 +457,26 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 
 	return &_cursorInfos.emplace(std::make_pair(hCursor, isCursorDpiAware ? monitorDpi : 0),
 		std::move(cursorInfo)).first->second;
+}
+
+Size CursorDrawer2::_CalcCursorSize(
+	Size cursorBmpSize,
+	uint32_t cursorDpi,
+	uint32_t monitorDpi
+) const noexcept {
+	float scale = ScalingWindow::Get().Options().cursorScale;
+	if (scale < FLOAT_EPSILON<float>) {
+		// 光标缩放和源窗口相同
+		SIZE destSize = Win32Helper::GetSizeOfRect(_destRect);
+		scale = (((float)destSize.cx / _srcSize.width) +
+			((float)destSize.cy / _srcSize.height)) / 2;
+	}
+
+	scale *= (GetSystemMetricsForDpi(SM_CXCURSOR, monitorDpi) * _cursorBaseSize) /
+		(GetSystemMetricsForDpi(SM_CXCURSOR, cursorDpi) * 32.0f);
+
+	return { (uint32_t)std::lroundf(cursorBmpSize.width * scale),
+		(uint32_t)std::lroundf(cursorBmpSize.height * scale) };
 }
 
 wil::unique_hcursor CursorDrawer2::_TryResolveCursorResource(
@@ -801,9 +831,22 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
 		CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
 	_graphicsContext->GetDynamicDescriptorHeap().CreateShaderResourceView(
-		cursorInfo.texture.get(), &srvDesc, cursorInfo._textureSrvIdx);
+		cursorInfo.texture.get(), &srvDesc, cursorInfo.textureSrvIdx);
 
 	return S_OK;
+}
+
+void CursorDrawer2::_ClearCursorInfos() noexcept {
+	_lastRawCursorHandle = NULL;
+	_hCurCursor = NULL;
+	_curCursorInfo = nullptr;
+
+	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+	for (const auto& pair : _cursorInfos) {
+		dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+	}
+
+	_cursorInfos.clear();
 }
 
 HRESULT CursorDrawer2::_CreateRootSignature() noexcept {

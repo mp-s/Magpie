@@ -197,7 +197,7 @@ ScalingError Renderer2::Initialize(
 	destRect.right = rendererRect.left + (LONG)_outputRect.right;
 	destRect.bottom = rendererRect.top + (LONG)_outputRect.bottom;
 
-	if (!_cursorDrawer.Initialize(_graphicsContext, rendererRect, destRect, _colorInfo)) {
+	if (!_cursorDrawer.Initialize(_graphicsContext, srcRect, rendererRect, destRect, _colorInfo)) {
 		Logger::Get().Error("CursorDrawer2::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -498,11 +498,7 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 	SimpleTask<HRESULT> task;
 	_frameProducer.OnColorInfoChangedAsync(_colorInfo, task);
 
-	hr = _cursorDrawer.OnColorInfoChanged(_colorInfo);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CursorDrawer::OnColorInfoChanged 失败", hr);
-		return hr;
-	}
+	_cursorDrawer.OnColorInfoChanged(_colorInfo);
 
 	hr = _presenter->OnColorInfoChanged(_colorInfo);
 	if (FAILED(hr)) {

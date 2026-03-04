@@ -17,7 +17,7 @@ public:
 		const ColorInfo& colorInfo
 	) noexcept;
 
-	// 处于 sRGB 空间时 rawRtvHandle 不做伽马校正，用于渲染光标
+	// SDR 下 rawRtvHandle 不做伽马校正，用于渲染光标
 	void BeginFrame(
 		ID3D12Resource** frameTex,
 		D3D12_CPU_DESCRIPTOR_HANDLE& rtvHandle,

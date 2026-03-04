@@ -16,7 +16,7 @@ public:
 
 	HRESULT Alloc(uint32_t count, uint32_t& idx) noexcept;
 
-	HRESULT Free(uint32_t idx, uint32_t count) noexcept;
+	void Free(uint32_t idx, uint32_t count) noexcept;
 
 	uint32_t GetDescriptorSize() const noexcept {
 		// 初始化后不会改变，因此无需同步

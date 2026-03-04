@@ -42,7 +42,7 @@ void ScalingOptions::Prepare() noexcept {
 		cropping.Right >= 0 && cropping.Bottom >= 0);
 	assert(minFrameRate >= 0);
 	assert(!maxFrameRate.has_value() || *maxFrameRate > 0);
-	assert(cursorScaling >= 0);
+	assert(cursorScale >= 0);
 	assert(!autoHideCursorDelay.has_value() || *autoHideCursorDelay > 0);
 	assert(initialWindowedScaleFactor >= 0);
 	assert(!screenshotsDir.empty());
@@ -87,7 +87,7 @@ void ScalingOptions::Prepare() noexcept {
 		deviceId: {}
 	minFrameRate: {}
 	maxFrameRate: {}
-	cursorScaling: {}
+	cursorScale: {}
 	captureMethod: {}
 	multiMonitorUsage: {}
 	cursorInterpolationMode: {}
@@ -119,7 +119,7 @@ void ScalingOptions::Prepare() noexcept {
 		graphicsCardId.deviceId,
 		minFrameRate,
 		maxFrameRate.has_value() ? *maxFrameRate : 0.0f,
-		cursorScaling,
+		cursorScale,
 		(int)captureMethod,
 		(int)multiMonitorUsage,
 		(int)cursorInterpolationMode,

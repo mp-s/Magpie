@@ -17,6 +17,7 @@ public:
 
 	bool Initialize(
 		GraphicsContext& graphicsContext,
+		const RECT& srcRect,
 		const RECT& rendererRect,
 		const RECT& destRect,
 		const ColorInfo& colorInfo
@@ -50,16 +51,11 @@ public:
 		_isSrcMoving = false;
 	}
 
-	void OnMoved(const RECT& rendererRect, const RECT& destRect) noexcept {
-		OnResized(rendererRect, destRect);
-	}
+	void OnMoved(const RECT& rendererRect, const RECT& destRect) noexcept;
 
-	void OnResized(const RECT& rendererRect, const RECT& destRect) noexcept {
-		_rendererRect = rendererRect;
-		_destRect = destRect;
-	}
+	void OnResized(const RECT& rendererRect, const RECT& destRect) noexcept;
 
-	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
 	// SDR 色域下使用 sRGB 空间，否则使用线性 RGB 空间。截至 Win11 25H2，Windows 在 WCG
@@ -87,7 +83,7 @@ private:
 		Size size;
 		Point hotspot;
 		winrt::com_ptr<ID3D12Resource> texture;
-		uint32_t _textureSrvIdx = std::numeric_limits<uint32_t>::max();
+		uint32_t textureSrvIdx = std::numeric_limits<uint32_t>::max();
 
 		Size originSize;
 		ByteBuffer originTextureData;
@@ -96,6 +92,12 @@ private:
 	};
 
 	_CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
+
+	Size _CalcCursorSize(
+		Size cursorBmpSize,
+		uint32_t cursorDpi,
+		uint32_t monitorDpi
+	) const noexcept;
 
 	wil::unique_hcursor _TryResolveCursorResource(
 		const ICONINFOEX& iconInfoEx,
@@ -112,11 +114,15 @@ private:
 
 	HRESULT _InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept;
 
+	// 只能在同步 GPU 后调用
+	void _ClearCursorInfos() noexcept;
+
 	HRESULT _CreateRootSignature() noexcept;
 
 	HRESULT _CreateColorPSO() noexcept;
 
 	GraphicsContext* _graphicsContext = nullptr;
+	Size _srcSize{};
 	RECT _rendererRect{};
 	RECT _destRect{};
 	ColorInfo _colorInfo;
