@@ -35,7 +35,7 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>S:\RTX_Video_SDK_v1.1.0\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <FxCompile>
       <ShaderModel>5.0</ShaderModel>
@@ -74,6 +74,7 @@
     <ClInclude Include="CursorHelper.h" />
     <ClInclude Include="include\EffectInfo.h" />
     <ClInclude Include="include\ShaderEffectParser.h" />
+    <ClInclude Include="RtxTrueHdrDrawer.h" />
     <ClInclude Include="ShaderEffectCompilerService.h" />
     <ClInclude Include="ShaderEffectDesc.h" />
     <ClInclude Include="ShaderEffectDrawer.h" />
@@ -133,6 +134,7 @@
     <ClCompile Include="FrameProducer.cpp" />
     <ClCompile Include="FrameSourceBase.cpp" />
     <ClCompile Include="CursorHelper.cpp" />
+    <ClCompile Include="RtxTrueHdrDrawer.cpp" />
     <ClCompile Include="ShaderEffectCompilerService.cpp" />
     <ClCompile Include="ShaderEffectDrawer.cpp" />
     <ClCompile Include="GDIFrameSource.cpp" />

@@ -198,6 +198,9 @@
     <ClInclude Include="ColorHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
+    <ClInclude Include="RtxTrueHdrDrawer.h">
+      <Filter>EffectDrawer</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -331,6 +334,9 @@
     </ClCompile>
     <ClCompile Include="DynamicDescriptorHeap.cpp">
       <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="RtxTrueHdrDrawer.cpp">
+      <Filter>EffectDrawer</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

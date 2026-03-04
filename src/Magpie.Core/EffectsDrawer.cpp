@@ -15,7 +15,7 @@ bool EffectsDrawer::Initialize(
 	Size rendererSize
 ) noexcept {
 	_graphicsContext = &graphicsContext;
-	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+	_colorInfo = colorInfo;
 	_inputSize = inputSize;
 
 	ID3D12Device5* device = graphicsContext.GetDevice();
@@ -41,6 +41,15 @@ bool EffectsDrawer::Initialize(
 		);
 		_outputSize.width = std::lroundf(inputSize.width * fillScale);
 		_outputSize.height = std::lroundf(inputSize.height * fillScale);
+	}
+
+	if (colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
+		_rtxTrueHdrDrawer.emplace();
+		HRESULT hr = _rtxTrueHdrDrawer->Initialize(graphicsContext, inputSize, colorInfo);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("RtxTrueHdrDrawer::Initialize 失败", hr);
+			return false;
+		}
 	}
 
 	_catmullRomDrawer.emplace();
@@ -90,6 +99,7 @@ HRESULT EffectsDrawer::Draw(
 	uint32_t frameIndex,
 	ID3D12Resource* /*inputResource*/,
 	ID3D12Resource* /*outputResource*/,
+	ID3D12DescriptorHeap* heap,
 	D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
 	D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
 ) noexcept {
@@ -115,6 +125,14 @@ HRESULT EffectsDrawer::Draw(
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
 
+	if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
+		HRESULT hr = _rtxTrueHdrDrawer->Draw();
+		if (FAILED(hr)) {
+			return hr;
+		}
+	}
+
+	commandList->SetDescriptorHeaps(1, &heap);
 	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvHandle, outputUavHandle, false);
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
@@ -124,14 +142,16 @@ HRESULT EffectsDrawer::Draw(
 	return S_OK;
 }
 
-HRESULT EffectsDrawer::OnResized(Size rendererSize) noexcept {
+void EffectsDrawer::OnResized(Size rendererSize) noexcept {
 	_outputSize = rendererSize;
-	return S_OK;
 }
 
-HRESULT EffectsDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
-	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
-	return S_OK;
+void EffectsDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
+	_colorInfo = colorInfo;
+
+	if (_rtxTrueHdrDrawer) {
+		_rtxTrueHdrDrawer->OnColorInfoChanged(colorInfo);
+	}
 }
 
 }

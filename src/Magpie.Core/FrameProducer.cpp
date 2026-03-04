@@ -117,11 +117,7 @@ void FrameProducer::OnResizedAsync(
 			return;
 		}
 
-		hr = _effectsDrawer.OnResized(rendererSize);
-		if (!_CheckResult(hr, "EffectsDrawer::OnResized 失败")) {
-			return;
-		}
-
+		_effectsDrawer.OnResized(rendererSize);
 		outputSize = _effectsDrawer.GetOutputSize();
 
 		hr = _frameRingBuffer.OnResized(outputSize);
@@ -172,12 +168,12 @@ void FrameProducer::OnColorInfoChangedAsync(
 			return;
 		}
 
-		hr = _effectsDrawer.OnColorInfoChanged(colorInfo);
-		if (!_CheckResult(hr, "EffectsDrawer::OnColorInfoChanged 失败")) {
+		_effectsDrawer.OnColorInfoChanged(colorInfo);
+
+		hr = _frameRingBuffer.OnColorInfoChanged(colorInfo);
+		if (!_CheckResult(hr, "FrameRingBuffer::OnColorInfoChanged 失败")) {
 			return;
 		}
-
-		_frameRingBuffer.OnColorInfoChanged(colorInfo);
 
 		_CreateInputDescriptors();
 		_CreateOutputDescriptors();
@@ -482,8 +478,7 @@ HRESULT FrameProducer::_Render() noexcept {
 	}
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
-	commandList->SetDescriptorHeaps(1, &heap);
-
+	
 	// 输出和输出纹理都处于 COMMON 状态，使用结束后也应处于此状态
 	ID3D12Resource* inputResource = _frameSource->GetOutput(frameSourceOutputIdx);
 	ID3D12Resource* outputResource = _frameRingBuffer.GetBuffer(frameRingBufferIdx);
@@ -504,6 +499,7 @@ HRESULT FrameProducer::_Render() noexcept {
 		frameIndex,
 		inputResource,
 		outputResource,
+		heap,
 		CD3DX12_GPU_DESCRIPTOR_HANDLE(
 			heapGpuHandle, _inputSrvBaseIdx + frameSourceOutputIdx, descriptorSize),
 		CD3DX12_GPU_DESCRIPTOR_HANDLE(

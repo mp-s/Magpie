@@ -1,5 +1,6 @@
 #pragma once
 #include "CatmullRomDrawer.h"
+#include "RtxTrueHdrDrawer.h"
 #include "SmallVector.h"
 
 namespace Magpie {
@@ -21,6 +22,7 @@ public:
 		uint32_t frameIndex,
 		ID3D12Resource* inputResource,
 		ID3D12Resource* outputResource,
+		ID3D12DescriptorHeap* heap,
 		D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
 		D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
 	) noexcept;
@@ -29,23 +31,24 @@ public:
 		return _outputSize;
 	}
 
-	HRESULT OnResized(Size rendererSize) noexcept;
+	void OnResized(Size rendererSize) noexcept;
 
-	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
 	GraphicsContext* _graphicsContext = nullptr;
+	ColorInfo _colorInfo;
 
 	Size _inputSize{};
 	Size _outputSize{};
 
+	std::optional<RtxTrueHdrDrawer> _rtxTrueHdrDrawer;
 	std::optional<CatmullRomDrawer> _catmullRomDrawer;
 
 	winrt::com_ptr<ID3D12QueryHeap> _queryHeap;
 	winrt::com_ptr<ID3D12Resource> _queryResultBuffer;
 	UINT64 _timestampFrequency = 0;
 
-	bool _isScRGB = false;
 	bool _isFP16Supported = false;
 };
 

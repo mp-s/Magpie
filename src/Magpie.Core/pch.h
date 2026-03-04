@@ -69,6 +69,7 @@ namespace Magpie {
 
 static constexpr uint32_t MAX_CAPTURE_DIRTY_RECT_COUNT = 4;
 static constexpr uint32_t DUP_FRAME_DISPATCH_BLOCK_SIZE = 16;
+static constexpr uint32_t SCENE_REFERRED_SDR_WHITE_LEVEL = 80;
 
 enum class ComponentState {
 	NoError,

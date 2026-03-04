@@ -731,9 +731,9 @@ bool CursorDrawer2::_ResolveCursorPixels(
 HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept {
 	ID3D12Device5* device = _graphicsContext->GetDevice();
 
+	CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 	D3D12_HEAP_FLAGS heapFlag = _graphicsContext->IsHeapFlagCreateNotZeroedSupported() ?
 		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
 
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 		cursorInfo.type == _CursorType::Color ? DXGI_FORMAT_R16G16B16A16_FLOAT :
@@ -752,7 +752,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureSize);
 
 	HRESULT hr = device->CreateCommittedResource(
-		&heapProperties,
+		&heapProps,
 		heapFlag,
 		&bufferDesc,
 		D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -764,9 +764,9 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 		return hr;
 	}
 
-	heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+	heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 	hr = device->CreateCommittedResource(
-		&heapProperties,
+		&heapProps,
 		heapFlag,
 		&texDesc,
 		D3D12_RESOURCE_STATE_COPY_DEST,
