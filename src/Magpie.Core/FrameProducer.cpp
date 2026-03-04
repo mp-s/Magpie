@@ -481,21 +481,19 @@ HRESULT FrameProducer::_Render() noexcept {
 		return hr;
 	}
 
-	// 处于 COMMON 状态，使用结束后也应处于此状态
-	ID3D12Resource* input = _frameSource->GetOutput(frameSourceOutputIdx);
-	// 处于 COPY_SOURCE 状态，使用结束后也应处于此状态
-	ID3D12Resource* output = _frameRingBuffer.GetBuffer(frameRingBufferIdx);
-
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
-
 	commandList->SetDescriptorHeaps(1, &heap);
+
+	// 输出和输出纹理都处于 COMMON 状态，使用结束后也应处于此状态
+	ID3D12Resource* inputResource = _frameSource->GetOutput(frameSourceOutputIdx);
+	ID3D12Resource* outputResource = _frameRingBuffer.GetBuffer(frameRingBufferIdx);
 
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				input, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, 0),
+				inputResource, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, 0),
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				output, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0)
+				outputResource, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0)
 		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
@@ -504,8 +502,12 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	hr = _effectsDrawer.Draw(
 		frameIndex,
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _inputSrvBaseIdx + frameSourceOutputIdx, descriptorSize),
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _outputUavBaseIdx + frameRingBufferIdx, descriptorSize)
+		inputResource,
+		outputResource,
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(
+			heapGpuHandle, _inputSrvBaseIdx + frameSourceOutputIdx, descriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(
+			heapGpuHandle, _outputUavBaseIdx + frameRingBufferIdx, descriptorSize)
 	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("EffectsDrawer::Draw 失败", hr);
@@ -515,9 +517,9 @@ HRESULT FrameProducer::_Render() noexcept {
 	{
 		D3D12_RESOURCE_BARRIER barriers[] = {
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				input, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON, 0),
+				inputResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON, 0),
 			CD3DX12_RESOURCE_BARRIER::Transition(
-				output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON, 0)
+				outputResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON, 0)
 		};
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}

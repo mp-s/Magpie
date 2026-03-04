@@ -44,11 +44,7 @@ bool EffectsDrawer::Initialize(
 	}
 
 	_catmullRomDrawer.emplace();
-	HRESULT hr = _catmullRomDrawer->Initialize(graphicsContext);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CatmullRomDrawer::Initialize 失败", hr);
-		return false;
-	}
+	_catmullRomDrawer->Initialize(graphicsContext);
 
 	{
 		// 每帧两个时间戳
@@ -58,7 +54,7 @@ bool EffectsDrawer::Initialize(
 			.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
 			.Count = timestampCount
 		};
-		hr = device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&_queryHeap));
+		HRESULT hr = device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&_queryHeap));
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateQueryHeap 失败", hr);
 			return false;
@@ -92,6 +88,8 @@ bool EffectsDrawer::Initialize(
 
 HRESULT EffectsDrawer::Draw(
 	uint32_t frameIndex,
+	ID3D12Resource* /*inputResource*/,
+	ID3D12Resource* /*outputResource*/,
 	D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
 	D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
 ) noexcept {

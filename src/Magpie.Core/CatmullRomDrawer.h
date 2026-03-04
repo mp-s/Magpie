@@ -6,7 +6,7 @@ class GraphicsContext;
 
 class CatmullRomDrawer {
 public:
-	HRESULT Initialize(GraphicsContext& graphicsContext) noexcept;
+	void Initialize(GraphicsContext& graphicsContext) noexcept;
 
 	HRESULT Draw(
 		Size inputSize,
@@ -19,9 +19,16 @@ public:
 private:
 	GraphicsContext* _graphicsContext = nullptr;
 
-	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
-	winrt::com_ptr<ID3D12PipelineState> _linearPSO;
-	winrt::com_ptr<ID3D12PipelineState> _srgbPSO;
+	HRESULT _InitializeCatmullRomRootSignature() noexcept;
+	HRESULT _InitializeCopyRootSignature() noexcept;
+
+	winrt::com_ptr<ID3D12RootSignature> _catmullRomRootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _catmullRomPSO;
+	winrt::com_ptr<ID3D12PipelineState> _catmullRomSrgbPSO;
+
+	winrt::com_ptr<ID3D12RootSignature> _copyRootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _copyPSO;
+	winrt::com_ptr<ID3D12PipelineState> _copySrgbPSO;
 };
 
 }

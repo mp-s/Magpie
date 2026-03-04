@@ -19,6 +19,8 @@ public:
 
 	HRESULT Draw(
 		uint32_t frameIndex,
+		ID3D12Resource* inputResource,
+		ID3D12Resource* outputResource,
 		D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
 		D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
 	) noexcept;

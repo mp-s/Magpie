@@ -8,8 +8,7 @@ cbuffer RootConstants : register(b0) {
 };
 
 Texture2D<float4> inputTex : register(t0);
-
-RWTexture2D<unorm float4> output : register(u0);
+RWTexture2D<float4> outputTex : register(u0);
 
 SamplerState linearSampler : register(s0);
 
@@ -96,9 +95,9 @@ void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 	uint2 gxy = (gid.xy << uint2(4, 3)) + Rmp8x8(tid.x);
 	float2 pos = (gxy + 0.5f) * outputPt;
 
-	output[gxy] = CatmullRom(pos);
+    outputTex[gxy] = CatmullRom(pos);
 
 	gxy.x += 8u;
 	pos.x += 8 * outputPt.x;
-	output[gxy] = CatmullRom(pos);
+    outputTex[gxy] = CatmullRom(pos);
 }

@@ -5,12 +5,138 @@
 #include "Logger.h"
 #include "shaders/CatmullRomCS.h"
 #include "shaders/CatmullRomCS_sRGB.h"
+#include "shaders/CopyCS.h"
+#include "shaders/CopyCS_sRGB.h"
 
 namespace Magpie {
 
-HRESULT CatmullRomDrawer::Initialize(GraphicsContext& graphicsContext) noexcept {
+void CatmullRomDrawer::Initialize(GraphicsContext& graphicsContext) noexcept {
 	_graphicsContext = &graphicsContext;
+}
 
+HRESULT CatmullRomDrawer::Draw(
+	Size inputSize,
+	Size outputSize,
+	D3D12_GPU_DESCRIPTOR_HANDLE inputGpuHandle,
+	D3D12_GPU_DESCRIPTOR_HANDLE outputGpuHandle,
+	bool outputSrgb
+) noexcept {
+	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+
+	// 作为性能优化，输入和输出尺寸相同时原样复制
+	if (inputSize == outputSize) {
+		if (!_copyRootSignature) {
+			HRESULT hr = _InitializeCopyRootSignature();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_InitializeCopyRootSignature 失败", hr);
+				return hr;
+			}
+		}
+		commandList->SetComputeRootSignature(_copyRootSignature.get());
+
+		if (outputSrgb) {
+			if (!_copySrgbPSO) {
+				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
+					.pRootSignature = _copyRootSignature.get(),
+					.CS = CD3DX12_SHADER_BYTECODE(CopyCS_sRGB, sizeof(CopyCS_sRGB))
+				};
+				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+					&psoDesc, IID_PPV_ARGS(&_copySrgbPSO));
+				if (FAILED(hr)) {
+					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+					return hr;
+				}
+			}
+
+			commandList->SetPipelineState(_copySrgbPSO.get());
+		} else {
+			if (!_copyPSO) {
+				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
+					.pRootSignature = _copyRootSignature.get(),
+					.CS = CD3DX12_SHADER_BYTECODE(CopyCS, sizeof(CopyCS))
+				};
+				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+					&psoDesc, IID_PPV_ARGS(&_copyPSO));
+				if (FAILED(hr)) {
+					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+					return hr;
+				}
+			}
+
+			commandList->SetPipelineState(_copyPSO.get());
+		}
+
+		commandList->SetComputeRootDescriptorTable(0, inputGpuHandle);
+		commandList->SetComputeRootDescriptorTable(1, outputGpuHandle);
+	} else {
+		if (!_catmullRomRootSignature) {
+			HRESULT hr = _InitializeCatmullRomRootSignature();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_InitializeCatmullRomRootSignature 失败", hr);
+				return hr;
+			}
+		}
+		commandList->SetComputeRootSignature(_catmullRomRootSignature.get());
+
+		if (outputSrgb) {
+			if (!_catmullRomSrgbPSO) {
+				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
+					.pRootSignature = _catmullRomRootSignature.get(),
+					.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS_sRGB, sizeof(CatmullRomCS_sRGB))
+				};
+				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+					&psoDesc, IID_PPV_ARGS(&_catmullRomSrgbPSO));
+				if (FAILED(hr)) {
+					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+					return hr;
+				}
+			}
+
+			commandList->SetPipelineState(_catmullRomSrgbPSO.get());
+		} else {
+			if (!_catmullRomPSO) {
+				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
+					.pRootSignature = _catmullRomRootSignature.get(),
+					.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS, sizeof(CatmullRomCS))
+				};
+				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+					&psoDesc, IID_PPV_ARGS(&_catmullRomPSO));
+				if (FAILED(hr)) {
+					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+					return hr;
+				}
+			}
+
+			commandList->SetPipelineState(_catmullRomPSO.get());
+		}
+
+		DirectXHelper::Constant32 constants[] = {
+			{.uintVal = inputSize.width},
+			{.uintVal = inputSize.height},
+			{.uintVal = outputSize.width},
+			{.uintVal = outputSize.height},
+			{.floatVal = 1.0f / inputSize.width},
+			{.floatVal = 1.0f / inputSize.height},
+			{.floatVal = 1.0f / outputSize.width},
+			{.floatVal = 1.0f / outputSize.height}
+		};
+		commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+
+		commandList->SetComputeRootDescriptorTable(1, inputGpuHandle);
+		commandList->SetComputeRootDescriptorTable(2, outputGpuHandle);
+	}
+
+	std::pair<uint32_t, uint32_t> BLOCK_SIZE = { 16, 8 };
+	commandList->Dispatch(
+		(outputSize.width + BLOCK_SIZE.first - 1) / BLOCK_SIZE.first,
+		(outputSize.height + BLOCK_SIZE.second - 1) / BLOCK_SIZE.second,
+		1
+	);
+
+	return S_OK;
+}
+
+HRESULT CatmullRomDrawer::_InitializeCatmullRomRootSignature() noexcept {
 	winrt::com_ptr<ID3DBlob> signature;
 
 	CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
@@ -49,19 +175,27 @@ HRESULT CatmullRomDrawer::Initialize(GraphicsContext& graphicsContext) noexcept 
 		.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
 		.ShaderRegister = 0
 	};
-	
+
 	CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
 		(UINT)std::size(rootParams), rootParams, 1, &samplerDesc);
 
 	HRESULT hr = D3DX12SerializeVersionedRootSignature(
-		&rootSignatureDesc, graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
+		&rootSignatureDesc,
+		_graphicsContext->GetRootSignatureVersion(),
+		signature.put(),
+		nullptr
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
 		return hr;
 	}
 
-	hr = graphicsContext.GetDevice()->CreateRootSignature(
-		0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
+	hr = _graphicsContext->GetDevice()->CreateRootSignature(
+		0,
+		signature->GetBufferPointer(),
+		signature->GetBufferSize(),
+		IID_PPV_ARGS(&_catmullRomRootSignature)
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateRootSignature 失败", hr);
 		return hr;
@@ -70,72 +204,55 @@ HRESULT CatmullRomDrawer::Initialize(GraphicsContext& graphicsContext) noexcept 
 	return S_OK;
 }
 
-HRESULT CatmullRomDrawer::Draw(
-	Size inputSize,
-	Size outputSize,
-	D3D12_GPU_DESCRIPTOR_HANDLE inputGpuHandle,
-	D3D12_GPU_DESCRIPTOR_HANDLE outputGpuHandle,
-	bool outputSrgb
-) noexcept {
-	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+HRESULT CatmullRomDrawer::_InitializeCopyRootSignature() noexcept {
+	winrt::com_ptr<ID3DBlob> signature;
 
-	if (outputSrgb) {
-		if (!_srgbPSO) {
-			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
-				.pRootSignature = _rootSignature.get(),
-				.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS_sRGB, sizeof(CatmullRomCS_sRGB))
-			};
-			HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
-				&psoDesc, IID_PPV_ARGS(&_srgbPSO));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateComputePipelineState 失败", hr);
-				return hr;
+	CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+		D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+	CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0,
+		D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+
+	D3D12_ROOT_PARAMETER1 rootParams[] = {
+		{
+			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+			.DescriptorTable = {
+				.NumDescriptorRanges = 1,
+				.pDescriptorRanges = &srvRange
+			}
+		},
+		{
+			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+			.DescriptorTable = {
+				.NumDescriptorRanges = 1,
+				.pDescriptorRanges = &uavRange
 			}
 		}
-		
-		commandList->SetPipelineState(_srgbPSO.get());
-	} else {
-		if (!_linearPSO) {
-			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
-				.pRootSignature = _rootSignature.get(),
-				.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS, sizeof(CatmullRomCS))
-			};
-			HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
-				&psoDesc, IID_PPV_ARGS(&_linearPSO));
-			if (FAILED(hr)) {
-				Logger::Get().ComError("CreateComputePipelineState 失败", hr);
-				return hr;
-			}
-		}
+	};
 
-		commandList->SetPipelineState(_linearPSO.get());
-	}
+	CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+		(UINT)std::size(rootParams), rootParams, 0, nullptr);
 
-	commandList->SetComputeRootSignature(_rootSignature.get());
-
-	{
-		DirectXHelper::Constant32 constants[] = {
-			{.uintVal = inputSize.width},
-			{.uintVal = inputSize.height},
-			{.uintVal = outputSize.width},
-			{.uintVal = outputSize.height},
-			{.floatVal = 1.0f / inputSize.width},
-			{.floatVal = 1.0f / inputSize.height},
-			{.floatVal = 1.0f / outputSize.width},
-			{.floatVal = 1.0f / outputSize.height}
-		};
-		commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
-	}
-
-	commandList->SetComputeRootDescriptorTable(1, inputGpuHandle);
-	commandList->SetComputeRootDescriptorTable(2, outputGpuHandle);
-
-	constexpr std::pair<uint32_t, uint32_t> BLOCK_SIZE = { 16, 8 };
-	commandList->Dispatch(
-		(outputSize.width + BLOCK_SIZE.first - 1) / BLOCK_SIZE.first,
-		(outputSize.height + BLOCK_SIZE.second - 1) / BLOCK_SIZE.second,
-		1
+	HRESULT hr = D3DX12SerializeVersionedRootSignature(
+		&rootSignatureDesc,
+		_graphicsContext->GetRootSignatureVersion(),
+		signature.put(),
+		nullptr
 	);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+		return hr;
+	}
+
+	hr = _graphicsContext->GetDevice()->CreateRootSignature(
+		0,
+		signature->GetBufferPointer(),
+		signature->GetBufferSize(),
+		IID_PPV_ARGS(&_copyRootSignature)
+	);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateRootSignature 失败", hr);
+		return hr;
+	}
 
 	return S_OK;
 }

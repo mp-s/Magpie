@@ -355,12 +355,6 @@
     <FxCompile Include="shaders\ImGuiImplPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="CatmullRomCS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="CatmullRomCS_sRGB.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
@@ -368,6 +362,18 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\CursorVS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\CatmullRomCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\CatmullRomCS_sRGB.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\CopyCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\CopyCS_sRGB.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>
