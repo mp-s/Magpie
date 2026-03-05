@@ -11,7 +11,7 @@ float4 LoadTexel(uint2 gxy) {
 	// unorm 格式，写入时将自动截断），然后在后处理中还原色调。
 	// 
 	// 不支持 HDR 输出，超出 sdrWhiteLevel 将被截断。
-    return inputTex[gxy] / sdrWhiteLevel;
+    return float4(inputTex[gxy].rgb / sdrWhiteLevel, 1);
 }
 
 [numthreads(8, 8, 1)]

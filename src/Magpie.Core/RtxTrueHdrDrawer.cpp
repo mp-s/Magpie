@@ -5,6 +5,7 @@
 #include "RtxTrueHdrDrawer.h"
 #include "GraphicsContext.h"
 #include "DynamicDescriptorHeap.h"
+#include "shaders/RtxTrueHdrPostCS.h"
 #include "shaders/RtxTrueHdrPreCS.h"
 #include "Logger.h"
 #include <nvsdk_ngx.h>
@@ -39,7 +40,7 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 	_inputSize = inputSize;
 	_colorInfo = colorInfo;
 
-	/*NVSDK_NGX_Result status = NVSDK_NGX_D3D12_Init(0, L".", graphicsContext.GetDevice());
+	NVSDK_NGX_Result status = NVSDK_NGX_D3D12_Init(0, L".", graphicsContext.GetDevice());
 	if (NVSDK_NGX_FAILED(status)) {
 		return E_FAIL;
 	}
@@ -55,7 +56,7 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 	status = _ngxParameters->Get(NVSDK_NGX_Parameter_TrueHDR_Available, &available);
 	if (NVSDK_NGX_FAILED(status) || !available) {
 		return E_FAIL;
-	}*/
+	}
 	
 	{
 		ID3D12Device5* device = graphicsContext.GetDevice();
@@ -76,7 +77,7 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 
 		texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
 		hr = device->CreateCommittedResource(
-			&heapProps, heapFlag, &texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+			&heapProps, heapFlag, &texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
 			nullptr, IID_PPV_ARGS(&_ngxOutputResource));
 		if (FAILED(hr)) {
 			return hr;
@@ -114,17 +115,17 @@ HRESULT RtxTrueHdrDrawer::Draw(
 	ID3D12DescriptorHeap* heap,
 	D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle,
 	uint32_t inputSrvIdx,
-	uint32_t /*outputUavIdx*/
+	uint32_t outputUavIdx
 ) noexcept {
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
 
 	_graphicsContext->SetDescriptorHeap(heap);
 
+	uint32_t descriptorSize = _graphicsContext->GetDynamicDescriptorHeap().GetDescriptorSize();
+
 	commandList->SetPipelineState(_prePSO.get());
 	commandList->SetComputeRootSignature(_preRootSignature.get());
 	commandList->SetComputeRoot32BitConstants(0, 1, &_colorInfo.sdrWhiteLevel, 0);
-
-	uint32_t descriptorSize = _graphicsContext->GetDynamicDescriptorHeap().GetDescriptorSize();
 	commandList->SetComputeRootDescriptorTable(
 		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvIdx, descriptorSize));
 	commandList->SetComputeRootDescriptorTable(
@@ -137,7 +138,7 @@ HRESULT RtxTrueHdrDrawer::Draw(
 		1
 	);
 
-	/*if (!_trueHdrFeature) {
+	if (!_trueHdrFeature) {
 		NVSDK_NGX_Result status = NVSDK_NGX_D3D12_CreateFeature(
 			commandList, NVSDK_NGX_Feature_TrueHDR, _ngxParameters, &_trueHdrFeature);
 		if (NVSDK_NGX_FAILED(status)) {
@@ -156,8 +157,8 @@ HRESULT RtxTrueHdrDrawer::Draw(
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutTop, 0);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutRight, _inputSize.width);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutBottom, _inputSize.height);
-		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Contrast, 100);
-		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Saturation, 100);
+		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Contrast, 50);
+		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Saturation, 50);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_MiddleGray, 50);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_MaxLuminance,
 			(uint32_t)std::lroundf(_colorInfo.maxLuminance * SCENE_REFERRED_SDR_WHITE_LEVEL));
@@ -192,10 +193,25 @@ HRESULT RtxTrueHdrDrawer::Draw(
 	if (infoQueue) {
 		infoQueue->PopStorageFilter();
 	}
-#endif*/
+#endif
 
 	_graphicsContext->InvalidateDescriptorHeapCache();
 	_graphicsContext->SetDescriptorHeap(heap);
+
+	commandList->SetPipelineState(_postPSO.get());
+	commandList->SetComputeRootSignature(_postRootSignature.get());
+	commandList->SetComputeRootDescriptorTable(
+		0, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _descriptorBaseIdx + 1, descriptorSize));
+	commandList->SetComputeRootDescriptorTable(
+		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvIdx, descriptorSize));
+	commandList->SetComputeRootDescriptorTable(
+		2, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, outputUavIdx, descriptorSize));
+
+	commandList->Dispatch(
+		(_inputSize.width + BLOCK_SIZE - 1) / BLOCK_SIZE,
+		(_inputSize.height + BLOCK_SIZE - 1) / BLOCK_SIZE,
+		1
+	);
 
 	return S_OK;
 }
@@ -210,55 +226,128 @@ void RtxTrueHdrDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 }
 
 HRESULT RtxTrueHdrDrawer::_InitializePSO() noexcept {
+	ID3D12Device5* device = _graphicsContext->GetDevice();
 	winrt::com_ptr<ID3DBlob> signature;
 
-	CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
-		D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-	CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0,
-		D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+	{
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
 
-	D3D12_ROOT_PARAMETER1 rootParams[] = {
-		{
-			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-			.Constants = {
-				.Num32BitValues = 1
+		D3D12_ROOT_PARAMETER1 rootParams[] = {
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 1
+				}
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange
+				}
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &uavRange
+				}
 			}
-		},
-		{
-			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-			.DescriptorTable = {
-				.NumDescriptorRanges = 1,
-				.pDescriptorRanges = &srvRange
-			}
-		},
-		{
-			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-			.DescriptorTable = {
-				.NumDescriptorRanges = 1,
-				.pDescriptorRanges = &uavRange
-			}
+		};
+
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			(UINT)std::size(rootParams), rootParams, 0, nullptr);
+
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc,
+			_graphicsContext->GetRootSignatureVersion(),
+			signature.put(),
+			nullptr
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			return hr;
 		}
-	};
-
-	CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-		(UINT)std::size(rootParams), rootParams, 0, nullptr);
-
-	HRESULT hr = D3DX12SerializeVersionedRootSignature(
-		&rootSignatureDesc,
-		_graphicsContext->GetRootSignatureVersion(),
-		signature.put(),
-		nullptr
-	);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
-		return hr;
 	}
-
-	hr = _graphicsContext->GetDevice()->CreateRootSignature(
+	
+	HRESULT hr = device->CreateRootSignature(
 		0,
 		signature->GetBufferPointer(),
 		signature->GetBufferSize(),
 		IID_PPV_ARGS(&_preRootSignature)
+	);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateRootSignature 失败", hr);
+		return hr;
+	}
+
+	{
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange2(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		CD3DX12_DESCRIPTOR_RANGE1 uavRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+
+		D3D12_ROOT_PARAMETER1 rootParams[] = {
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange1
+				}
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange2
+				}
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &uavRange
+				}
+			}
+		};
+
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			(UINT)std::size(rootParams), rootParams, 0, nullptr);
+
+		hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc,
+			_graphicsContext->GetRootSignatureVersion(),
+			signature.put(),
+			nullptr
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			return hr;
+		}
+
+		hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc,
+			_graphicsContext->GetRootSignatureVersion(),
+			signature.put(),
+			nullptr
+		);
+
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			return hr;
+		}
+	}
+
+	hr = device->CreateRootSignature(
+		0,
+		signature->GetBufferPointer(),
+		signature->GetBufferSize(),
+		IID_PPV_ARGS(&_postRootSignature)
 	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateRootSignature 失败", hr);
@@ -271,6 +360,15 @@ HRESULT RtxTrueHdrDrawer::_InitializePSO() noexcept {
 	};
 	hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
 		&psoDesc, IID_PPV_ARGS(&_prePSO));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateComputePipelineState 失败", hr);
+		return hr;
+	}
+
+	psoDesc.pRootSignature = _postRootSignature.get();
+	psoDesc.CS = CD3DX12_SHADER_BYTECODE(RtxTrueHdrPostCS, sizeof(RtxTrueHdrPostCS));
+	hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+		&psoDesc, IID_PPV_ARGS(&_postPSO));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateComputePipelineState 失败", hr);
 		return hr;

@@ -1,15 +1,18 @@
-#include "Common.hlsli"
-
 Texture2D<float4> inputTex : register(t0);
+Texture2D<float4> originTex : register(t1);
 RWTexture2D<float4> outputTex : register(u0);
 
 float4 LoadTexel(uint2 gxy) {
-    float4 color = inputTex[gxy];
-
-#ifdef MP_SRGB
-	color.rgb = LinearToSrgb(saturate(color.rgb));
-#endif
-    return color;
+    float3 color = inputTex[gxy].rgb;
+    
+    // 还原超出 sRGB 的颜色
+    float3 origin = originTex[gxy].rgb;
+    origin /= origin.r + origin.g + origin.b;
+    
+    float3 adjust = min(origin, 0) + max(origin - 1, 0);
+    color += adjust * (color.r + color.g + color.b);
+    
+    return float4(color, 1);
 }
 
 [numthreads(8, 8, 1)]
