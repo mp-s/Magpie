@@ -14,7 +14,7 @@ float4 LoadTexel(uint2 gxy) {
 
 [numthreads(8, 8, 1)]
 void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
-	uint2 gxy = (gid.xy << uint2(4, 3)) + tid.xy;
+	uint2 gxy = (gid.xy << 4) + tid.xy;
 	outputTex[gxy] = LoadTexel(gxy);
 	
 	gxy.x += 8u;
