@@ -126,10 +126,10 @@ HRESULT CatmullRomDrawer::Draw(
 		commandList->SetComputeRootDescriptorTable(2, outputGpuHandle);
 	}
 
-	std::pair<uint32_t, uint32_t> BLOCK_SIZE = { 16, 8 };
+	constexpr uint32_t BLOCK_SIZE = 16;
 	commandList->Dispatch(
-		(outputSize.width + BLOCK_SIZE.first - 1) / BLOCK_SIZE.first,
-		(outputSize.height + BLOCK_SIZE.second - 1) / BLOCK_SIZE.second,
+		(outputSize.width + BLOCK_SIZE - 1) / BLOCK_SIZE,
+		(outputSize.height + BLOCK_SIZE - 1) / BLOCK_SIZE,
 		1
 	);
 

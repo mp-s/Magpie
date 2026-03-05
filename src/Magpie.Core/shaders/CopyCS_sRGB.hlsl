@@ -1,2 +1,2 @@
 #define MP_SRGB
-#include "CatmullRomCS.hlsl"
+#include "CopyCS.hlsl"
