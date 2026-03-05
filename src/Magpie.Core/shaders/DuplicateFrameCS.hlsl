@@ -31,18 +31,18 @@ void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 
 #ifdef MP_NO_BOUNDS_CHECKING
 	if (any(tex1.GatherRed(sam, pos) != tex2.GatherRed(sam, pos))) {
-        result[resultOffset] = target;
+		result[resultOffset] = target;
 		return;
 	}
 	
 	if (any(tex1.GatherGreen(sam, pos) != tex2.GatherGreen(sam, pos))) {
-        result[resultOffset] = target;
+		result[resultOffset] = target;
 		return;
 	}
 	
 	if (any(tex1.GatherBlue(sam, pos) != tex2.GatherBlue(sam, pos))) {
-        result[resultOffset] = target;
-    }
+		result[resultOffset] = target;
+	}
 #else
 	// w z
 	// x y
