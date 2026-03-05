@@ -4,13 +4,17 @@ RWTexture2D<float4> outputTex : register(u0);
 
 float4 LoadTexel(uint2 gxy) {
     float3 color = inputTex[gxy].rgb;
+	float3 origin = originTex[gxy].rgb;
     
     // 还原超出 sRGB 的颜色
-    float3 origin = originTex[gxy].rgb;
-    origin /= origin.r + origin.g + origin.b;
+	float sum = origin.r + origin.g + origin.b;
+	if (sum > 1e-5) {
+        // 归一化
+		origin *= rcp(sum);
     
-    float3 adjust = min(origin, 0) + max(origin - 1, 0);
-    color += adjust * (color.r + color.g + color.b);
+		float3 adjust = origin - saturate(origin);
+		color += adjust * (color.r + color.g + color.b);
+	}
     
     return float4(color, 1);
 }
