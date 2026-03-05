@@ -12,6 +12,7 @@
       <PreprocessorDefinitions Condition="'$(CommitId)' != ''">MP_COMMIT_ID=$(CommitId);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="$(DebugInfo)">MP_DEBUG_INFO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="$(UseCompSwapchain)">MP_USE_COMPSWAPCHAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(RtxVideoSDKDir)' != ''">MP_ENABLE_RTX_TRUE_HDR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat Condition="'$(DisablePDB)' == 'true'">None</DebugInformationFormat>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
       <!-- /await:strict: 禁用协程的非标准语言扩展 -->

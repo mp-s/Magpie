@@ -541,9 +541,9 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		return hr;
 	}
 
-	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
+	_graphicsContext.SetDescriptorHeap(heap);
 
-	commandList->SetDescriptorHeaps(1, &heap);
+	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
 	{

@@ -382,6 +382,12 @@
     <FxCompile Include="shaders\CopyCS_sRGB.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="shaders\RtxTrueHdrPostCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\RtxTrueHdrPreCS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

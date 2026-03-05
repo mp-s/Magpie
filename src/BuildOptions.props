@@ -18,6 +18,8 @@
     <PatchVersion></PatchVersion>
     <VersionString></VersionString>
     <CommitId></CommitId>
+
+    <RtxVideoSDKDir></RtxVideoSDKDir>
   </PropertyGroup>
   
   <!-- 用户自定义编译选项 -->

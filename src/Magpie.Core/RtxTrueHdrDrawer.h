@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef MP_ENABLE_RTX_TRUE_HDR
+
 struct NVSDK_NGX_Parameter;
 struct NVSDK_NGX_Handle;
 
@@ -21,11 +23,18 @@ public:
 		return _inputSize;
 	}
 
-	HRESULT Draw() noexcept;
+	HRESULT Draw(
+		ID3D12DescriptorHeap* heap,
+		D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle,
+		uint32_t inputSrvIdx,
+		uint32_t outputUavIdx
+	) noexcept;
 
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
+	HRESULT _InitializePSO() noexcept;
+
 	GraphicsContext* _graphicsContext = nullptr;
 
 	Size _inputSize{};
@@ -33,11 +42,20 @@ private:
 
 	winrt::com_ptr<ID3D12Resource> _ngxInputResource;
 	winrt::com_ptr<ID3D12Resource> _ngxOutputResource;
-	winrt::com_ptr<ID3D12Resource> _colorFactorResource;
+
+	uint32_t _descriptorBaseIdx = std::numeric_limits<uint32_t>::max();
 
 	NVSDK_NGX_Parameter* _ngxParameters = nullptr;
 	NVSDK_NGX_Handle* _trueHdrFeature = nullptr;
+
+	winrt::com_ptr<ID3D12RootSignature> _preRootSignature;
+	winrt::com_ptr<ID3D12RootSignature> _postRootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _prePSO;
+	winrt::com_ptr<ID3D12PipelineState> _postPSO;
+
 	bool _isNgxInitialized = false;
 };
 
 }
+
+#endif

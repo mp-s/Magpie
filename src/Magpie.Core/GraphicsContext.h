@@ -94,6 +94,12 @@ public:
 
 	HRESULT EndFrame() noexcept;
 
+	void SetDescriptorHeap(ID3D12DescriptorHeap* descriptorHeap) noexcept;
+
+	void InvalidateDescriptorHeapCache() noexcept {
+		_curDescriptorHeap = nullptr;
+	}
+
 private:
 	HRESULT _CreateDXGIFactory() noexcept;
 
@@ -125,6 +131,8 @@ private:
 
 	std::vector<uint64_t> _frameFenceValues;
 	uint32_t _curFrameIndex = 0;
+
+	ID3D12DescriptorHeap* _curDescriptorHeap = nullptr;
 
 	D3D_ROOT_SIGNATURE_VERSION _rootSignatureVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
 	bool _isUMA = false;

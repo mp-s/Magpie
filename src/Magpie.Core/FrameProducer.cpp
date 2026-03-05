@@ -493,17 +493,12 @@ HRESULT FrameProducer::_Render() noexcept {
 		commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
 	}
 
-	const uint32_t descriptorSize = _graphicsContext.GetDynamicDescriptorHeap().GetDescriptorSize();
-
 	hr = _effectsDrawer.Draw(
 		frameIndex,
-		inputResource,
-		outputResource,
 		heap,
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(
-			heapGpuHandle, _inputSrvBaseIdx + frameSourceOutputIdx, descriptorSize),
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(
-			heapGpuHandle, _outputUavBaseIdx + frameRingBufferIdx, descriptorSize)
+		heapGpuHandle,
+		_inputSrvBaseIdx + frameSourceOutputIdx,
+		_outputUavBaseIdx + frameRingBufferIdx
 	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("EffectsDrawer::Draw 失败", hr);

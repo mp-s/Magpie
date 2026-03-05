@@ -199,6 +199,8 @@ HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState
 }
 
 HRESULT GraphicsContext::EndFrame() noexcept {
+	InvalidateDescriptorHeapCache();
+
 	if (!_frameFenceValues.empty()) {
 		HRESULT hr = Signal(_frameFenceValues[_curFrameIndex]);
 		if (FAILED(hr)) {
@@ -209,6 +211,13 @@ HRESULT GraphicsContext::EndFrame() noexcept {
 
 	_curFrameIndex = (_curFrameIndex + 1) % (uint32_t)_commandAllocators.size();
 	return S_OK;
+}
+
+void GraphicsContext::SetDescriptorHeap(ID3D12DescriptorHeap* descriptorHeap) noexcept {
+	if (descriptorHeap != _curDescriptorHeap) {
+		_curDescriptorHeap = descriptorHeap;
+		_commandList->SetDescriptorHeaps(1, &descriptorHeap);
+	}
 }
 
 HRESULT GraphicsContext::_CreateDXGIFactory() noexcept {

@@ -35,7 +35,8 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>S:\RTX_Video_SDK_v1.1.0\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(RtxVideoSDKDir)' != ''">$(RtxVideoSDKDir)\include;;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <FxCompile>
       <ShaderModel>5.0</ShaderModel>
@@ -200,6 +201,12 @@
       <ShaderType>Compute</ShaderType>
     </FxCompile>
     <FxCompile Include="shaders\CopyCS_sRGB.hlsl">
+      <ShaderType>Compute</ShaderType>
+    </FxCompile>
+    <FxCompile Include="shaders\RtxTrueHdrPostCS.hlsl">
+      <ShaderType>Compute</ShaderType>
+    </FxCompile>
+    <FxCompile Include="shaders\RtxTrueHdrPreCS.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>
     <FxCompile Include="shaders\SimplePS.hlsl">

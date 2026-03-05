@@ -53,9 +53,11 @@ static DWORD GetCursorBaseSize() noexcept {
 
 CursorDrawer2::~CursorDrawer2() noexcept {
 #ifdef _DEBUG
-	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
-	for (const auto& pair : _cursorInfos) {
-		dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+	if (_graphicsContext) {
+		auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+		for (const auto& pair : _cursorInfos) {
+			dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+		}
 	}
 #endif
 }
