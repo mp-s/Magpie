@@ -27,19 +27,11 @@
 #include <dxgi1_6.h>
 
 // Debug 配置下使用 Agility SDK 辅助调试
-#ifdef _DEBUG
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 619; }
-extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
-#endif
+extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\app\\"; }
 
 using namespace Magpie;
 using namespace winrt::Magpie::implementation;
-
-// 将当前目录设为程序所在目录
-static void SetWorkingDir() noexcept {
-	FAIL_FAST_IF_WIN32_BOOL_FALSE(SetCurrentDirectory(
-		Win32Helper::GetExePath().parent_path().c_str()));
-}
 
 static void InitializeLogger(const wchar_t* logFilePath) noexcept {
 	// 最多两个日志文件，每个最多 500KB
@@ -90,8 +82,17 @@ int APIENTRY wWinMain(
 	// 堆损坏时终止进程
 	HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, nullptr, 0);
 
-	SetWorkingDir();
+	{
+		std::filesystem::path workingDir = Win32Helper::GetExePath().parent_path();
+		// 将当前目录设为程序所在目录
+		FAIL_FAST_IF_WIN32_BOOL_FALSE(SetCurrentDirectory(workingDir.c_str()));
 
+		// 依赖的 dll 都位于 app 文件夹
+		SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+		workingDir += L"\\app";
+		AddDllDirectory(workingDir.c_str());
+	}
+	
 	enum {
 		Normal,
 		RegisterTouchHelper,

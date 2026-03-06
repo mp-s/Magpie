@@ -29,6 +29,8 @@
     <VCProjectVersion Condition="$(VS17)">17.0</VCProjectVersion>
     <VCProjectVersion Condition="!$(VS17)">18.0</VCProjectVersion>
     <DefaultLanguage>en-US</DefaultLanguage>
+    <IntDir>$(SolutionDir)\obj\$(Platform)\$(Configuration)\$(MSBuildProjectName)\</IntDir>
+    <OutBaseDir Condition="'$(OutBaseDir)' == ''">$(SolutionDir)\bin\$(Platform)\$(Configuration)\</OutBaseDir>
     <MajorVersion Condition="'$(MajorVersion)' == ''">0</MajorVersion>
     <MinorVersion Condition="'$(MinorVersion)' == ''">0</MinorVersion>
     <PatchVersion Condition="'$(PatchVersion)' == ''">0</PatchVersion>
@@ -41,6 +43,7 @@
     <PlatformToolset Condition="!$(UseClangCL) And $(VS17)">v143</PlatformToolset>
     <PlatformToolset Condition="!$(UseClangCL) And !$(VS17)">v145</PlatformToolset>
     <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
-    <WholeProgramOptimization Condition="'$(Configuration)' == 'Release'">true</WholeProgramOptimization>
+    <!-- clang-cl 不支持 LTCG -->
+    <WholeProgramOptimization Condition="'$(Configuration)' == 'Release' And !$(UseClangCL)">true</WholeProgramOptimization>
   </PropertyGroup>
 </Project>

@@ -25,7 +25,7 @@ struct CommonSharedConstants {
 	static constexpr const wchar_t* CONFIG_DIR = L"config";
 	static constexpr const wchar_t* CONFIG_FILENAME = L"config.json";
 	static constexpr const wchar_t* SOURCES_DIR = L"sources";
-	static constexpr const wchar_t* EFFECTS_DIR = L"effects";
+	static constexpr const wchar_t* EFFECTS_DIR = L"app\\effects\\shaders";
 	static constexpr const wchar_t* CACHE_DIR = L"cache";
 	static constexpr const wchar_t* UPDATE_DIR = L"update";
 
