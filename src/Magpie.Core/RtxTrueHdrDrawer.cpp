@@ -8,10 +8,14 @@
 #include "shaders/RtxTrueHdrPostCS.h"
 #include "shaders/RtxTrueHdrPreCS.h"
 #include "Logger.h"
+#include "Win32Helper.h"
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_defs_truehdr.h>
 
 namespace Magpie {
+
+// nvsdk_ngx_defs.h 中的 NVSDK_NGX_FAILED 会产生编译警告
+#define NGX_FAILED(value) (((value) & 0xFFF00000) == (uint32_t)NVSDK_NGX_Result_Fail)
 
 RtxTrueHdrDrawer::~RtxTrueHdrDrawer() noexcept {
 #ifdef _DEBUG
@@ -40,21 +44,33 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 	_inputSize = inputSize;
 	_colorInfo = colorInfo;
 
-	NVSDK_NGX_Result status = NVSDK_NGX_D3D12_Init(0, L".", graphicsContext.GetDevice());
-	if (NVSDK_NGX_FAILED(status)) {
-		return E_FAIL;
+	{
+		std::filesystem::path appPath = Win32Helper::GetExePath().parent_path() / L"app";
+		const wchar_t* appPathStr = appPath.c_str();
+		NVSDK_NGX_FeatureCommonInfo info = {
+			.PathListInfo = {
+				.Path = &appPathStr,
+				.Length = 1
+			}
+		};
+		NVSDK_NGX_Result status = NVSDK_NGX_D3D12_Init(0, L".", graphicsContext.GetDevice(), &info);
+		if (NGX_FAILED(status)) {
+			return E_FAIL;
+		}
 	}
 
 	_isNgxInitialized = true;
 
-	status = NVSDK_NGX_D3D12_GetCapabilityParameters(&_ngxParameters);
-	if (NVSDK_NGX_FAILED(status)) {
+	NVSDK_NGX_Result status = NVSDK_NGX_D3D12_GetCapabilityParameters(&_ngxParameters);
+	if (NGX_FAILED(status)) {
+		Logger::Get().Error("NVSDK_NGX_D3D12_GetCapabilityParameters 失败");
 		return E_FAIL;
 	}
 
 	int available = 0;
 	status = _ngxParameters->Get(NVSDK_NGX_Parameter_TrueHDR_Available, &available);
-	if (NVSDK_NGX_FAILED(status) || !available) {
+	if (NGX_FAILED(status) || !available) {
+		Logger::Get().Error("TrueHDR 不可用");
 		return E_FAIL;
 	}
 	
@@ -72,6 +88,7 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 			&heapProps, heapFlag, &texDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
 			nullptr, IID_PPV_ARGS(&_ngxInputResource));
 		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
 			return hr;
 		}
 
@@ -80,6 +97,7 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 			&heapProps, heapFlag, &texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
 			nullptr, IID_PPV_ARGS(&_ngxOutputResource));
 		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
 			return hr;
 		}
 	}
@@ -89,6 +107,7 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 
 		HRESULT hr = dynamicDescriptorHeap.Alloc(2, _descriptorBaseIdx);
 		if (FAILED(hr)) {
+			Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
 			return hr;
 		}
 
@@ -105,6 +124,7 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 	
 	HRESULT hr = _InitializePSO();
 	if (FAILED(hr)) {
+		Logger::Get().ComError("_InitializePSO 失败", hr);
 		return hr;
 	}
 
@@ -141,7 +161,8 @@ HRESULT RtxTrueHdrDrawer::Draw(
 	if (!_trueHdrFeature) {
 		NVSDK_NGX_Result status = NVSDK_NGX_D3D12_CreateFeature(
 			commandList, NVSDK_NGX_Feature_TrueHDR, _ngxParameters, &_trueHdrFeature);
-		if (NVSDK_NGX_FAILED(status)) {
+		if (NGX_FAILED(status)) {
+			Logger::Get().Error("NVSDK_NGX_D3D12_CreateFeature 失败");
 			return E_FAIL;
 		}
 
@@ -185,7 +206,8 @@ HRESULT RtxTrueHdrDrawer::Draw(
 
 	NVSDK_NGX_Result status = NVSDK_NGX_D3D12_EvaluateFeature(
 		commandList, _trueHdrFeature, _ngxParameters, nullptr);
-	if (NVSDK_NGX_FAILED(status)) {
+	if (NGX_FAILED(status)) {
+		Logger::Get().Error("NVSDK_NGX_D3D12_EvaluateFeature 失败");
 		return E_FAIL;
 	}
 
