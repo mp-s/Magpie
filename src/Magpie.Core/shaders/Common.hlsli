@@ -19,3 +19,9 @@ float3 LinearToSrgb(float3 c) {
     float2 k = { 1.055, -0.055 };
     return clamp(j.xxx, c * j.yyy, pow(c, j.zzz) * k.xxx + k.yyy);
 }
+
+// 接受线性 RGB 输入
+float Luminance(float3 color) {
+    // 参数来自 https://en.wikipedia.org/wiki/Relative_luminance
+	return dot(color, float3(0.2126, 0.7152, 0.0722));
+}

@@ -157,7 +157,7 @@ HRESULT RtxTrueHdrDrawer::Draw(
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutTop, 0);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutRight, _inputSize.width);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutBottom, _inputSize.height);
-		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Contrast, 50);
+		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Contrast, 20);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Saturation, 0);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_MiddleGray, 80);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_MaxLuminance,
