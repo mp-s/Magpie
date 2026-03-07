@@ -14,6 +14,7 @@ namespace Magpie {
 static constexpr uint32_t TOUCH_HELPER_VERSION = 4;
 
 static constexpr const wchar_t* TOUCH_HELPER_EXE_NAME = L"TouchHelper.exe";
+static constexpr const wchar_t* TOUCH_HELPER_EXE_PATH = L"app\\TouchHelper.exe";
 
 // 证书的 SHA1 哈希值，也是“指纹”
 static constexpr std::array<uint8_t, 20> CERT_FINGERPRINT{
@@ -153,12 +154,12 @@ bool TouchHelper::Register() noexcept {
 		return false;
 	}
 
-	if (!Win32Helper::FileExists(TOUCH_HELPER_EXE_NAME)) {
+	if (!Win32Helper::FileExists(TOUCH_HELPER_EXE_PATH)) {
 		Logger::Get().Error("找不到可执行文件");
 		return false;
 	}
 
-	if (!InstallCertificateFromPE(TOUCH_HELPER_EXE_NAME)) {
+	if (!InstallCertificateFromPE(TOUCH_HELPER_EXE_PATH)) {
 		Logger::Get().Error("InstallCert 失败");
 		return false;
 	}
@@ -183,7 +184,7 @@ bool TouchHelper::Register() noexcept {
 	}
 
 	std::wstring targetPath = StrHelper::Concat(magpieDir, L"\\", TOUCH_HELPER_EXE_NAME);
-	if (!CopyFile(TOUCH_HELPER_EXE_NAME, targetPath.c_str(), FALSE)) {
+	if (!CopyFile(TOUCH_HELPER_EXE_PATH, targetPath.c_str(), FALSE)) {
 		Logger::Get().Win32Error("CopyFile 失败");
 		return false;
 	}
@@ -281,8 +282,8 @@ bool TouchHelper::Unregister() noexcept {
 	}
 
 	// 如果 TouchHelper 正在运行，则使它退出
-	if (DeleteTouchHelperExe(StrHelper::Concat(system32Dir.get(), L"\\Magpie\\",
-							 TOUCH_HELPER_EXE_NAME).c_str())) {
+	if (DeleteTouchHelperExe(StrHelper::Concat(
+		system32Dir.get(), L"\\Magpie\\", TOUCH_HELPER_EXE_NAME).c_str())) {
 		Logger::Get().Info("已删除 TouchHelper.exe");
 	} else {
 		Logger::Get().Error("删除 TouchHelper.exe 失败");

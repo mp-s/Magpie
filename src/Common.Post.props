@@ -60,7 +60,7 @@
       <!-- /Zc:checkGwOdr: 防止 /Gw 导致某些 ODR 违规被忽略 -->
       <AdditionalOptions>/Gw %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="!$(UseClangCL)">/Zc:checkGwOdr %(AdditionalOptions)</AdditionalOptions>
-      <!-- clang-cl 不支持 /LTCG，应使用 LTO -->
+      <!-- clang-cl 不支持 LTCG，应使用 LTO -->
       <AdditionalOptions Condition="$(UseClangCL)">/clang:-flto %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
