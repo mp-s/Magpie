@@ -47,7 +47,7 @@ ScalingError Renderer2::Initialize(
 		options.Is3DGameMode() ? 2 : 6,
 		D3D12_COMMAND_QUEUE_PRIORITY_HIGH,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		_dynamicDescriptorHeap
+		_descriptorHeap
 	)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return ScalingError::ScalingFailedGeneral;
@@ -517,12 +517,9 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COMMON 状态，依赖隐式状态转换
 	ID3D12Resource* curBuffer;
-	uint32_t curBufferSrvIdx;
+	uint32_t curBufferSrvOffset;
 	UINT64 fenceValueToSignal;
-	ID3D12DescriptorHeap* heap;
-	D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle;
-	if (!_frameProducer.ConsumerBeginFrame(
-		curBuffer, curBufferSrvIdx, fenceValueToSignal, heap, heapGpuHandle)) {
+	if (!_frameProducer.ConsumerBeginFrame(curBuffer, curBufferSrvOffset, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -543,7 +540,11 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
-	commandList->SetDescriptorHeaps(1, &heap);
+	{
+		ID3D12DescriptorHeap* heap = _descriptorHeap.GetHeap();
+		commandList->SetDescriptorHeaps(1, &heap);
+	}
+	
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
 	{
@@ -569,11 +570,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 	}
 
-	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
-	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
-
-	commandList->SetGraphicsRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, curBufferSrvIdx, descriptorSize));
+	commandList->SetGraphicsRootDescriptorTable(1, _descriptorHeap.GetGpuHandle(curBufferSrvOffset));
 
 	{
 		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)rendererSize.width, (float)rendererSize.height);
@@ -592,7 +589,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->OMSetRenderTargets(1, &rawRtvHandle, FALSE, nullptr);
 	}
 
-	hr = _cursorDrawer.Draw(heapGpuHandle);
+	hr = _cursorDrawer.Draw();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CursorDrawer2::Draw 失败", hr);
 		return hr;

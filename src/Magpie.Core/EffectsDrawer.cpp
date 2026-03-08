@@ -90,8 +90,8 @@ HRESULT EffectsDrawer::Draw(
 	uint32_t frameIndex,
 	ID3D12Resource* /*inputResource*/,
 	ID3D12Resource* /*outputResource*/,
-	D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
-	D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
+	uint32_t inputSrvOffset,
+	uint32_t outputUavOffset
 ) noexcept {
 	// 获取渲染时间
 	const uint32_t queryHeapIndex = 2 * frameIndex;
@@ -115,7 +115,7 @@ HRESULT EffectsDrawer::Draw(
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
 
-	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvHandle, outputUavHandle, false);
+	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvOffset, outputUavOffset, false);
 
 	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
 	commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,

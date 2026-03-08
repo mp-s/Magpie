@@ -21,8 +21,8 @@ public:
 		uint32_t frameIndex,
 		ID3D12Resource* inputResource,
 		ID3D12Resource* outputResource,
-		D3D12_GPU_DESCRIPTOR_HANDLE inputSrvHandle,
-		D3D12_GPU_DESCRIPTOR_HANDLE outputUavHandle
+		uint32_t inputSrvOffset,
+		uint32_t outputUavOffset
 	) noexcept;
 
 	Size GetOutputSize() const noexcept {

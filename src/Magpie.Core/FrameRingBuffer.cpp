@@ -4,7 +4,7 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "DebugInfo.h"
-#include "DynamicDescriptorHeap.h"
+#include "DescriptorHeap.h"
 
 namespace Magpie {
 
@@ -53,9 +53,7 @@ ID3D12Resource* FrameRingBuffer::GetBuffer(uint32_t index) noexcept {
 
 HRESULT FrameRingBuffer::ProducerBeginFrame(
 	ID3D12CommandQueue* commandQueue,
-	uint32_t& bufferIdx,
-	ID3D12DescriptorHeap*& heap,
-	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+	uint32_t& bufferIdx
 ) noexcept {
 	auto lk = _lock.lock_exclusive();
 
@@ -70,10 +68,6 @@ HRESULT FrameRingBuffer::ProducerBeginFrame(
 	}
 
 	bufferIdx = _curProducerIdx;
-
-	heap = _graphicsContext->GetDynamicDescriptorHeap().GetHeapForBinding(
-		gpuHandle, curSlot.producerFenceValue, _producerFence->GetCompletedValue(), false);
-
 	return S_OK;
 }
 
@@ -128,9 +122,7 @@ HRESULT FrameRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noex
 bool FrameRingBuffer::ConsumerBeginFrame(
 	uint32_t& bufferIdx,
 	ID3D12Resource*& buffer,
-	UINT64& fenceValueToSignal,
-	ID3D12DescriptorHeap*& heap,
-	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+	UINT64& fenceValueToSignal
 ) noexcept {
 	auto lk = _lock.lock_exclusive();
 
@@ -169,9 +161,6 @@ bool FrameRingBuffer::ConsumerBeginFrame(
 
 	bufferIdx = _curConsumerIdx;
 	buffer = curSlot.resource.get();
-
-	heap = _graphicsContext->GetDynamicDescriptorHeap().GetHeapForBinding(
-		gpuHandle, fenceValueToSignal, _consumerFence->GetCompletedValue(), true);
 
 	return true;
 }

@@ -192,7 +192,7 @@
     <ClInclude Include="CursorHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
-    <ClInclude Include="DynamicDescriptorHeap.h">
+    <ClInclude Include="DescriptorHeap.h">
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="ColorHelper.h">
@@ -329,7 +329,7 @@
     <ClCompile Include="CursorHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
-    <ClCompile Include="DynamicDescriptorHeap.cpp">
+    <ClCompile Include="DescriptorHeap.cpp">
       <Filter>Render</Filter>
     </ClCompile>
   </ItemGroup>

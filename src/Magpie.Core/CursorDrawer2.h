@@ -25,7 +25,7 @@ public:
 
 	bool CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept;
 
-	HRESULT Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept;
+	HRESULT Draw() noexcept;
 
 	void OnCursorVirtualizationStarted() noexcept {
 		_isCursorVirtualized = true;
@@ -83,7 +83,7 @@ private:
 		Size size;
 		Point hotspot;
 		winrt::com_ptr<ID3D12Resource> texture;
-		uint32_t textureSrvIdx = std::numeric_limits<uint32_t>::max();
+		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
 
 		Size originSize;
 		ByteBuffer originTextureData;

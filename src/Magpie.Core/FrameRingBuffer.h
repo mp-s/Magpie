@@ -21,9 +21,7 @@ public:
 
 	HRESULT ProducerBeginFrame(
 		ID3D12CommandQueue* commandQueue,
-		uint32_t& bufferIdx,
-		ID3D12DescriptorHeap*& heap,
-		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+		uint32_t& bufferIdx
 	) noexcept;
 
 	HRESULT ProducerEndFrame(ID3D12CommandQueue* commandQueue) noexcept;
@@ -31,9 +29,7 @@ public:
 	bool ConsumerBeginFrame(
 		uint32_t& bufferIdx,
 		ID3D12Resource*& buffer,
-		UINT64& fenceValueToSignal,
-		ID3D12DescriptorHeap*& heap,
-		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+		UINT64& fenceValueToSignal
 	) noexcept;
 
 	HRESULT ConsumerEndFrame(

@@ -2,7 +2,7 @@
 #include "CursorDrawer2.h"
 #include "FrameProducer.h"
 #include "GraphicsContext.h"
-#include "DynamicDescriptorHeap.h"
+#include "DescriptorHeap.h"
 #include "ScalingOptions.h"
 
 namespace Magpie {
@@ -87,7 +87,7 @@ private:
 	Rect _outputRect{};
 
 	// 由多个 GraphicsContext 共享
-	DynamicDescriptorHeap _dynamicDescriptorHeap;
+	DescriptorHeap _descriptorHeap;
 	GraphicsContext _graphicsContext;
 	FrameProducer _frameProducer;
 	CursorDrawer2 _cursorDrawer;

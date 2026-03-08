@@ -3,7 +3,7 @@
 #include "ByteBuffer.h"
 #include "ColorHelper.h"
 #include "CursorHelper.h"
-#include "DynamicDescriptorHeap.h"
+#include "DescriptorHeap.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
@@ -56,9 +56,9 @@ static DWORD GetCursorBaseSize() noexcept {
 CursorDrawer2::~CursorDrawer2() noexcept {
 #ifdef _DEBUG
 	if (_graphicsContext) {
-		auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+		auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 		for (const auto& pair : _cursorInfos) {
-			dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+			descriptorHeap.Free(pair.second.textureSrvOffset, 1);
 		}
 	}
 #endif
@@ -198,7 +198,7 @@ bool CursorDrawer2::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 	}
 }
 
-HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept {
+HRESULT CursorDrawer2::Draw() noexcept {
 	if (!_hCurCursor || !_curCursorInfo) {
 		return S_OK;
 	}
@@ -252,11 +252,8 @@ HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept 
 		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 	}
 
-	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
-	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
-
 	commandList->SetGraphicsRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _curCursorInfo->textureSrvIdx, descriptorSize));
+		1, _graphicsContext->GetDescriptorHeap().GetGpuHandle(_curCursorInfo->textureSrvOffset));
 
 	{
 		CD3DX12_VIEWPORT viewport(
@@ -453,9 +450,9 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 		return nullptr;
 	}
 
-	HRESULT hr = _graphicsContext->GetDynamicDescriptorHeap().Alloc(1, cursorInfo.textureSrvIdx);
+	HRESULT hr = _graphicsContext->GetDescriptorHeap().Alloc(1, cursorInfo.textureSrvOffset);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
+		Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 		return nullptr;
 	}
 
@@ -839,8 +836,8 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 
 	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
 		CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
-	_graphicsContext->GetDynamicDescriptorHeap().CreateShaderResourceView(
-		cursorInfo.texture.get(), &srvDesc, cursorInfo.textureSrvIdx);
+	device->CreateShaderResourceView(cursorInfo.texture.get(), &srvDesc,
+		_graphicsContext->GetDescriptorHeap().GetCpuHandle(cursorInfo.textureSrvOffset));
 
 	return S_OK;
 }
@@ -850,9 +847,9 @@ void CursorDrawer2::_ClearCursorInfos() noexcept {
 	_hCurCursor = NULL;
 	_curCursorInfo = nullptr;
 
-	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 	for (const auto& pair : _cursorInfos) {
-		dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+		descriptorHeap.Free(pair.second.textureSrvOffset, 1);
 	}
 
 	_cursorInfos.clear();

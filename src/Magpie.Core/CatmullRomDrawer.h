@@ -11,8 +11,8 @@ public:
 	HRESULT Draw(
 		Size inputSize,
 		Size outputSize,
-		D3D12_GPU_DESCRIPTOR_HANDLE inputGpuHandle,
-		D3D12_GPU_DESCRIPTOR_HANDLE outputGpuHandle,
+		uint32_t inputSrvOffset,
+		uint32_t outputUavOffset,
 		bool outputSrgb
 	) noexcept;
 
