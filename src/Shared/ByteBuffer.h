@@ -2,6 +2,7 @@
 
 namespace Magpie {
 
+// 申请的内存都已置零
 class ByteBuffer {
 public:
 	ByteBuffer() = default;

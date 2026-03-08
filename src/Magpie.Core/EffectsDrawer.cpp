@@ -124,14 +124,12 @@ HRESULT EffectsDrawer::Draw(
 	return S_OK;
 }
 
-HRESULT EffectsDrawer::OnResized(Size rendererSize) noexcept {
+void EffectsDrawer::OnResized(Size rendererSize) noexcept {
 	_outputSize = rendererSize;
-	return S_OK;
 }
 
-HRESULT EffectsDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
+void EffectsDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
-	return S_OK;
 }
 
 }

@@ -29,9 +29,9 @@ public:
 		return _outputSize;
 	}
 
-	HRESULT OnResized(Size rendererSize) noexcept;
+	void OnResized(Size rendererSize) noexcept;
 
-	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
 	GraphicsContext* _graphicsContext = nullptr;

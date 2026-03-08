@@ -16,6 +16,8 @@
 
 namespace Magpie {
 
+using namespace DirectX::PackedVector;
+
 using FnGetCursorFrameInfo = HCURSOR WINAPI(
 	HCURSOR hcur,
 	LPWSTR  lpName,
@@ -53,9 +55,11 @@ static DWORD GetCursorBaseSize() noexcept {
 
 CursorDrawer2::~CursorDrawer2() noexcept {
 #ifdef _DEBUG
-	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
-	for (const auto& pair : _cursorInfos) {
-		dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+	if (_graphicsContext) {
+		auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+		for (const auto& pair : _cursorInfos) {
+			dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+		}
 	}
 #endif
 }
@@ -547,6 +551,30 @@ wil::unique_hcursor CursorDrawer2::_TryResolveStandardCursor(
 	return result;
 }
 
+static void FillColorCursorRGB(
+	HALF* textureData,
+	uint8_t* pixels,
+	const ColorInfo& colorInfo,
+	float alpha
+) noexcept {
+	// 预乘 Alpha 通道并归一化
+	float factor = alpha / 255.0f;
+
+	if (colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
+		*textureData++ = XMConvertFloatToHalf(pixels[2] * factor);
+		*textureData++ = XMConvertFloatToHalf(pixels[1] * factor);
+		*textureData = XMConvertFloatToHalf(pixels[0] * factor);
+	} else {
+		if (colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
+			factor *= colorInfo.sdrWhiteLevel;
+		}
+
+		*textureData++ = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[2]) * factor);
+		*textureData++ = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[1]) * factor);
+		*textureData = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[0]) * factor);
+	}
+}
+
 bool CursorDrawer2::_ResolveCursorPixels(
 	_CursorInfo& cursorInfo,
 	HBITMAP hColorBmp,
@@ -594,30 +622,12 @@ bool CursorDrawer2::_ResolveCursorPixels(
 			cursorInfo.type = _CursorType::Color;
 			cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
-			using namespace DirectX::PackedVector;
-
 			HALF* textureData = (HALF*)cursorInfo.originTextureData.Data();
 
 			for (uint32_t i = 0; i < bi.bmiHeader.biSizeImage; i += 4) {
-				// 预乘 Alpha 通道
 				float alpha = pixels[i + 3] / 255.0f;
-				float factor = alpha / 255.0f;
-
+				FillColorCursorRGB(&textureData[i], &pixels[i], _colorInfo, alpha);
 				textureData[i + 3] = XMConvertFloatToHalf(1.0f - alpha);
-				
-				if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
-					textureData[i] = XMConvertFloatToHalf(pixels[i + 2] * factor);
-					textureData[i + 1] = XMConvertFloatToHalf(pixels[i + 1] * factor);
-					textureData[i + 2] = XMConvertFloatToHalf(pixels[i] * factor);
-				} else {
-					if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
-						factor *= _colorInfo.sdrWhiteLevel;
-					}
-
-					textureData[i] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i + 2]) * factor);
-					textureData[i + 1] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i + 1]) * factor);
-					textureData[i + 2] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i]) * factor);
-				}
 			}
 		} else {
 			// 彩色掩码光标。如果不需要应用 XOR 则转换成彩色光标
@@ -647,14 +657,15 @@ bool CursorDrawer2::_ResolveCursorPixels(
 				cursorInfo.type = _CursorType::Color;
 				cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
+				HALF* textureData = (HALF*)cursorInfo.originTextureData.Data();
+
 				for (uint32_t i = 0; i < bi.bmiHeader.biSizeImage; i += 4) {
 					if (maskPixels[i] == 0) {
-						// Alpha 通道已经是 0，无需设置
-						std::swap(pixels[i], pixels[i + 2]);
+						// Alpha 通道为 0，无需设置
+						FillColorCursorRGB(&textureData[i], &pixels[i], _colorInfo, 1.0f);
 					} else {
 						// 透明像素
-						std::memset(&pixels[i], 0, 3);
-						pixels[i + 3] = 255;
+						textureData[i + 3] = XMConvertFloatToHalf(1.0f);
 					}
 				}
 			} else {
@@ -688,22 +699,20 @@ bool CursorDrawer2::_ResolveCursorPixels(
 			cursorInfo.type = _CursorType::Color;
 			cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
+			HALF* textureData = (HALF*)cursorInfo.originTextureData.Data();
+
 			for (uint32_t i = 0; i < halfSize; i += 4) {
 				// 上半部分是 AND 掩码，下半部分是 XOR 掩码
 				// https://learn.microsoft.com/en-us/windows-hardware/drivers/display/drawing-monochrome-pointers
 				if (pixels[i] == 0) {
-					if (pixels[i + halfSize] == 0) {
-						// 黑色
-						std::memset(&pixels[i], 0, 4);
-					} else {
-						// 白色
-						std::memset(&pixels[i], 255, 3);
-						pixels[i + 3] = 0;
+					// 黑色全为 0，无需设置
+					if (pixels[i + halfSize] != 0) {
+						// 白色。非 HDR 时 sdrWhiteLevel 始终为 1
+						std::fill_n(&textureData[i], 3, XMConvertFloatToHalf(_colorInfo.sdrWhiteLevel));
 					}
 				} else {
 					// 透明
-					std::memset(&pixels[i], 0, 3);
-					pixels[i + 3] = 255;
+					textureData[i + 3] = XMConvertFloatToHalf(1.0f);
 				}
 			}
 		} else {
@@ -731,9 +740,9 @@ bool CursorDrawer2::_ResolveCursorPixels(
 HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept {
 	ID3D12Device5* device = _graphicsContext->GetDevice();
 
+	CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 	D3D12_HEAP_FLAGS heapFlag = _graphicsContext->IsHeapFlagCreateNotZeroedSupported() ?
 		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-	CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
 
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 		cursorInfo.type == _CursorType::Color ? DXGI_FORMAT_R16G16B16A16_FLOAT :
@@ -752,7 +761,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureSize);
 
 	HRESULT hr = device->CreateCommittedResource(
-		&heapProperties,
+		&heapProps,
 		heapFlag,
 		&bufferDesc,
 		D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -764,9 +773,9 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 		return hr;
 	}
 
-	heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+	heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 	hr = device->CreateCommittedResource(
-		&heapProperties,
+		&heapProps,
 		heapFlag,
 		&texDesc,
 		D3D12_RESOURCE_STATE_COPY_DEST,

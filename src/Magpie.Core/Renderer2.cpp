@@ -13,8 +13,6 @@
 
 namespace Magpie {
 
-static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
-
 Renderer2::Renderer2() noexcept {}
 
 Renderer2::~Renderer2() noexcept {
