@@ -4,8 +4,11 @@ cbuffer RootConstants : register(b1) {
 	uint2 cursorTexSize;
 	uint2 cursorSize;
 	uint2 originOffset;
-	float sdrWhiteLevel;
+#ifdef MP_SRGB
 	uint shouldEncodeSrgb;
+#else
+	float sdrWhiteLevel;
+#endif
 };
 
 Texture2D<uint> cursorTex : register(t0);
@@ -21,12 +24,17 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 	
 	if (!andMask) {
 		// 黑色或白色
+#ifdef MP_SRGB
+		float c = xorMask ? 1.0f : 0.0f;
+#else
 		float c = xorMask ? sdrWhiteLevel : 0.0f;
+#endif
 		return float4(c, c, c, 1.0f);
 	}
 	
 	float3 origin = originTex[uv * cursorSize + originOffset].rgb;
 	
+#ifdef MP_SRGB
 	[branch]
 	if (shouldEncodeSrgb) {
 		origin = EncodeSrgb(saturate(origin));
@@ -34,9 +42,15 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 	
 	if (xorMask) {
 		// 反色
+		origin = 1.0f - origin;
+	}
+#else
+	if (xorMask) {
+		// 反色
 		float white = max(max(max(origin.r, origin.g), origin.b), sdrWhiteLevel);
 		origin = white - origin;
 	}
+#endif
 	
 	return float4(origin, 1.0f);
 }

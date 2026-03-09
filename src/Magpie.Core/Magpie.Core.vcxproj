@@ -190,6 +190,9 @@
     <FxCompile Include="shaders\MaskedCursorPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
+    <FxCompile Include="shaders\MaskedCursorPS_sRGB.hlsl">
+      <ShaderType>Pixel</ShaderType>
+    </FxCompile>
     <FxCompile Include="shaders\MonochromeCursorPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -198,6 +201,9 @@
     </FxCompile>
     <FxCompile Include="shaders\CopyCS_sRGB.hlsl">
       <ShaderType>Compute</ShaderType>
+    </FxCompile>
+    <FxCompile Include="shaders\MonochromeCursorPS_sRGB.hlsl">
+      <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="shaders\SimplePS.hlsl">
       <ShaderType>Pixel</ShaderType>

@@ -9,9 +9,11 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "shaders/CursorVS.h"
-#include "shaders/SimplePS.h"
 #include "shaders/MaskedCursorPS.h"
+#include "shaders/MaskedCursorPS_sRGB.h"
 #include "shaders/MonochromeCursorPS.h"
+#include "shaders/MonochromeCursorPS_sRGB.h"
+#include "shaders/SimplePS.h"
 #include "Win32Helper.h"
 #include <DirectXPackedVector.h>
 #include <ShellScalingApi.h>
@@ -214,6 +216,8 @@ HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 	};
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+
+	const bool isSrgb = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange;
 	
 	if (_curCursorInfo->type == _CursorType::Color) {
 		if (!_colorPSO) {
@@ -226,27 +230,22 @@ HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 
 		commandList->SetPipelineState(_colorPSO.get());
 		commandList->SetGraphicsRootSignature(_colorRootSignature.get());
-	} else if (_curCursorInfo->type == _CursorType::Monochrome) {
-		if (!_monochromePSO) {
-			HRESULT hr = _CreateMaskPSO(true);
-			if (FAILED(hr)) {
-				Logger::Get().ComError("_CreateMaskPSO 失败", hr);
-				return hr;
-			}
-		}
-
-		commandList->SetPipelineState(_monochromePSO.get());
-		commandList->SetGraphicsRootSignature(_maskRootSignature.get());
 	} else {
-		if (!_maskedColorPSO) {
-			HRESULT hr = _CreateMaskPSO(false);
+		bool isMonochrome = _curCursorInfo->type == _CursorType::Monochrome;
+		
+		winrt::com_ptr<ID3D12PipelineState>& pso = isMonochrome ?
+			(isSrgb ? _monochromeSrgbPSO : _monochromePSO) :
+			(isSrgb ? _maskedColorSrgbPSO : _maskedColorPSO);
+
+		if (!pso) {
+			HRESULT hr = _CreateMaskPSO(isMonochrome, isSrgb, pso);
 			if (FAILED(hr)) {
 				Logger::Get().ComError("_CreateMaskPSO 失败", hr);
 				return hr;
 			}
 		}
 
-		commandList->SetPipelineState(_maskedColorPSO.get());
+		commandList->SetPipelineState(pso.get());
 		commandList->SetGraphicsRootSignature(_maskRootSignature.get());
 	}
 
@@ -280,8 +279,7 @@ HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 			{.uintVal = _curCursorInfo->size.height},
 			{.uintVal = uint32_t(cursorRect.left - _destRect.left)},
 			{.uintVal = uint32_t(cursorRect.top - _destRect.top)},
-			{.floatVal = _colorInfo.sdrWhiteLevel},
-			{.uintVal = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange}
+			{.uintVal = isSrgb ? 1 : std::bit_cast<uint32_t>(_colorInfo.sdrWhiteLevel)}
 		};
 		commandList->SetGraphicsRoot32BitConstants(1, (UINT)std::size(constants), constants, 0);
 
@@ -981,7 +979,11 @@ HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
 	return S_OK;
 }
 
-HRESULT CursorDrawer2::_CreateMaskPSO(bool isMonochrome) noexcept {
+HRESULT CursorDrawer2::_CreateMaskPSO(
+	bool isMonochrome,
+	bool isSrgb,
+	winrt::com_ptr<ID3D12PipelineState>& result
+) noexcept {
 	if (!_maskRootSignature) {
 		winrt::com_ptr<ID3DBlob> signature;
 		{
@@ -1002,7 +1004,7 @@ HRESULT CursorDrawer2::_CreateMaskPSO(bool isMonochrome) noexcept {
 					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
 					.Constants = {
 						.ShaderRegister = 1,
-						.Num32BitValues = 8
+						.Num32BitValues = 7
 					},
 					.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
 				},
@@ -1052,9 +1054,21 @@ HRESULT CursorDrawer2::_CreateMaskPSO(bool isMonochrome) noexcept {
 
 	D3D12_SHADER_BYTECODE psByteCode;
 	if (isMonochrome) {
-		psByteCode = CD3DX12_SHADER_BYTECODE(MonochromeCursorPS, sizeof(MonochromeCursorPS));
+		if (isSrgb) {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MonochromeCursorPS_sRGB, sizeof(MonochromeCursorPS_sRGB));
+		} else {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MonochromeCursorPS, sizeof(MonochromeCursorPS));
+		}
 	} else {
-		psByteCode = CD3DX12_SHADER_BYTECODE(MaskedCursorPS, sizeof(MaskedCursorPS));
+		if (isSrgb) {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MaskedCursorPS_sRGB, sizeof(MaskedCursorPS_sRGB));
+		} else {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MaskedCursorPS, sizeof(MaskedCursorPS));
+		}
 	}
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
@@ -1071,15 +1085,11 @@ HRESULT CursorDrawer2::_CreateMaskPSO(bool isMonochrome) noexcept {
 		},
 		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
 		.NumRenderTargets = 1,
-		.RTVFormats = { _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-			DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT },
+		.RTVFormats = { isSrgb ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT },
 		.SampleDesc = { .Count = 1 }
 	};
 	HRESULT hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
-		&psoDesc,
-		winrt::guid_of<ID3D12PipelineState>(),
-		(isMonochrome ? _monochromePSO : _maskedColorPSO).put_void()
-	);
+		&psoDesc, IID_PPV_ARGS(&result));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
 		return hr;

@@ -376,6 +376,12 @@
     <FxCompile Include="shaders\CopyCS_sRGB.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="shaders\MonochromeCursorPS_sRGB.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\MaskedCursorPS_sRGB.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
