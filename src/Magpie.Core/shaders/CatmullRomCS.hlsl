@@ -64,7 +64,7 @@ float4 CatmullRom(float2 pos) {
 	total += bottom * coltaps.w;
 
 #ifdef MP_SRGB
-	total = LinearToSrgb(saturate(total));
+	total = EncodeSrgb(saturate(total));
 #endif
 	return float4(total, 1);
 }

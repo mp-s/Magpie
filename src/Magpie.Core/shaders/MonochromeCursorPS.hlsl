@@ -1,24 +1,45 @@
-Texture2D originTex : register(t0);
-Texture2D<float2> cursorTex : register(t1);
+#include "Common.hlsli"
 
-SamplerState pointSampler : register(s0);
+cbuffer RootConstants : register(b1) {
+	uint2 texSize;
+	uint2 originOffset;
+	float sdrWhiteLevel;
+	uint isSdr;
+	uint shouldEncodeSrgb;
+};
 
-float4 main(noperspective float2 coord : TEXCOORD) : SV_TARGET {
-	float2 mask = cursorTex.Sample(pointSampler, coord);
+Texture2D<uint> cursorTex : register(t0);
+Texture2D<float4> originTex : register(t1);
+
+float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
+	uint2 coord = uint2(uv * texSize);
 	
-	if (mask.x > 0.5f) {
-		float3 origin = originTex.Sample(pointSampler, coord).rgb;
+	// 高四位是 AND 掩码， 低四位是 XOR 掩码
+	uint mask = cursorTex[coord];
+    uint andMask = mask & 0xF0u;
+    uint xorMask = mask & 0x0Fu;
+	
+    if (!andMask) {
+        float v = xorMask ? sdrWhiteLevel : 0.0f;
+        return float4(v, v, v, 1.0f);
+    }
+	
+    float3 origin = originTex[coord + originOffset].rgb;
+	
+	if (isSdr) {
+		if (shouldEncodeSrgb) {
+			origin = EncodeSrgb(saturate(origin));
+		}
 
-		if (mask.y > 0.5f) {
-			return float4(1 - origin, 1);
-		} else {
-			return float4(origin, 1);
+		if (xorMask) {
+			origin = 1.0f - origin;
 		}
 	} else {
-		if (mask.y > 0.5f) {
-			return float4(1, 1, 1, 1);
-		} else {
-			return float4(0, 0, 0, 1);
+		if (xorMask) {
+			float white = max(max(origin.r, origin.g), max(origin.b, sdrWhiteLevel));
+			origin = white - origin;
 		}
 	}
+	
+    return float4(origin, 1.0f);
 }

@@ -121,7 +121,7 @@ HRESULT FrameRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noex
 
 bool FrameRingBuffer::ConsumerBeginFrame(
 	uint32_t& bufferIdx,
-	ID3D12Resource*& buffer,
+	ID3D12Resource*& frame,
 	UINT64& fenceValueToSignal
 ) noexcept {
 	auto lk = _lock.lock_exclusive();
@@ -160,7 +160,7 @@ bool FrameRingBuffer::ConsumerBeginFrame(
 	curSlot.consumerFenceValue = fenceValueToSignal;
 
 	bufferIdx = _curConsumerIdx;
-	buffer = curSlot.resource.get();
+	frame = curSlot.resource.get();
 
 	return true;
 }

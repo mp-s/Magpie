@@ -32,8 +32,8 @@ public:
 	uint64_t GetLatestFrameNumber() const noexcept;
 
 	bool ConsumerBeginFrame(
-		ID3D12Resource*& buffer,
-		uint32_t& srvOffset,
+		ID3D12Resource*& frame,
+		uint32_t& frameSrvOffset,
 		UINT64& fenceValueToSignal
 	) noexcept;
 

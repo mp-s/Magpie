@@ -516,10 +516,10 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 
 HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COMMON 状态，依赖隐式状态转换
-	ID3D12Resource* curBuffer;
-	uint32_t curBufferSrvOffset;
+	ID3D12Resource* curFrame;
+	uint32_t curFrameSrvOffset;
 	UINT64 fenceValueToSignal;
-	if (!_frameProducer.ConsumerBeginFrame(curBuffer, curBufferSrvOffset, fenceValueToSignal)) {
+	if (!_frameProducer.ConsumerBeginFrame(curFrame, curFrameSrvOffset, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -570,7 +570,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 	}
 
-	commandList->SetGraphicsRootDescriptorTable(1, _descriptorHeap.GetGpuHandle(curBufferSrvOffset));
+	commandList->SetGraphicsRootDescriptorTable(1, _descriptorHeap.GetGpuHandle(curFrameSrvOffset));
 
 	{
 		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)rendererSize.width, (float)rendererSize.height);
@@ -589,7 +589,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->OMSetRenderTargets(1, &rawRtvHandle, FALSE, nullptr);
 	}
 
-	hr = _cursorDrawer.Draw();
+	hr = _cursorDrawer.Draw(curFrameSrvOffset);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CursorDrawer2::Draw 失败", hr);
 		return hr;

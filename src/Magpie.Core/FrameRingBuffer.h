@@ -28,7 +28,7 @@ public:
 
 	bool ConsumerBeginFrame(
 		uint32_t& bufferIdx,
-		ID3D12Resource*& buffer,
+		ID3D12Resource*& frame,
 		UINT64& fenceValueToSignal
 	) noexcept;
 
