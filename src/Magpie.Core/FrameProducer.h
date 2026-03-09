@@ -32,11 +32,9 @@ public:
 	uint64_t GetLatestFrameNumber() const noexcept;
 
 	bool ConsumerBeginFrame(
-		ID3D12Resource*& buffer,
-		uint32_t& srvIdx,
-		UINT64& fenceValueToSignal,
-		ID3D12DescriptorHeap*& heap,
-		D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+		ID3D12Resource*& frame,
+		uint32_t& frameSrvOffset,
+		UINT64& fenceValueToSignal
 	) noexcept;
 
 	HRESULT ConsumerEndFrame(
@@ -91,9 +89,9 @@ private:
 	std::unique_ptr<GraphicsCaptureFrameSource> _frameSource;
 	EffectsDrawer _effectsDrawer;
 
-	uint32_t _inputSrvBaseIdx = std::numeric_limits<uint32_t>::max();
-	uint32_t _outputUavBaseIdx = std::numeric_limits<uint32_t>::max();
-	uint32_t _outputSrvBaseIdx = std::numeric_limits<uint32_t>::max();
+	uint32_t _inputSrvBaseOffset = std::numeric_limits<uint32_t>::max();
+	uint32_t _outputUavBaseOffset = std::numeric_limits<uint32_t>::max();
+	uint32_t _outputSrvBaseOffset = std::numeric_limits<uint32_t>::max();
 
 	bool _isScRGB = false;
 };

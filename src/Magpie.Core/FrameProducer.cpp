@@ -2,7 +2,7 @@
 #include "FrameProducer.h"
 #include "CommonSharedConstants.h"
 #include "DuplicateFrameChecker.h"
-#include "DynamicDescriptorHeap.h"
+#include "DescriptorHeap.h"
 #include "GraphicsCaptureFrameSource.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
@@ -31,10 +31,10 @@ FrameProducer::~FrameProducer() noexcept {
 	}
 
 #ifdef _DEBUG
-	if (_inputSrvBaseIdx != std::numeric_limits<uint32_t>::max()) {
-		auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+	if (_inputSrvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+		auto& descriptorHeap = _graphicsContext.GetDescriptorHeap();
 		uint32_t maxInFlightFrameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-		dynamicDescriptorHeap.Free(_inputSrvBaseIdx, 3 * maxInFlightFrameCount + 2);
+		descriptorHeap.Free(_inputSrvBaseOffset, 3 * maxInFlightFrameCount + 2);
 	}
 #endif
 }
@@ -71,19 +71,16 @@ uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
 }
 
 bool FrameProducer::ConsumerBeginFrame(
-	ID3D12Resource*& buffer,
-	uint32_t& srvIdx,
-	UINT64& fenceValueToSignal,
-	ID3D12DescriptorHeap*& heap,
-	D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle
+	ID3D12Resource*& frame,
+	uint32_t& frameSrvOffset,
+	UINT64& fenceValueToSignal
 ) noexcept {
 	uint32_t bufferIdx;
-	if (!_frameRingBuffer.ConsumerBeginFrame(
-		bufferIdx, buffer, fenceValueToSignal, heap, gpuHandle)) {
+	if (!_frameRingBuffer.ConsumerBeginFrame(bufferIdx, frame, fenceValueToSignal)) {
 		return false;
 	}
 
-	srvIdx = _outputSrvBaseIdx + bufferIdx;
+	frameSrvOffset = _outputSrvBaseOffset + bufferIdx;
 	return true;
 }
 
@@ -383,17 +380,17 @@ bool FrameProducer::_Initialize(
 	}
 
 	{
-		auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
+		auto& descriptorHeap = _graphicsContext.GetDescriptorHeap();
 
 		// maxInFlightFrameCount + (maxInFlightFrameCount + 1) + (maxInFlightFrameCount + 1)
-		HRESULT hr = dynamicDescriptorHeap.Alloc(maxInFlightFrameCount * 3 + 2, _inputSrvBaseIdx);
+		HRESULT hr = descriptorHeap.Alloc(maxInFlightFrameCount * 3 + 2, _inputSrvBaseOffset);
 		if (FAILED(hr)) {
-			Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
+			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 			return false;
 		}
 
-		_outputUavBaseIdx = _inputSrvBaseIdx + maxInFlightFrameCount;
-		_outputSrvBaseIdx = _outputUavBaseIdx + maxInFlightFrameCount + 1;
+		_outputUavBaseOffset = _inputSrvBaseOffset + maxInFlightFrameCount;
+		_outputSrvBaseOffset = _outputUavBaseOffset + maxInFlightFrameCount + 1;
 
 		_CreateInputDescriptors();
 		_CreateOutputDescriptors();
@@ -419,33 +416,42 @@ bool FrameProducer::_Initialize(
 
 void FrameProducer::_CreateInputDescriptors() noexcept {
 	uint32_t bufferCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
-	SmallVector<ID3D12Resource*, 3> resources(bufferCount);
-	for (uint32_t i = 0; i < bufferCount; ++i) {
-		resources[i] = _frameSource->GetOutput(i);
-	}
-
+	ID3D12Device5* device = _graphicsContext.GetDevice();
+	auto& descriptorHeap = _graphicsContext.GetDescriptorHeap();
+	uint32_t descriptorSize = descriptorHeap.GetDescriptorSize();
+	
+	CD3DX12_CPU_DESCRIPTOR_HANDLE descriptorCpuHandle(descriptorHeap.GetCpuHandle(_inputSrvBaseOffset));
+	
 	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, 1);
-	_graphicsContext.GetDynamicDescriptorHeap()
-		.CreateShaderResourceViews(resources, &srvDesc, _inputSrvBaseIdx);
+
+	for (uint32_t i = 0; i < bufferCount; ++i) {
+		device->CreateShaderResourceView(_frameSource->GetOutput(i), &srvDesc, descriptorCpuHandle);
+		descriptorCpuHandle.Offset(descriptorSize);
+	}
 }
 
 void FrameProducer::_CreateOutputDescriptors() noexcept {
 	uint32_t bufferCount = ScalingWindow::Get().Options().maxProducerInFlightFrames + 1;
-	SmallVector<ID3D12Resource*, 4> resources(bufferCount);
+	ID3D12Device5* device = _graphicsContext.GetDevice();
+	auto& descriptorHeap = _graphicsContext.GetDescriptorHeap();
+	uint32_t descriptorSize = descriptorHeap.GetDescriptorSize();
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE uavCpuHandle(descriptorHeap.GetCpuHandle(_outputUavBaseOffset));
+	CD3DX12_CPU_DESCRIPTOR_HANDLE srvCpuHandle(descriptorHeap.GetCpuHandle(_outputSrvBaseOffset));
+
+	DXGI_FORMAT format = _isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+	CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc = CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(format);
+	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(format, 1);
+
 	for (uint32_t i = 0; i < bufferCount; ++i) {
-		resources[i] = _frameRingBuffer.GetBuffer(i);
+		ID3D12Resource* resource = _frameRingBuffer.GetBuffer(i);
+		device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, uavCpuHandle);
+		device->CreateShaderResourceView(resource, &srvDesc, srvCpuHandle);
+
+		uavCpuHandle.Offset(descriptorSize);
+		srvCpuHandle.Offset(descriptorSize);
 	}
-
-	auto& dynamicDescriptorHeap = _graphicsContext.GetDynamicDescriptorHeap();
-
-	CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc = CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(
-		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM);
-	dynamicDescriptorHeap.CreateUnorderedAccessViews(resources, &uavDesc, _outputUavBaseIdx);
-
-	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(
-		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM, 1);
-	dynamicDescriptorHeap.CreateShaderResourceViews(resources, &srvDesc, _outputSrvBaseIdx);
 }
 
 HRESULT FrameProducer::_Render() noexcept {
@@ -461,10 +467,7 @@ HRESULT FrameProducer::_Render() noexcept {
 	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
 
 	uint32_t frameRingBufferIdx;
-	ID3D12DescriptorHeap* heap;
-	D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle;
-	hr = _frameRingBuffer.ProducerBeginFrame(
-		commandQueue, frameRingBufferIdx, heap, heapGpuHandle);
+	hr = _frameRingBuffer.ProducerBeginFrame(commandQueue, frameRingBufferIdx);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("FrameRingBuffer::ProducerBeginFrame 失败", hr);
 		return hr;
@@ -478,7 +481,12 @@ HRESULT FrameProducer::_Render() noexcept {
 	}
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
-	
+
+	{
+		ID3D12DescriptorHeap* heap = _graphicsContext.GetDescriptorHeap().GetHeap();
+		commandList->SetDescriptorHeaps(1, &heap);
+	}
+
 	// 输出和输出纹理都处于 COMMON 状态，使用结束后也应处于此状态
 	ID3D12Resource* inputResource = _frameSource->GetOutput(frameSourceOutputIdx);
 	ID3D12Resource* outputResource = _frameRingBuffer.GetBuffer(frameRingBufferIdx);
@@ -495,10 +503,10 @@ HRESULT FrameProducer::_Render() noexcept {
 
 	hr = _effectsDrawer.Draw(
 		frameIndex,
-		heap,
-		heapGpuHandle,
-		_inputSrvBaseIdx + frameSourceOutputIdx,
-		_outputUavBaseIdx + frameRingBufferIdx
+		inputResource,
+		outputResource,
+		_inputSrvBaseOffset + frameSourceOutputIdx,
+		_outputUavBaseOffset + frameRingBufferIdx
 	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("EffectsDrawer::Draw 失败", hr);

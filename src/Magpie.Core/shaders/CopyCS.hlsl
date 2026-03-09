@@ -7,7 +7,7 @@ float4 LoadTexel(uint2 gxy) {
 	float4 color = inputTex[gxy];
 
 #ifdef MP_SRGB
-	color.rgb = LinearToSrgb(saturate(color.rgb));
+	color.rgb = EncodeSrgb(saturate(color.rgb));
 #endif
 	return color;
 }

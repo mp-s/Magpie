@@ -3,7 +3,7 @@
 
 namespace Magpie {
 
-class DynamicDescriptorHeap;
+class DescriptorHeap;
 
 class GraphicsContext {
 public:
@@ -16,7 +16,7 @@ public:
 		uint32_t maxInFlightFrameCount,
 		D3D12_COMMAND_QUEUE_PRIORITY priority,
 		D3D12_COMMAND_LIST_TYPE commandListType,
-		DynamicDescriptorHeap& dynamicDescriptorHeap,
+		DescriptorHeap& descriptorHeap,
 		bool disableFrameFenceTracking = false
 	) noexcept;
 
@@ -29,8 +29,8 @@ public:
 		bool disableFrameTracking = false
 	) noexcept;
 
-	DynamicDescriptorHeap& GetDynamicDescriptorHeap() const noexcept {
-		return *_dynamicDescriptorHeap;
+	DescriptorHeap& GetDescriptorHeap() const noexcept {
+		return *_descriptorHeap;
 	}
 
 	IDXGIFactory7* GetDXGIFactory() const noexcept {
@@ -116,7 +116,7 @@ private:
 
 	bool _CreateAdapterFromDevice() noexcept;
 
-	DynamicDescriptorHeap* _dynamicDescriptorHeap = nullptr;
+	DescriptorHeap* _descriptorHeap = nullptr;
 
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<IDXGIAdapter4> _dxgiAdapter;

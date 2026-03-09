@@ -23,10 +23,10 @@ public:
 
 	HRESULT Draw(
 		uint32_t frameIndex,
-		ID3D12DescriptorHeap* heap,
-		D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle,
-		uint32_t inputSrvIdx,
-		uint32_t outputUavIdx
+		ID3D12Resource* inputResource,
+		ID3D12Resource* outputResource,
+		uint32_t inputSrvOffset,
+		uint32_t outputUavOffset
 	) noexcept;
 
 	Size GetOutputSize() const noexcept {

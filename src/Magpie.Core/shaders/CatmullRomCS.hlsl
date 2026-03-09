@@ -4,7 +4,6 @@
 
 cbuffer RootConstants : register(b0) {
 	uint2 inputSize;
-	uint2 outputSize;
 	float2 inputPt;
 	float2 outputPt;
 };
@@ -64,7 +63,7 @@ float4 CatmullRom(float2 pos) {
 	total += bottom * coltaps.w;
 
 #ifdef MP_SRGB
-	total = LinearToSrgb(saturate(total));
+	total = EncodeSrgb(saturate(total));
 #endif
 	return float4(total, 1);
 }

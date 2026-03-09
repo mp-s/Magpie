@@ -3,11 +3,16 @@
 #include "ByteBuffer.h"
 #include "ColorHelper.h"
 #include "CursorHelper.h"
-#include "DynamicDescriptorHeap.h"
+#include "DescriptorHeap.h"
+#include "DirectXHelper.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "shaders/CursorVS.h"
+#include "shaders/MaskedCursorPS.h"
+#include "shaders/MaskedCursorPS_sRGB.h"
+#include "shaders/MonochromeCursorPS.h"
+#include "shaders/MonochromeCursorPS_sRGB.h"
 #include "shaders/SimplePS.h"
 #include "Win32Helper.h"
 #include <DirectXPackedVector.h>
@@ -15,6 +20,8 @@
 #include <wil/registry.h>
 
 namespace Magpie {
+
+using namespace DirectX::PackedVector;
 
 using FnGetCursorFrameInfo = HCURSOR WINAPI(
 	HCURSOR hcur,
@@ -54,9 +61,9 @@ static DWORD GetCursorBaseSize() noexcept {
 CursorDrawer2::~CursorDrawer2() noexcept {
 #ifdef _DEBUG
 	if (_graphicsContext) {
-		auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+		auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 		for (const auto& pair : _cursorInfos) {
-			dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+			descriptorHeap.Free(pair.second.textureSrvOffset, 1);
 		}
 	}
 #endif
@@ -123,13 +130,6 @@ bool CursorDrawer2::Initialize(
 	});
 
 	_cursorBaseSize = GetCursorBaseSize();
-
-	HRESULT hr = _CreateRootSignature();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateRootSignature 失败", hr);
-		return false;
-	}
-
 	return true;
 }
 
@@ -196,7 +196,7 @@ bool CursorDrawer2::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 	}
 }
 
-HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept {
+HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 	if (!_hCurCursor || !_curCursorInfo) {
 		return S_OK;
 	}
@@ -216,20 +216,38 @@ HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept 
 	};
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+
+	const bool isSrgb = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange;
 	
-	//if (_curCursorInfo->type == _CursorType::Color) {
-	if (!_colorPSO) {
-		HRESULT hr = _CreateColorPSO();
-		if (FAILED(hr)) {
-			Logger::Get().ComError("_CreateColorPSO 失败", hr);
-			return hr;
+	if (_curCursorInfo->type == _CursorType::Color) {
+		if (!_colorPSO) {
+			HRESULT hr = _CreateColorPSO();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_CreateColorPSO 失败", hr);
+				return hr;
+			}
 		}
+
+		commandList->SetPipelineState(_colorPSO.get());
+		commandList->SetGraphicsRootSignature(_colorRootSignature.get());
+	} else {
+		bool isMonochrome = _curCursorInfo->type == _CursorType::Monochrome;
+		
+		winrt::com_ptr<ID3D12PipelineState>& pso = isMonochrome ?
+			(isSrgb ? _monochromeSrgbPSO : _monochromePSO) :
+			(isSrgb ? _maskedColorSrgbPSO : _maskedColorPSO);
+
+		if (!pso) {
+			HRESULT hr = _CreateMaskPSO(isMonochrome, isSrgb, pso);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_CreateMaskPSO 失败", hr);
+				return hr;
+			}
+		}
+
+		commandList->SetPipelineState(pso.get());
+		commandList->SetGraphicsRootSignature(_maskRootSignature.get());
 	}
-
-	commandList->SetPipelineState(_colorPSO.get());
-	//}
-
-	commandList->SetGraphicsRootSignature(_rootSignature.get());
 
 	const RECT viewportRect = {
 		_destRect.left - _rendererRect.left,
@@ -250,11 +268,26 @@ HRESULT CursorDrawer2::Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept 
 		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 	}
 
-	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
-	const uint32_t descriptorSize = dynamicDescriptorHeap.GetDescriptorSize();
+	if (_curCursorInfo->type == _CursorType::Color) {
+		commandList->SetGraphicsRootDescriptorTable(
+			1, _graphicsContext->GetDescriptorHeap().GetGpuHandle(_curCursorInfo->textureSrvOffset));
+	} else {
+		DirectXHelper::Constant32 constants[] = {
+			{.uintVal = _curCursorInfo->originSize.width},
+			{.uintVal = _curCursorInfo->originSize.height},
+			{.uintVal = _curCursorInfo->size.width},
+			{.uintVal = _curCursorInfo->size.height},
+			{.uintVal = uint32_t(cursorRect.left - _destRect.left)},
+			{.uintVal = uint32_t(cursorRect.top - _destRect.top)},
+			{.uintVal = isSrgb ? 1 : std::bit_cast<uint32_t>(_colorInfo.sdrWhiteLevel)}
+		};
+		commandList->SetGraphicsRoot32BitConstants(1, (UINT)std::size(constants), constants, 0);
 
-	commandList->SetGraphicsRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _curCursorInfo->textureSrvIdx, descriptorSize));
+		commandList->SetGraphicsRootDescriptorTable(
+			2, _graphicsContext->GetDescriptorHeap().GetGpuHandle(_curCursorInfo->textureSrvOffset));
+		commandList->SetGraphicsRootDescriptorTable(
+			3, _graphicsContext->GetDescriptorHeap().GetGpuHandle(curFrameSrvOffset));
+	}
 
 	{
 		CD3DX12_VIEWPORT viewport(
@@ -451,9 +484,9 @@ CursorDrawer2::_CursorInfo* CursorDrawer2::_ResolveCursor(
 		return nullptr;
 	}
 
-	HRESULT hr = _graphicsContext->GetDynamicDescriptorHeap().Alloc(1, cursorInfo.textureSrvIdx);
+	HRESULT hr = _graphicsContext->GetDescriptorHeap().Alloc(1, cursorInfo.textureSrvOffset);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
+		Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 		return nullptr;
 	}
 
@@ -549,6 +582,30 @@ wil::unique_hcursor CursorDrawer2::_TryResolveStandardCursor(
 	return result;
 }
 
+static void FillColorCursorRGB(
+	HALF* textureData,
+	uint8_t* pixels,
+	const ColorInfo& colorInfo,
+	float alpha
+) noexcept {
+	// 预乘 Alpha 通道并归一化
+	float factor = alpha / 255.0f;
+
+	if (colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
+		*textureData++ = XMConvertFloatToHalf(pixels[2] * factor);
+		*textureData++ = XMConvertFloatToHalf(pixels[1] * factor);
+		*textureData = XMConvertFloatToHalf(pixels[0] * factor);
+	} else {
+		if (colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
+			factor *= colorInfo.sdrWhiteLevel;
+		}
+
+		*textureData++ = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[2]) * factor);
+		*textureData++ = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[1]) * factor);
+		*textureData = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[0]) * factor);
+	}
+}
+
 bool CursorDrawer2::_ResolveCursorPixels(
 	_CursorInfo& cursorInfo,
 	HBITMAP hColorBmp,
@@ -596,30 +653,12 @@ bool CursorDrawer2::_ResolveCursorPixels(
 			cursorInfo.type = _CursorType::Color;
 			cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
-			using namespace DirectX::PackedVector;
-
 			HALF* textureData = (HALF*)cursorInfo.originTextureData.Data();
 
 			for (uint32_t i = 0; i < bi.bmiHeader.biSizeImage; i += 4) {
-				// 预乘 Alpha 通道
 				float alpha = pixels[i + 3] / 255.0f;
-				float factor = alpha / 255.0f;
-
+				FillColorCursorRGB(&textureData[i], &pixels[i], _colorInfo, alpha);
 				textureData[i + 3] = XMConvertFloatToHalf(1.0f - alpha);
-				
-				if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
-					textureData[i] = XMConvertFloatToHalf(pixels[i + 2] * factor);
-					textureData[i + 1] = XMConvertFloatToHalf(pixels[i + 1] * factor);
-					textureData[i + 2] = XMConvertFloatToHalf(pixels[i] * factor);
-				} else {
-					if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
-						factor *= _colorInfo.sdrWhiteLevel;
-					}
-
-					textureData[i] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i + 2]) * factor);
-					textureData[i + 1] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i + 1]) * factor);
-					textureData[i + 2] = XMConvertFloatToHalf(ColorHelper::SrgbToLinear(pixels[i]) * factor);
-				}
 			}
 		} else {
 			// 彩色掩码光标。如果不需要应用 XOR 则转换成彩色光标
@@ -649,14 +688,15 @@ bool CursorDrawer2::_ResolveCursorPixels(
 				cursorInfo.type = _CursorType::Color;
 				cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
+				HALF* textureData = (HALF*)cursorInfo.originTextureData.Data();
+
 				for (uint32_t i = 0; i < bi.bmiHeader.biSizeImage; i += 4) {
 					if (maskPixels[i] == 0) {
-						// Alpha 通道已经是 0，无需设置
-						std::swap(pixels[i], pixels[i + 2]);
+						// Alpha 通道为 0，无需设置
+						FillColorCursorRGB(&textureData[i], &pixels[i], _colorInfo, 1.0f);
 					} else {
 						// 透明像素
-						std::memset(&pixels[i], 0, 3);
-						pixels[i + 3] = 255;
+						textureData[i + 3] = XMConvertFloatToHalf(1.0f);
 					}
 				}
 			} else {
@@ -690,22 +730,20 @@ bool CursorDrawer2::_ResolveCursorPixels(
 			cursorInfo.type = _CursorType::Color;
 			cursorInfo.originTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
+			HALF* textureData = (HALF*)cursorInfo.originTextureData.Data();
+
 			for (uint32_t i = 0; i < halfSize; i += 4) {
 				// 上半部分是 AND 掩码，下半部分是 XOR 掩码
 				// https://learn.microsoft.com/en-us/windows-hardware/drivers/display/drawing-monochrome-pointers
 				if (pixels[i] == 0) {
-					if (pixels[i + halfSize] == 0) {
-						// 黑色
-						std::memset(&pixels[i], 0, 4);
-					} else {
-						// 白色
-						std::memset(&pixels[i], 255, 3);
-						pixels[i + 3] = 0;
+					// 黑色全为 0，无需设置
+					if (pixels[i + halfSize] != 0) {
+						// 白色。非 HDR 时 sdrWhiteLevel 始终为 1
+						std::fill_n(&textureData[i], 3, XMConvertFloatToHalf(_colorInfo.sdrWhiteLevel));
 					}
 				} else {
 					// 透明
-					std::memset(&pixels[i], 0, 3);
-					pixels[i + 3] = 255;
+					textureData[i + 3] = XMConvertFloatToHalf(1.0f);
 				}
 			}
 		} else {
@@ -739,7 +777,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 		cursorInfo.type == _CursorType::Color ? DXGI_FORMAT_R16G16B16A16_FLOAT :
-			(cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM),
+			(cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R8G8B8A8_UNORM),
 		cursorInfo.originSize.width, cursorInfo.originSize.height, 1, 1);
 
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT textureLayout;
@@ -832,8 +870,8 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 
 	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
 		CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
-	_graphicsContext->GetDynamicDescriptorHeap().CreateShaderResourceView(
-		cursorInfo.texture.get(), &srvDesc, cursorInfo.textureSrvIdx);
+	device->CreateShaderResourceView(cursorInfo.texture.get(), &srvDesc,
+		_graphicsContext->GetDescriptorHeap().GetCpuHandle(cursorInfo.textureSrvOffset));
 
 	return S_OK;
 }
@@ -843,66 +881,68 @@ void CursorDrawer2::_ClearCursorInfos() noexcept {
 	_hCurCursor = NULL;
 	_curCursorInfo = nullptr;
 
-	auto& dynamicDescriptorHeap = _graphicsContext->GetDynamicDescriptorHeap();
+	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 	for (const auto& pair : _cursorInfos) {
-		dynamicDescriptorHeap.Free(pair.second.textureSrvIdx, 1);
+		descriptorHeap.Free(pair.second.textureSrvOffset, 1);
 	}
 
 	_cursorInfos.clear();
 }
 
-HRESULT CursorDrawer2::_CreateRootSignature() noexcept {
-	CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
-		D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-	D3D12_ROOT_PARAMETER1 rootParams[] = {
-		{
-			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-			.Constants = {
-				.Num32BitValues = 4
-			},
-			.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
-		},
-		{
-			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-			.DescriptorTable = {
-				.NumDescriptorRanges = 1,
-				.pDescriptorRanges = &srvRange
-			},
-			.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-		}
-	};
-	D3D12_STATIC_SAMPLER_DESC samplerDesc = {
-		.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
-		.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-		.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-		.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-		.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
-		.ShaderRegister = 0
-	};
-	CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-		(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
+HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
 	winrt::com_ptr<ID3DBlob> signature;
-	HRESULT hr = D3DX12SerializeVersionedRootSignature(
-		&rootSignatureDesc, _graphicsContext->GetRootSignatureVersion(), signature.put(), nullptr);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
-		return hr;
+	{
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		D3D12_ROOT_PARAMETER1 rootParams[] = {
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 4
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+			}
+		};
+		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
+			.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
+			.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+			.ShaderRegister = 0
+		};
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc, _graphicsContext->GetRootSignatureVersion(), signature.put(), nullptr);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			return hr;
+		}
 	}
 
-	hr = _graphicsContext->GetDevice()->CreateRootSignature(
-		0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
+	HRESULT hr = _graphicsContext->GetDevice()->CreateRootSignature(
+		0,
+		signature->GetBufferPointer(),
+		signature->GetBufferSize(),
+		IID_PPV_ARGS(&_colorRootSignature)
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateRootSignature 失败", hr);
 		return hr;
 	}
 
-	return S_OK;
-}
-
-HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
-		.pRootSignature = _rootSignature.get(),
+		.pRootSignature = _colorRootSignature.get(),
 		.VS = CD3DX12_SHADER_BYTECODE(CursorVS, sizeof(CursorVS)),
 		.PS = CD3DX12_SHADER_BYTECODE(SimplePS, sizeof(SimplePS)),
 		.BlendState = {
@@ -929,8 +969,127 @@ HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
 			DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT },
 		.SampleDesc = { .Count = 1 }
 	};
-	HRESULT hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
+	hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
 		&psoDesc, IID_PPV_ARGS(&_colorPSO));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
+}
+
+HRESULT CursorDrawer2::_CreateMaskPSO(
+	bool isMonochrome,
+	bool isSrgb,
+	winrt::com_ptr<ID3D12PipelineState>& result
+) noexcept {
+	if (!_maskRootSignature) {
+		winrt::com_ptr<ID3DBlob> signature;
+		{
+			CD3DX12_DESCRIPTOR_RANGE1 srvRange1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+				D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+			CD3DX12_DESCRIPTOR_RANGE1 srvRange2(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0,
+				D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+			D3D12_ROOT_PARAMETER1 rootParams[] = {
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+					.Constants = {
+						.ShaderRegister = 0,
+						.Num32BitValues = 4
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
+				},
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+					.Constants = {
+						.ShaderRegister = 1,
+						.Num32BitValues = 7
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+				},
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+					.DescriptorTable = {
+						.NumDescriptorRanges = 1,
+						.pDescriptorRanges = &srvRange1
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+				},
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+					.DescriptorTable = {
+						.NumDescriptorRanges = 1,
+						.pDescriptorRanges = &srvRange2
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+				}
+			};
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+				(UINT)std::size(rootParams), rootParams, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+			HRESULT hr = D3DX12SerializeVersionedRootSignature(
+				&rootSignatureDesc,
+				_graphicsContext->GetRootSignatureVersion(),
+				signature.put(),
+				nullptr
+			);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+				return hr;
+			}
+		}
+
+		HRESULT hr = _graphicsContext->GetDevice()->CreateRootSignature(
+			0,
+			signature->GetBufferPointer(),
+			signature->GetBufferSize(),
+			IID_PPV_ARGS(&_maskRootSignature)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateRootSignature 失败", hr);
+			return hr;
+		}
+	}
+
+	D3D12_SHADER_BYTECODE psByteCode;
+	if (isMonochrome) {
+		if (isSrgb) {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MonochromeCursorPS_sRGB, sizeof(MonochromeCursorPS_sRGB));
+		} else {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MonochromeCursorPS, sizeof(MonochromeCursorPS));
+		}
+	} else {
+		if (isSrgb) {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MaskedCursorPS_sRGB, sizeof(MaskedCursorPS_sRGB));
+		} else {
+			psByteCode = CD3DX12_SHADER_BYTECODE(
+				MaskedCursorPS, sizeof(MaskedCursorPS));
+		}
+	}
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _maskRootSignature.get(),
+		.VS = CD3DX12_SHADER_BYTECODE(CursorVS, sizeof(CursorVS)),
+		.PS = psByteCode,
+		.BlendState = {
+			.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
+		},
+		.SampleMask = UINT_MAX,
+		.RasterizerState = {
+			.FillMode = D3D12_FILL_MODE_SOLID,
+			.CullMode = D3D12_CULL_MODE_NONE
+		},
+		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+		.NumRenderTargets = 1,
+		.RTVFormats = { isSrgb ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT },
+		.SampleDesc = { .Count = 1 }
+	};
+	HRESULT hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
+		&psoDesc, IID_PPV_ARGS(&result));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
 		return hr;

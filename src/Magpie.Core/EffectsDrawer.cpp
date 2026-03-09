@@ -147,10 +147,10 @@ bool EffectsDrawer::Initialize(
 
 HRESULT EffectsDrawer::Draw(
 	uint32_t frameIndex,
-	ID3D12DescriptorHeap* heap,
-	D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle,
-	uint32_t inputSrvIdx,
-	uint32_t outputUavIdx
+	ID3D12Resource* /*inputResource*/,
+	ID3D12Resource* /*outputResource*/,
+	uint32_t inputSrvOffset,
+	uint32_t outputUavOffset
 ) noexcept {
 	// 获取渲染时间
 	const uint32_t queryHeapIndex = 2 * frameIndex;
@@ -179,7 +179,7 @@ HRESULT EffectsDrawer::Draw(
 
 #ifdef MP_ENABLE_RTX_TRUE_HDR
 	if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
-		uint32_t curOutputUavIdx = _rtxTrueHdrOutputDescriptorBaseIdx;
+		uint32_t curOutputUavOffset = _rtxTrueHdrOutputDescriptorBaseIdx;
 		if (_rtxTrueHdrOutput) {
 			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 				_rtxTrueHdrOutput.get(),
@@ -190,11 +190,11 @@ HRESULT EffectsDrawer::Draw(
 			commandList->ResourceBarrier(1, &barrier);
 		} else {
 			postResize = false;
-			curOutputUavIdx = outputUavIdx;
+			curOutputUavOffset = outputUavIdx;
 		}
 
 		HRESULT hr = _rtxTrueHdrDrawer->Draw(
-			heap, heapGpuHandle, inputSrvIdx, curOutputUavIdx);
+			heap, heapGpuHandle, inputSrvOffset, curOutputUavOffset);
 		if (FAILED(hr)) {
 			return hr;
 		}

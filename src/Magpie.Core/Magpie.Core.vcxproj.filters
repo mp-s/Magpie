@@ -192,7 +192,7 @@
     <ClInclude Include="CursorHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
-    <ClInclude Include="DynamicDescriptorHeap.h">
+    <ClInclude Include="DescriptorHeap.h">
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="ColorHelper.h">
@@ -332,7 +332,7 @@
     <ClCompile Include="CursorHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
-    <ClCompile Include="DynamicDescriptorHeap.cpp">
+    <ClCompile Include="DescriptorHeap.cpp">
       <Filter>Render</Filter>
     </ClCompile>
     <ClCompile Include="RtxTrueHdrDrawer.cpp">
@@ -380,6 +380,12 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\CopyCS_sRGB.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\MonochromeCursorPS_sRGB.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\MaskedCursorPS_sRGB.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\RtxTrueHdrPostCS.hlsl">

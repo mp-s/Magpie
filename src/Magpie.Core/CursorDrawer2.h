@@ -25,7 +25,7 @@ public:
 
 	bool CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept;
 
-	HRESULT Draw(D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle) noexcept;
+	HRESULT Draw(uint32_t curFrameSrvOffset) noexcept;
 
 	void OnCursorVirtualizationStarted() noexcept {
 		_isCursorVirtualized = true;
@@ -68,7 +68,7 @@ private:
 		// 减少着色器的计算量以及确保 (可能进行的) 双线性插值的准确性。
 		Color = 0,
 		// 单色光标
-		// 纹理格式: DXGI_FORMAT_R8_UNORM
+		// 纹理格式: DXGI_FORMAT_R8_UINT
 		// 高四位为 AND 掩码，低四位为 XOR 掩码，值只能是 0 或 0xf。
 		Monochrome,
 		// 彩色掩码光标
@@ -83,7 +83,7 @@ private:
 		Size size;
 		Point hotspot;
 		winrt::com_ptr<ID3D12Resource> texture;
-		uint32_t textureSrvIdx = std::numeric_limits<uint32_t>::max();
+		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
 
 		Size originSize;
 		ByteBuffer originTextureData;
@@ -117,9 +117,13 @@ private:
 	// 只能在同步 GPU 后调用
 	void _ClearCursorInfos() noexcept;
 
-	HRESULT _CreateRootSignature() noexcept;
-
 	HRESULT _CreateColorPSO() noexcept;
+
+	HRESULT _CreateMaskPSO(
+		bool isMonochrome,
+		bool isSrgb,
+		winrt::com_ptr<ID3D12PipelineState>& result
+	) noexcept;
 
 	GraphicsContext* _graphicsContext = nullptr;
 	Size _srcSize{};
@@ -143,8 +147,14 @@ private:
 	wil::unique_registry_watcher_nothrow _regWatcher;
 	DWORD _cursorBaseSize = 32;
 
-	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
+	winrt::com_ptr<ID3D12RootSignature> _colorRootSignature;
 	winrt::com_ptr<ID3D12PipelineState> _colorPSO;
+	winrt::com_ptr<ID3D12RootSignature> _maskRootSignature;
+	// 这些 PSO 共用 _maskRootSignature
+	winrt::com_ptr<ID3D12PipelineState> _monochromePSO;
+	winrt::com_ptr<ID3D12PipelineState> _monochromeSrgbPSO;
+	winrt::com_ptr<ID3D12PipelineState> _maskedColorPSO;
+	winrt::com_ptr<ID3D12PipelineState> _maskedColorSrgbPSO;
 
 	bool _isCursorVisible = true;
 	bool _isMoving = false;

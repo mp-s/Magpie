@@ -2,6 +2,7 @@
 #include "CatmullRomDrawer.h"
 #include "DirectXHelper.h"
 #include "GraphicsContext.h"
+#include "DescriptorHeap.h"
 #include "Logger.h"
 #include "shaders/CatmullRomCS.h"
 #include "shaders/CatmullRomCS_sRGB.h"
@@ -17,11 +18,12 @@ void CatmullRomDrawer::Initialize(GraphicsContext& graphicsContext) noexcept {
 HRESULT CatmullRomDrawer::Draw(
 	Size inputSize,
 	Size outputSize,
-	D3D12_GPU_DESCRIPTOR_HANDLE inputGpuHandle,
-	D3D12_GPU_DESCRIPTOR_HANDLE outputGpuHandle,
+	uint32_t inputSrvOffset,
+	uint32_t outputUavOffset,
 	bool outputSrgb
 ) noexcept {
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 
 	// 作为性能优化，输入和输出尺寸相同时原样复制
 	if (inputSize == outputSize) {
@@ -66,8 +68,8 @@ HRESULT CatmullRomDrawer::Draw(
 			commandList->SetPipelineState(_copyPSO.get());
 		}
 
-		commandList->SetComputeRootDescriptorTable(0, inputGpuHandle);
-		commandList->SetComputeRootDescriptorTable(1, outputGpuHandle);
+		commandList->SetComputeRootDescriptorTable(0, descriptorHeap.GetGpuHandle(inputSrvOffset));
+		commandList->SetComputeRootDescriptorTable(1, descriptorHeap.GetGpuHandle(outputUavOffset));
 	} else {
 		if (!_catmullRomRootSignature) {
 			HRESULT hr = _InitializeCatmullRomRootSignature();
@@ -113,8 +115,6 @@ HRESULT CatmullRomDrawer::Draw(
 		DirectXHelper::Constant32 constants[] = {
 			{.uintVal = inputSize.width},
 			{.uintVal = inputSize.height},
-			{.uintVal = outputSize.width},
-			{.uintVal = outputSize.height},
 			{.floatVal = 1.0f / inputSize.width},
 			{.floatVal = 1.0f / inputSize.height},
 			{.floatVal = 1.0f / outputSize.width},
@@ -122,8 +122,8 @@ HRESULT CatmullRomDrawer::Draw(
 		};
 		commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 
-		commandList->SetComputeRootDescriptorTable(1, inputGpuHandle);
-		commandList->SetComputeRootDescriptorTable(2, outputGpuHandle);
+		commandList->SetComputeRootDescriptorTable(1, descriptorHeap.GetGpuHandle(inputSrvOffset));
+		commandList->SetComputeRootDescriptorTable(2, descriptorHeap.GetGpuHandle(outputUavOffset));
 	}
 
 	constexpr uint32_t BLOCK_SIZE = 16;
@@ -148,7 +148,7 @@ HRESULT CatmullRomDrawer::_InitializeCatmullRomRootSignature() noexcept {
 		{
 			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
 			.Constants = {
-				.Num32BitValues = 8
+				.Num32BitValues = 6
 			}
 		},
 		{
