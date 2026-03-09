@@ -4,7 +4,6 @@
 
 cbuffer RootConstants : register(b0) {
 	uint2 inputSize;
-	uint2 outputSize;
 	float2 inputPt;
 	float2 outputPt;
 };

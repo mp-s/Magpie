@@ -115,8 +115,6 @@ HRESULT CatmullRomDrawer::Draw(
 		DirectXHelper::Constant32 constants[] = {
 			{.uintVal = inputSize.width},
 			{.uintVal = inputSize.height},
-			{.uintVal = outputSize.width},
-			{.uintVal = outputSize.height},
 			{.floatVal = 1.0f / inputSize.width},
 			{.floatVal = 1.0f / inputSize.height},
 			{.floatVal = 1.0f / outputSize.width},
@@ -150,7 +148,7 @@ HRESULT CatmullRomDrawer::_InitializeCatmullRomRootSignature() noexcept {
 		{
 			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
 			.Constants = {
-				.Num32BitValues = 8
+				.Num32BitValues = 6
 			}
 		},
 		{

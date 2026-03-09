@@ -15,16 +15,14 @@ Texture2D<float4> cursorTex : register(t0);
 Texture2D<float4> originTex : register(t1);
 
 float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
-	uint2 coord = uint2(uv * cursorTexSize);
-	
 	// A 为 0 时用 RGB 通道取代屏幕颜色，为 1 时将 RGB 通道和屏幕颜色进行异或操作
-	float4 mask = cursorTex[coord];
+	float4 mask = cursorTex[uint2(uv * cursorTexSize)];
 	
 	if (mask.a < 0.5f) {
 		return float4(mask.rgb, 1);
 	}
 	
-	float3 origin = originTex[uv * cursorSize + originOffset].rgb;
+	float3 origin = originTex[uint2(uv * cursorSize) + originOffset].rgb;
 	
 #ifdef MP_SRGB
 	[branch]
@@ -32,7 +30,7 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 		origin = EncodeSrgb(saturate(origin));
 	}
 #else
-	float white = max(max(max(origin.r, origin.g), origin.b), sdrWhiteLevel);
+	float white = max(max(origin.r, origin.g), max(origin.b, sdrWhiteLevel));
 	origin = saturate(origin / white);
 #endif
 	
