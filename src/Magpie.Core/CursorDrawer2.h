@@ -119,7 +119,7 @@ private:
 
 	HRESULT _CreateColorPSO() noexcept;
 
-	HRESULT _CreateMonochromePSO() noexcept;
+	HRESULT _CreateMaskPSO(bool isMonochrome) noexcept;
 
 	GraphicsContext* _graphicsContext = nullptr;
 	Size _srcSize{};
@@ -145,8 +145,9 @@ private:
 
 	winrt::com_ptr<ID3D12RootSignature> _colorRootSignature;
 	winrt::com_ptr<ID3D12PipelineState> _colorPSO;
-	winrt::com_ptr<ID3D12RootSignature> _monochromeRootSignature;
+	winrt::com_ptr<ID3D12RootSignature> _maskRootSignature;
 	winrt::com_ptr<ID3D12PipelineState> _monochromePSO;
+	winrt::com_ptr<ID3D12PipelineState> _maskedColorPSO;
 
 	bool _isCursorVisible = true;
 	bool _isMoving = false;

@@ -10,6 +10,7 @@
 #include "ScalingWindow.h"
 #include "shaders/CursorVS.h"
 #include "shaders/SimplePS.h"
+#include "shaders/MaskedCursorPS.h"
 #include "shaders/MonochromeCursorPS.h"
 #include "Win32Helper.h"
 #include <DirectXPackedVector.h>
@@ -225,17 +226,28 @@ HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 
 		commandList->SetPipelineState(_colorPSO.get());
 		commandList->SetGraphicsRootSignature(_colorRootSignature.get());
-	} else {
+	} else if (_curCursorInfo->type == _CursorType::Monochrome) {
 		if (!_monochromePSO) {
-			HRESULT hr = _CreateMonochromePSO();
+			HRESULT hr = _CreateMaskPSO(true);
 			if (FAILED(hr)) {
-				Logger::Get().ComError("_CreateColorPSO 失败", hr);
+				Logger::Get().ComError("_CreateMaskPSO 失败", hr);
 				return hr;
 			}
 		}
 
 		commandList->SetPipelineState(_monochromePSO.get());
-		commandList->SetGraphicsRootSignature(_monochromeRootSignature.get());
+		commandList->SetGraphicsRootSignature(_maskRootSignature.get());
+	} else {
+		if (!_maskedColorPSO) {
+			HRESULT hr = _CreateMaskPSO(false);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_CreateMaskPSO 失败", hr);
+				return hr;
+			}
+		}
+
+		commandList->SetPipelineState(_maskedColorPSO.get());
+		commandList->SetGraphicsRootSignature(_maskRootSignature.get());
 	}
 
 	const RECT viewportRect = {
@@ -264,11 +276,12 @@ HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 		DirectXHelper::Constant32 constants[] = {
 			{.uintVal = _curCursorInfo->originSize.width},
 			{.uintVal = _curCursorInfo->originSize.height},
+			{.uintVal = _curCursorInfo->size.width},
+			{.uintVal = _curCursorInfo->size.height},
 			{.uintVal = uint32_t(cursorRect.left - _destRect.left)},
 			{.uintVal = uint32_t(cursorRect.top - _destRect.top)},
 			{.floatVal = _colorInfo.sdrWhiteLevel},
-			{.uintVal = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange},
-			{.uintVal = 1}
+			{.uintVal = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange}
 		};
 		commandList->SetGraphicsRoot32BitConstants(1, (UINT)std::size(constants), constants, 0);
 
@@ -968,73 +981,86 @@ HRESULT CursorDrawer2::_CreateColorPSO() noexcept {
 	return S_OK;
 }
 
-HRESULT CursorDrawer2::_CreateMonochromePSO() noexcept {
-	winrt::com_ptr<ID3DBlob> signature;
-	{
-		CD3DX12_DESCRIPTOR_RANGE1 srvRange1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
-			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-		CD3DX12_DESCRIPTOR_RANGE1 srvRange2(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0,
-			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-		D3D12_ROOT_PARAMETER1 rootParams[] = {
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-				.Constants = {
-					.ShaderRegister = 0,
-					.Num32BitValues = 4
+HRESULT CursorDrawer2::_CreateMaskPSO(bool isMonochrome) noexcept {
+	if (!_maskRootSignature) {
+		winrt::com_ptr<ID3DBlob> signature;
+		{
+			CD3DX12_DESCRIPTOR_RANGE1 srvRange1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+				D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+			CD3DX12_DESCRIPTOR_RANGE1 srvRange2(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0,
+				D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+			D3D12_ROOT_PARAMETER1 rootParams[] = {
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+					.Constants = {
+						.ShaderRegister = 0,
+						.Num32BitValues = 4
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
 				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
-			},
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-				.Constants = {
-					.ShaderRegister = 1,
-					.Num32BitValues = 7
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+					.Constants = {
+						.ShaderRegister = 1,
+						.Num32BitValues = 8
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
 				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-			},
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-				.DescriptorTable = {
-					.NumDescriptorRanges = 1,
-					.pDescriptorRanges = &srvRange1
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+					.DescriptorTable = {
+						.NumDescriptorRanges = 1,
+						.pDescriptorRanges = &srvRange1
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
 				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-			},
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-				.DescriptorTable = {
-					.NumDescriptorRanges = 1,
-					.pDescriptorRanges = &srvRange2
-				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-			}
-		};
-		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-			(UINT)std::size(rootParams), rootParams, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+				{
+					.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+					.DescriptorTable = {
+						.NumDescriptorRanges = 1,
+						.pDescriptorRanges = &srvRange2
+					},
+					.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+				}
+			};
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+				(UINT)std::size(rootParams), rootParams, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
-		HRESULT hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, _graphicsContext->GetRootSignatureVersion(), signature.put(), nullptr);
+			HRESULT hr = D3DX12SerializeVersionedRootSignature(
+				&rootSignatureDesc,
+				_graphicsContext->GetRootSignatureVersion(),
+				signature.put(),
+				nullptr
+			);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+				return hr;
+			}
+		}
+
+		HRESULT hr = _graphicsContext->GetDevice()->CreateRootSignature(
+			0,
+			signature->GetBufferPointer(),
+			signature->GetBufferSize(),
+			IID_PPV_ARGS(&_maskRootSignature)
+		);
 		if (FAILED(hr)) {
-			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			Logger::Get().ComError("CreateRootSignature 失败", hr);
 			return hr;
 		}
 	}
-	
-	HRESULT hr = _graphicsContext->GetDevice()->CreateRootSignature(
-		0,
-		signature->GetBufferPointer(),
-		signature->GetBufferSize(),
-		IID_PPV_ARGS(&_monochromeRootSignature)
-	);
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateRootSignature 失败", hr);
-		return hr;
+
+	D3D12_SHADER_BYTECODE psByteCode;
+	if (isMonochrome) {
+		psByteCode = CD3DX12_SHADER_BYTECODE(MonochromeCursorPS, sizeof(MonochromeCursorPS));
+	} else {
+		psByteCode = CD3DX12_SHADER_BYTECODE(MaskedCursorPS, sizeof(MaskedCursorPS));
 	}
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
-		.pRootSignature = _monochromeRootSignature.get(),
+		.pRootSignature = _maskRootSignature.get(),
 		.VS = CD3DX12_SHADER_BYTECODE(CursorVS, sizeof(CursorVS)),
-		.PS = CD3DX12_SHADER_BYTECODE(MonochromeCursorPS, sizeof(MonochromeCursorPS)),
+		.PS = psByteCode,
 		.BlendState = {
 			.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
 		},
@@ -1049,8 +1075,11 @@ HRESULT CursorDrawer2::_CreateMonochromePSO() noexcept {
 			DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT },
 		.SampleDesc = { .Count = 1 }
 	};
-	hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
-		&psoDesc, IID_PPV_ARGS(&_monochromePSO));
+	HRESULT hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
+		&psoDesc,
+		winrt::guid_of<ID3D12PipelineState>(),
+		(isMonochrome ? _monochromePSO : _maskedColorPSO).put_void()
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
 		return hr;
