@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "CatmullRomDrawer.h"
-#include "DynamicDescriptorHeap.h"
+#include "DescriptorHeap.h"
 #include "EffectsDrawer.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
@@ -11,9 +11,9 @@ namespace Magpie {
 
 EffectsDrawer::~EffectsDrawer() noexcept {
 #ifdef _DEBUG
-	if (_rtxTrueHdrOutputDescriptorBaseIdx != std::numeric_limits<uint32_t>::max()) {
-		_graphicsContext->GetDynamicDescriptorHeap()
-			.Free(_rtxTrueHdrOutputDescriptorBaseIdx, 2);
+	if (_rtxTrueHdrOutputDescriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
+		_graphicsContext->GetDescriptorHeap()
+			.Free(_rtxTrueHdrOutputDescriptorBaseOffset, 2);
 	}
 #endif
 }
@@ -65,39 +65,41 @@ bool EffectsDrawer::Initialize(
 		Size rtxTrueHdrOutputSize = _rtxTrueHdrDrawer->GetOutputSize();
 
 		if (rtxTrueHdrOutputSize != _outputSize) {
-			CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
-			D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
-				D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-			CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-				DXGI_FORMAT_R16G16B16A16_FLOAT,
-				rtxTrueHdrOutputSize.width,
-				rtxTrueHdrOutputSize.height,
-				1, 1, 1, 0,
-				D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-			);
-			hr = device->CreateCommittedResource(
-				&heapProps, heapFlag, &texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-				nullptr, IID_PPV_ARGS(&_rtxTrueHdrOutput));
-			if (FAILED(hr)) {
-				return false;
+			{
+				CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
+				D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
+					D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
+				CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+					DXGI_FORMAT_R16G16B16A16_FLOAT,
+					rtxTrueHdrOutputSize.width,
+					rtxTrueHdrOutputSize.height,
+					1, 1, 1, 0,
+					D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+				);
+				hr = device->CreateCommittedResource(
+					&heapProps, heapFlag, &texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+					nullptr, IID_PPV_ARGS(&_rtxTrueHdrOutput));
+				if (FAILED(hr)) {
+					return false;
+				}
 			}
+			
+			auto& descriptorHeap = graphicsContext.GetDescriptorHeap();
 
-			auto& dynamicDescriptorHeap = graphicsContext.GetDynamicDescriptorHeap();
-
-			hr = dynamicDescriptorHeap.Alloc(2, _rtxTrueHdrOutputDescriptorBaseIdx);
+			hr = descriptorHeap.Alloc(2, _rtxTrueHdrOutputDescriptorBaseOffset);
 			if (FAILED(hr)) {
 				return false;
 			}
 
 			CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc =
 				CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT);
-			dynamicDescriptorHeap.CreateUnorderedAccessView(
-				_rtxTrueHdrOutput.get(), &uavDesc, _rtxTrueHdrOutputDescriptorBaseIdx);
+			device->CreateUnorderedAccessView(_rtxTrueHdrOutput.get(), nullptr, &uavDesc,
+				descriptorHeap.GetCpuHandle(_rtxTrueHdrOutputDescriptorBaseOffset));
 
 			CD3DX12_SHADER_RESOURCE_VIEW_DESC srcDesc =
 				CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, 1);
-			dynamicDescriptorHeap.CreateShaderResourceView(
-				_rtxTrueHdrOutput.get(), &srcDesc, _rtxTrueHdrOutputDescriptorBaseIdx + 1);
+			device->CreateShaderResourceView(_rtxTrueHdrOutput.get(), &srcDesc,
+				descriptorHeap.GetCpuHandle(_rtxTrueHdrOutputDescriptorBaseOffset + 1));
 		}
 	}
 #endif
@@ -179,7 +181,7 @@ HRESULT EffectsDrawer::Draw(
 
 #ifdef MP_ENABLE_RTX_TRUE_HDR
 	if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
-		uint32_t curOutputUavOffset = _rtxTrueHdrOutputDescriptorBaseIdx;
+		uint32_t curOutputUavOffset = _rtxTrueHdrOutputDescriptorBaseOffset;
 		if (_rtxTrueHdrOutput) {
 			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 				_rtxTrueHdrOutput.get(),
@@ -190,17 +192,16 @@ HRESULT EffectsDrawer::Draw(
 			commandList->ResourceBarrier(1, &barrier);
 		} else {
 			postResize = false;
-			curOutputUavOffset = outputUavIdx;
+			curOutputUavOffset = outputUavOffset;
 		}
 
-		HRESULT hr = _rtxTrueHdrDrawer->Draw(
-			heap, heapGpuHandle, inputSrvOffset, curOutputUavOffset);
+		HRESULT hr = _rtxTrueHdrDrawer->Draw(inputSrvOffset, curOutputUavOffset);
 		if (FAILED(hr)) {
 			return hr;
 		}
 
 		if (_rtxTrueHdrOutput) {
-			inputSrvIdx = _rtxTrueHdrOutputDescriptorBaseIdx + 1;
+			inputSrvOffset = _rtxTrueHdrOutputDescriptorBaseOffset + 1;
 			curInputSize = _rtxTrueHdrDrawer->GetOutputSize();
 
 			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -215,14 +216,13 @@ HRESULT EffectsDrawer::Draw(
 #endif
 
 	if (postResize) {
-		_graphicsContext->SetDescriptorHeap(heap);
+		_graphicsContext->SetDescriptorHeap(_graphicsContext->GetDescriptorHeap().GetHeap());
 
-		uint32_t descriptorSize = _graphicsContext->GetDynamicDescriptorHeap().GetDescriptorSize();
 		_catmullRomDrawer->Draw(
 			curInputSize,
 			_outputSize,
-			CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvIdx, descriptorSize),
-			CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, outputUavIdx, descriptorSize),
+			inputSrvOffset,
+			outputUavOffset,
 			false
 		);
 	}

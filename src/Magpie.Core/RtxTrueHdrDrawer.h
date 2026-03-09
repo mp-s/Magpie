@@ -23,12 +23,7 @@ public:
 		return _inputSize;
 	}
 
-	HRESULT Draw(
-		ID3D12DescriptorHeap* heap,
-		D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle,
-		uint32_t inputSrvIdx,
-		uint32_t outputUavIdx
-	) noexcept;
+	HRESULT Draw(uint32_t inputSrvOffset, uint32_t outputUavOffset) noexcept;
 
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
@@ -43,7 +38,7 @@ private:
 	winrt::com_ptr<ID3D12Resource> _ngxInputResource;
 	winrt::com_ptr<ID3D12Resource> _ngxOutputResource;
 
-	uint32_t _descriptorBaseIdx = std::numeric_limits<uint32_t>::max();
+	uint32_t _descriptorBaseOffset = std::numeric_limits<uint32_t>::max();
 
 	NVSDK_NGX_Parameter* _ngxParameters = nullptr;
 	NVSDK_NGX_Handle* _trueHdrFeature = nullptr;

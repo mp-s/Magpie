@@ -48,7 +48,7 @@ private:
 	std::optional<RtxTrueHdrDrawer> _rtxTrueHdrDrawer;
 	winrt::com_ptr<ID3D12Resource> _rtxTrueHdrOutput;
 	// UAV + SRV
-	uint32_t _rtxTrueHdrOutputDescriptorBaseIdx = std::numeric_limits<uint32_t>::max();
+	uint32_t _rtxTrueHdrOutputDescriptorBaseOffset = std::numeric_limits<uint32_t>::max();
 #endif
 	std::optional<CatmullRomDrawer> _catmullRomDrawer;
 

@@ -4,7 +4,7 @@
 
 #include "RtxTrueHdrDrawer.h"
 #include "GraphicsContext.h"
-#include "DynamicDescriptorHeap.h"
+#include "DescriptorHeap.h"
 #include "shaders/RtxTrueHdrPostCS.h"
 #include "shaders/RtxTrueHdrPreCS.h"
 #include "Logger.h"
@@ -19,8 +19,8 @@ namespace Magpie {
 
 RtxTrueHdrDrawer::~RtxTrueHdrDrawer() noexcept {
 #ifdef _DEBUG
-	if (_descriptorBaseIdx != std::numeric_limits<uint32_t>::max()) {
-		_graphicsContext->GetDynamicDescriptorHeap().Free(_descriptorBaseIdx, 2);
+	if (_descriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
+		_graphicsContext->GetDescriptorHeap().Free(_descriptorBaseOffset, 2);
 	}
 #endif
 
@@ -73,10 +73,10 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 		Logger::Get().Error("TrueHDR 不可用");
 		return E_FAIL;
 	}
+
+	ID3D12Device5* device = graphicsContext.GetDevice();
 	
 	{
-		ID3D12Device5* device = graphicsContext.GetDevice();
-
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 		D3D12_HEAP_FLAGS heapFlag = graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
 			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
@@ -103,9 +103,9 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 	}
 	
 	{
-		auto& dynamicDescriptorHeap = graphicsContext.GetDynamicDescriptorHeap();
+		auto& descriptorHeap = graphicsContext.GetDescriptorHeap();
 
-		HRESULT hr = dynamicDescriptorHeap.Alloc(2, _descriptorBaseIdx);
+		HRESULT hr = descriptorHeap.Alloc(2, _descriptorBaseOffset);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("DynamicDescriptorHeap::Alloc 失败", hr);
 			return hr;
@@ -113,13 +113,13 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 
 		CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc = 
 			CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(DXGI_FORMAT_R10G10B10A2_UNORM);
-		dynamicDescriptorHeap.CreateUnorderedAccessView(
-			_ngxInputResource.get(), &uavDesc, _descriptorBaseIdx);
+		device->CreateUnorderedAccessView(_ngxInputResource.get(), nullptr, &uavDesc,
+			descriptorHeap.GetCpuHandle(_descriptorBaseOffset));
 
 		CD3DX12_SHADER_RESOURCE_VIEW_DESC srcDesc =
 			CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, 1);
-		dynamicDescriptorHeap.CreateShaderResourceView(
-			_ngxOutputResource.get(), &srcDesc, _descriptorBaseIdx + 1);
+		device->CreateShaderResourceView(_ngxOutputResource.get(), &srcDesc,
+			descriptorHeap.GetCpuHandle(_descriptorBaseOffset + 1));
 	}
 	
 	HRESULT hr = _InitializePSO();
@@ -131,25 +131,17 @@ HRESULT RtxTrueHdrDrawer::Initialize(
 	return S_OK;
 }
 
-HRESULT RtxTrueHdrDrawer::Draw(
-	ID3D12DescriptorHeap* heap,
-	D3D12_GPU_DESCRIPTOR_HANDLE heapGpuHandle,
-	uint32_t inputSrvIdx,
-	uint32_t outputUavIdx
-) noexcept {
+HRESULT RtxTrueHdrDrawer::Draw(uint32_t inputSrvOffset, uint32_t outputUavOffset) noexcept {
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 
-	_graphicsContext->SetDescriptorHeap(heap);
-
-	uint32_t descriptorSize = _graphicsContext->GetDynamicDescriptorHeap().GetDescriptorSize();
+	_graphicsContext->SetDescriptorHeap(descriptorHeap.GetHeap());
 
 	commandList->SetPipelineState(_prePSO.get());
 	commandList->SetComputeRootSignature(_preRootSignature.get());
 	commandList->SetComputeRoot32BitConstants(0, 1, &_colorInfo.sdrWhiteLevel, 0);
-	commandList->SetComputeRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvIdx, descriptorSize));
-	commandList->SetComputeRootDescriptorTable(
-		2, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _descriptorBaseIdx, descriptorSize));
+	commandList->SetComputeRootDescriptorTable(1, descriptorHeap.GetGpuHandle(inputSrvOffset));
+	commandList->SetComputeRootDescriptorTable(2, descriptorHeap.GetGpuHandle(_descriptorBaseOffset));
 
 	constexpr uint32_t BLOCK_SIZE = 16;
 	commandList->Dispatch(
@@ -218,16 +210,13 @@ HRESULT RtxTrueHdrDrawer::Draw(
 #endif
 
 	_graphicsContext->InvalidateDescriptorHeapCache();
-	_graphicsContext->SetDescriptorHeap(heap);
+	_graphicsContext->SetDescriptorHeap(descriptorHeap.GetHeap());
 
 	commandList->SetPipelineState(_postPSO.get());
 	commandList->SetComputeRootSignature(_postRootSignature.get());
-	commandList->SetComputeRootDescriptorTable(
-		0, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, _descriptorBaseIdx + 1, descriptorSize));
-	commandList->SetComputeRootDescriptorTable(
-		1, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, inputSrvIdx, descriptorSize));
-	commandList->SetComputeRootDescriptorTable(
-		2, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapGpuHandle, outputUavIdx, descriptorSize));
+	commandList->SetComputeRootDescriptorTable(0, descriptorHeap.GetGpuHandle(_descriptorBaseOffset + 1));
+	commandList->SetComputeRootDescriptorTable(1, descriptorHeap.GetGpuHandle(inputSrvOffset));
+	commandList->SetComputeRootDescriptorTable(2, descriptorHeap.GetGpuHandle(outputUavOffset));
 
 	commandList->Dispatch(
 		(_inputSize.width + BLOCK_SIZE - 1) / BLOCK_SIZE,
