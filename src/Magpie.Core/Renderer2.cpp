@@ -6,7 +6,7 @@
 #include "ScalingWindow.h"
 #include "SwapChainPresenter.h"
 #include "shaders/CopyFrameVS.h"
-#include "shaders/SimplePS.h"
+#include "shaders/TextureBlitPS.h"
 #include "GraphicsCaptureFrameSource.h"
 #include <d3dkmthk.h>
 #include <windows.graphics.display.interop.h>
@@ -160,7 +160,7 @@ ScalingError Renderer2::Initialize(
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
 			.pRootSignature = _rootSignature.get(),
 			.VS = CD3DX12_SHADER_BYTECODE(CopyFrameVS, sizeof(CopyFrameVS)),
-			.PS = CD3DX12_SHADER_BYTECODE(SimplePS, sizeof(SimplePS)),
+			.PS = CD3DX12_SHADER_BYTECODE(TextureBlitPS, sizeof(TextureBlitPS)),
 			.BlendState = {
 				.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
 			},
@@ -196,7 +196,7 @@ ScalingError Renderer2::Initialize(
 	destRect.bottom = rendererRect.top + (LONG)_outputRect.bottom;
 
 	if (!_cursorDrawer.Initialize(_graphicsContext, srcRect, rendererRect, destRect, _colorInfo)) {
-		Logger::Get().Error("CursorDrawer2::Initialize 失败");
+		Logger::Get().Error("CursorDrawer::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 
@@ -593,7 +593,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	hr = _cursorDrawer.Draw(completedFenceValue, fenceValueToSignal, curFrameSrvOffset, nullptr);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("CursorDrawer2::Draw 失败", hr);
+		Logger::Get().ComError("CursorDrawer::Draw 失败", hr);
 		return hr;
 	}
 

@@ -1,5 +1,5 @@
 #pragma once
-#include "CursorDrawer2.h"
+#include "CursorDrawer.h"
 #include "FrameProducer.h"
 #include "GraphicsContext.h"
 #include "DescriptorHeap.h"
@@ -90,7 +90,7 @@ private:
 	DescriptorHeap _descriptorHeap;
 	GraphicsContext _graphicsContext;
 	FrameProducer _frameProducer;
-	CursorDrawer2 _cursorDrawer;
+	CursorDrawer _cursorDrawer;
 	std::unique_ptr<SwapChainPresenter> _presenter;
 	
 	HMONITOR _hCurMonitor = NULL;

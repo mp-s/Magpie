@@ -382,6 +382,9 @@
     <FxCompile Include="shaders\MaskedCursorPS_sRGB.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="shaders\CursorResizerPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

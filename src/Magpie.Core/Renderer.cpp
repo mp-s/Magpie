@@ -122,11 +122,6 @@ ScalingError Renderer::Initialize(HWND hwndAttach, OverlayOptions& overlayOption
 		_destRect.left, _destRect.top, _destRect.right, _destRect.bottom,
 		_destRect.right - _destRect.left, _destRect.bottom - _destRect.top));
 
-	if (!_cursorDrawer.Initialize(_frontendResources)) {
-		Logger::Get().ComError("初始化 CursorDrawer 失败", hr);
-		return ScalingError::ScalingFailedGeneral;
-	}
-
 	if (!_overlayDrawer.Initialize(_frontendResources, overlayOptions)) {
 		Logger::Get().Error("初始化 OverlayDrawer 失败");
 		return ScalingError::ScalingFailedGeneral;
@@ -263,9 +258,6 @@ void Renderer::_FrontendRender(bool waitForGpu) noexcept {
 	// 绘制叠加层。ImGui 至少渲染两遍，否则经常有布局错误
 	_overlayDrawer.Draw(2, _stepTimer.FPS(), _effectsProfiler.GetTimings(), drawOffset);
 
-	// 绘制光标
-	_cursorDrawer.Draw(frameTex.get(), drawOffset);
-	
 	_presenter->EndFrame(waitForGpu);
 }
 
@@ -273,10 +265,6 @@ bool Renderer::Render(bool force, bool waitForGpu) noexcept {
 	if (!force && _lastAccessMutexKey == _sharedTextureMutexKey.load(std::memory_order_relaxed)) {
 		if (_lastAccessMutexKey == 0) {
 			// 第一帧尚未完成
-			return false;
-		}
-
-		if (!_cursorDrawer.NeedRedraw() && !_overlayDrawer.NeedRedraw(_stepTimer.FPS())) {
 			return false;
 		}
 	}
@@ -1200,34 +1188,6 @@ winrt::IAsyncOperation<bool> Renderer::_TakeScreenshotImpl(
 
 // 监听 PrintScreen 实现截屏时隐藏光标
 LRESULT CALLBACK Renderer::_LowLevelKeyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
-	if (nCode != HC_ACTION || wParam != WM_KEYDOWN) {
-		return CallNextHookEx(NULL, nCode, wParam, lParam);
-	}
-
-	KBDLLHOOKSTRUCT* info = (KBDLLHOOKSTRUCT*)lParam;
-	if (info->vkCode == VK_SNAPSHOT) {
-		// 为了缩短钩子处理时间，异步执行所有逻辑
-		ScalingWindow::Dispatcher().TryEnqueue([]() -> winrt::fire_and_forget {
-			// 暂时隐藏光标
-			Renderer& renderer = ScalingWindow::Get().Renderer();
-			renderer._cursorDrawer.IsCursorVisible(false);
-			renderer._FrontendRender();
-
-			const uint32_t runId = ScalingWindow::RunId();
-
-			winrt::DispatcherQueue dispatcher = ScalingWindow::Dispatcher();
-			co_await 200ms;
-			co_await dispatcher;
-
-			if (ScalingWindow::RunId() == runId &&
-				!renderer._cursorDrawer.IsCursorVisible()
-			) {
-				renderer._cursorDrawer.IsCursorVisible(true);
-				renderer._FrontendRender();
-			}
-		});
-	}
-
 	return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 

@@ -106,7 +106,6 @@ private:
 	DeviceResources _frontendResources;
 	std::unique_ptr<PresenterBase> _presenter;
 	
-	CursorDrawer _cursorDrawer;
 	OverlayDrawer _overlayDrawer;
 
 	winrt::com_ptr<ID3D11Texture2D> _frontendSharedTexture;

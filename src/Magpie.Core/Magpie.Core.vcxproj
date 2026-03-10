@@ -50,9 +50,8 @@
     <ClInclude Include="CatmullRomDrawer.h" />
     <ClInclude Include="ColorHelper.h" />
     <ClInclude Include="CompSwapchainPresenter.h" />
-    <ClInclude Include="CursorDrawer2.h" />
-    <ClInclude Include="CursorManager.h" />
     <ClInclude Include="CursorDrawer.h" />
+    <ClInclude Include="CursorManager.h" />
     <ClInclude Include="DDS.h" />
     <ClInclude Include="DDSHelper.h" />
     <ClInclude Include="DesktopDuplicationFrameSource.h" />
@@ -112,9 +111,8 @@
     <ClCompile Include="BackendDescriptorStore.cpp" />
     <ClCompile Include="CatmullRomDrawer.cpp" />
     <ClCompile Include="CompSwapchainPresenter.cpp" />
-    <ClCompile Include="CursorDrawer2.cpp" />
-    <ClCompile Include="CursorManager.cpp" />
     <ClCompile Include="CursorDrawer.cpp" />
+    <ClCompile Include="CursorManager.cpp" />
     <ClCompile Include="DDSHelper.cpp" />
     <ClCompile Include="DesktopDuplicationFrameSource.cpp" />
     <ClCompile Include="DeviceResources.cpp" />
@@ -169,6 +167,9 @@
     <FxCompile Include="shaders\CatmullRomCS_sRGB.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>
+    <FxCompile Include="shaders\CursorResizerPS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+    </FxCompile>
     <FxCompile Include="shaders\CursorVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
@@ -205,11 +206,8 @@
     <FxCompile Include="shaders\MonochromeCursorPS_sRGB.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
-    <FxCompile Include="shaders\SimplePS.hlsl">
+    <FxCompile Include="shaders\TextureBlitPS.hlsl">
       <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="shaders\SimpleVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
     </FxCompile>
   </ItemGroup>
   <ItemGroup>

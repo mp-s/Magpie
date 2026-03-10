@@ -1,6 +1,6 @@
-Texture2D tex : register(t0);
+Texture2D inputTex : register(t0);
 SamplerState sam : register(s0);
 
 float4 main(noperspective float2 coord : TEXCOORD) : SV_Target {
-	return tex.Sample(sam, coord);
+	return inputTex.Sample(sam, coord);
 }
