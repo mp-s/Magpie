@@ -57,10 +57,6 @@ bool GraphicsContext::Initialize(
 		}
 	}
 
-	// 检查 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 支持
-	// https://devblogs.microsoft.com/directx/coming-to-directx-12-more-control-over-memory-allocation/
-	_isHeapFlagCreateNotZeroedSupported = (bool)_device.try_as<ID3D12Device8>();
-
 	// 检查 Resizable BAR 支持
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS16 data{};
@@ -94,7 +90,6 @@ void GraphicsContext::CopyDevice(const GraphicsContext& other) {
 	_descriptorHeap = other._descriptorHeap;
 	_device = other._device;
 	_rootSignatureVersion = other._rootSignatureVersion;
-	_isHeapFlagCreateNotZeroedSupported = other._isHeapFlagCreateNotZeroedSupported;
 }
 
 bool GraphicsContext::InitializeAfterCopyDevice(
