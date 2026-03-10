@@ -122,26 +122,27 @@ HRESULT FrameRingBuffer::ProducerEndFrame(ID3D12CommandQueue* commandQueue) noex
 bool FrameRingBuffer::ConsumerBeginFrame(
 	uint32_t& bufferIdx,
 	ID3D12Resource*& frame,
-	UINT64& fenceValueToSignal
+	uint64_t& completedFenceValue,
+	uint64_t& fenceValueToSignal
 ) noexcept {
 	auto lk = _lock.lock_exclusive();
 
 	if (_curConsumerIdx != _curProducerIdx) {
-		const uint64_t completedFenceValue = _producerFence->GetCompletedValue();
-		if (completedFenceValue == 0) {
+		const uint64_t producerCompletedFenceValue = _producerFence->GetCompletedValue();
+		if (producerCompletedFenceValue == 0) {
 			// 第一帧尚未完成
 			return false;
 		}
 
 		const uint32_t slotCount = (uint32_t)_slots.size();
 		uint32_t nextConsumerSlot = (_curConsumerIdx + 1) % slotCount;
-		if (completedFenceValue >= _slots[nextConsumerSlot].producerFenceValue) {
+		if (producerCompletedFenceValue >= _slots[nextConsumerSlot].producerFenceValue) {
 			_curConsumerIdx = nextConsumerSlot;
 
 			// 寻找最新帧
 			while (true) {
 				nextConsumerSlot = (_curConsumerIdx + 1) % slotCount;
-				if (completedFenceValue < _slots[nextConsumerSlot].producerFenceValue) {
+				if (producerCompletedFenceValue < _slots[nextConsumerSlot].producerFenceValue) {
 					break;
 				}
 
@@ -161,13 +162,14 @@ bool FrameRingBuffer::ConsumerBeginFrame(
 
 	bufferIdx = _curConsumerIdx;
 	frame = curSlot.resource.get();
+	completedFenceValue = _consumerFence->GetCompletedValue();
 
 	return true;
 }
 
 HRESULT FrameRingBuffer::ConsumerEndFrame(
 	ID3D12CommandQueue* commandQueue,
-	UINT64 fenceValueToSignal
+	uint64_t fenceValueToSignal
 ) const noexcept {
 	HRESULT hr = commandQueue->Signal(_consumerFence.get(), fenceValueToSignal);
 	if (FAILED(hr)) {

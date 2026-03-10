@@ -62,8 +62,17 @@ CursorDrawer2::~CursorDrawer2() noexcept {
 #ifdef _DEBUG
 	if (_graphicsContext) {
 		auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
+
 		for (const auto& pair : _cursorInfos) {
 			descriptorHeap.Free(pair.second.textureSrvOffset, 1);
+		}
+
+		if (_tempOriginTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+			descriptorHeap.Free(_tempOriginTextureSrvOffset, 1);
+		}
+		
+		for (const _RetiredTempOriginTexture& rt : _retiredTempOriginTextures) {
+			descriptorHeap.Free(rt.srvOffset, 1);
 		}
 	}
 #endif
@@ -196,7 +205,14 @@ bool CursorDrawer2::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 	}
 }
 
-HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
+HRESULT CursorDrawer2::Draw(
+	uint64_t completedFenceValue,
+	uint64_t nextFenceValue,
+	uint32_t curFrameSrvOffset,
+	ID3D12Resource* backBuffer
+) noexcept {
+	_ClearRetiredResources(completedFenceValue);
+
 	if (!_hCurCursor || !_curCursorInfo) {
 		return S_OK;
 	}
@@ -216,6 +232,7 @@ HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 	};
 
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
+	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 
 	const bool isSrgb = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange;
 	
@@ -270,23 +287,125 @@ HRESULT CursorDrawer2::Draw(uint32_t curFrameSrvOffset) noexcept {
 
 	if (_curCursorInfo->type == _CursorType::Color) {
 		commandList->SetGraphicsRootDescriptorTable(
-			1, _graphicsContext->GetDescriptorHeap().GetGpuHandle(_curCursorInfo->textureSrvOffset));
+			1, descriptorHeap.GetGpuHandle(_curCursorInfo->textureSrvOffset));
 	} else {
 		DirectXHelper::Constant32 constants[] = {
 			{.uintVal = _curCursorInfo->originSize.width},
 			{.uintVal = _curCursorInfo->originSize.height},
 			{.uintVal = _curCursorInfo->size.width},
 			{.uintVal = _curCursorInfo->size.height},
-			{.uintVal = uint32_t(cursorRect.left - _destRect.left)},
-			{.uintVal = uint32_t(cursorRect.top - _destRect.top)},
-			{.uintVal = isSrgb ? 1 : std::bit_cast<uint32_t>(_colorInfo.sdrWhiteLevel)}
+			{.uintVal = backBuffer ? 0u :uint32_t(cursorRect.left - _destRect.left)},
+			{.uintVal = backBuffer ? 0u : uint32_t(cursorRect.top - _destRect.top)},
+			// 原始帧需要伽马校正，从渲染目标复制的临时纹理不需要。WCG/HDR 下这个参数有不同的意义
+			{.uintVal = isSrgb ? (backBuffer ? 0u : 1u) :
+				std::bit_cast<uint32_t>(_colorInfo.sdrWhiteLevel)}
 		};
 		commandList->SetGraphicsRoot32BitConstants(1, (UINT)std::size(constants), constants, 0);
 
 		commandList->SetGraphicsRootDescriptorTable(
-			2, _graphicsContext->GetDescriptorHeap().GetGpuHandle(_curCursorInfo->textureSrvOffset));
-		commandList->SetGraphicsRootDescriptorTable(
-			3, _graphicsContext->GetDescriptorHeap().GetGpuHandle(curFrameSrvOffset));
+			2, descriptorHeap.GetGpuHandle(_curCursorInfo->textureSrvOffset));
+
+		if (backBuffer) {
+			// 掩码光标在叠加层上时需要从渲染目标复制光标下区域到临时纹理
+			if (_tempOriginTextureSize.width < _curCursorInfo->size.width ||
+				_tempOriginTextureSize.height < _curCursorInfo->size.height
+			) {
+				if (_tempOriginTexture) {
+					_retiredTempOriginTextures.emplace_back(_RetiredTempOriginTexture{
+						.texture = std::move(_tempOriginTexture),
+						.fenceValue = nextFenceValue,
+						.srvOffset = _tempOriginTextureSrvOffset
+					});
+				}
+
+				// 对齐到 32 的倍数
+				_tempOriginTextureSize.width = (_curCursorInfo->size.width + 31) & ~31;
+				_tempOriginTextureSize.height = (_curCursorInfo->size.height + 31) & ~31;
+
+				ID3D12Device5* device = _graphicsContext->GetDevice();
+
+				CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
+
+				CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+					isSrgb ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT,
+					_tempOriginTextureSize.width,
+					_tempOriginTextureSize.height,
+					1, 1, 1, 0,
+					D3D12_RESOURCE_FLAG_NONE
+				);
+
+				HRESULT hr = device->CreateCommittedResource(
+					&heapProps,
+					D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+					&texDesc,
+					D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+					nullptr,
+					IID_PPV_ARGS(&_tempOriginTexture)
+				);
+				if (FAILED(hr)) {
+					Logger::Get().ComError("CreateCommittedResource 失败", hr);
+					return hr;
+				}
+				
+				hr = descriptorHeap.Alloc(1, _tempOriginTextureSrvOffset);
+				if (FAILED(hr)) {
+					Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
+					return hr;
+				}
+
+				CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
+					CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
+				device->CreateShaderResourceView(_tempOriginTexture.get(), &srvDesc,
+					descriptorHeap.GetCpuHandle(_tempOriginTextureSrvOffset));
+			}
+
+			{
+				D3D12_RESOURCE_BARRIER barriers[] = {
+					CD3DX12_RESOURCE_BARRIER::Transition(_tempOriginTexture.get(),
+						D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST, 0),
+					CD3DX12_RESOURCE_BARRIER::Transition(backBuffer,
+						D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE, 0)
+				};
+				commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
+			}
+			
+			{
+				D3D12_BOX srcBox = {
+					UINT(std::max(cursorRect.left - _rendererRect.left, viewportRect.left)),
+					UINT(std::max(cursorRect.top - _rendererRect.top, viewportRect.top)),
+					0,
+					UINT(std::min(cursorRect.right - _rendererRect.left, viewportRect.right)),
+					UINT(std::min(cursorRect.bottom - _rendererRect.top, viewportRect.bottom)),
+					1
+				};
+				UINT destLeft = UINT(std::max(0l, viewportRect.left - cursorRect.left + _rendererRect.left));
+				UINT destTop = UINT(std::max(0l, viewportRect.top - cursorRect.top + _rendererRect.top));
+
+				assert(destLeft + srcBox.right - srcBox.left <= _curCursorInfo->size.width);
+				assert(destTop + srcBox.bottom - srcBox.top <= _curCursorInfo->size.height);
+
+				CD3DX12_TEXTURE_COPY_LOCATION dest(_tempOriginTexture.get());
+				CD3DX12_TEXTURE_COPY_LOCATION src(backBuffer);
+				commandList->CopyTextureRegion(&dest, destLeft, destTop, 0, &src, &srcBox);
+			}
+			
+			{
+				D3D12_RESOURCE_BARRIER barriers[] = {
+					CD3DX12_RESOURCE_BARRIER::Transition(_tempOriginTexture.get(),
+						D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, 0),
+					CD3DX12_RESOURCE_BARRIER::Transition(backBuffer,
+						D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, 0)
+				};
+				commandList->ResourceBarrier((UINT)std::size(barriers), barriers);
+			}
+
+			commandList->SetGraphicsRootDescriptorTable(
+				3, descriptorHeap.GetGpuHandle(_tempOriginTextureSrvOffset));
+		} else {
+			// 直接使用原始帧
+			commandList->SetGraphicsRootDescriptorTable(
+				3, descriptorHeap.GetGpuHandle(curFrameSrvOffset));
+		}
 	}
 
 	{
@@ -843,7 +962,7 @@ HRESULT CursorDrawer2::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcep
 	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
 
 	{
-		CD3DX12_TEXTURE_COPY_LOCATION dest(cursorInfo.originTexture.get(), 0);
+		CD3DX12_TEXTURE_COPY_LOCATION dest(cursorInfo.originTexture.get());
 		CD3DX12_TEXTURE_COPY_LOCATION src(cursorInfo.originUploadBuffer.get(), textureLayout);
 		commandList->CopyTextureRegion(&dest, 0, 0, 0, &src, nullptr);
 	}
@@ -1094,6 +1213,33 @@ HRESULT CursorDrawer2::_CreateMaskPSO(
 	}
 
 	return S_OK;
+}
+
+void CursorDrawer2::_ClearRetiredResources(uint64_t completedFenceValue) noexcept {
+	if (_retiredTempOriginTextures.empty()) {
+		return;
+	}
+
+	// _retiredTempOriginTextures 中元素的 fenceValue 按升序排列
+	auto it = std::find_if(
+		_retiredTempOriginTextures.begin(),
+		_retiredTempOriginTextures.end(),
+		[&](const _RetiredTempOriginTexture& rt) {
+			return rt.fenceValue > completedFenceValue;
+		}
+	);
+	if (it == _retiredTempOriginTextures.begin()) {
+		return;
+	}
+
+	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
+	for (auto it1 = _retiredTempOriginTextures.begin(); it1 != it; ++it1) {
+		descriptorHeap.Free(it1->srvOffset, 1);
+	}
+
+	_retiredTempOriginTextures.erase(_retiredTempOriginTextures.begin(), it);
+
+	OutputDebugString(fmt::format(L"{}", _retiredTempOriginTextures.size()).c_str());
 }
 
 }

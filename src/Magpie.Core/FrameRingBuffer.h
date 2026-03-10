@@ -29,12 +29,13 @@ public:
 	bool ConsumerBeginFrame(
 		uint32_t& bufferIdx,
 		ID3D12Resource*& frame,
-		UINT64& fenceValueToSignal
+		uint64_t& completedFenceValue,
+		uint64_t& fenceValueToSignal
 	) noexcept;
 
 	HRESULT ConsumerEndFrame(
 		ID3D12CommandQueue* commandQueue,
-		UINT64 fenceValueToSignal
+		uint64_t fenceValueToSignal
 	) const noexcept;
 
 	HRESULT SetEventOnNewFrame(uint64_t& frameNumber, HANDLE hEvent) const noexcept;

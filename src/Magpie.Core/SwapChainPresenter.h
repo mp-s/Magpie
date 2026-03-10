@@ -19,7 +19,7 @@ public:
 
 	// SDR 下 rawRtvHandle 不做伽马校正，用于渲染光标
 	void BeginFrame(
-		ID3D12Resource** frameTex,
+		ID3D12Resource** backBuffer,
 		D3D12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
 		D3D12_CPU_DESCRIPTOR_HANDLE& rawRtvHandle
 	) noexcept;

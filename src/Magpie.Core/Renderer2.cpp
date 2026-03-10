@@ -518,8 +518,10 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	// 处于 COMMON 状态，依赖隐式状态转换
 	ID3D12Resource* curFrame;
 	uint32_t curFrameSrvOffset;
-	UINT64 fenceValueToSignal;
-	if (!_frameProducer.ConsumerBeginFrame(curFrame, curFrameSrvOffset, fenceValueToSignal)) {
+	uint64_t completedFenceValue;
+	uint64_t fenceValueToSignal;
+	if (!_frameProducer.ConsumerBeginFrame(
+		curFrame, curFrameSrvOffset, completedFenceValue, fenceValueToSignal)) {
 		// 不应出现第一帧未完成的情况
 		assert(false);
 		return S_OK;
@@ -527,9 +529,9 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	// SwapChain::BeginFrame 和 GraphicsContext::BeginFrame 无顺序要求，不过
 	// 前者通常等待时间更久，将它放在前面可以减少等待次数。
-	ID3D12Resource* frameTex;
+	ID3D12Resource* backBuffer;
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle, rawRtvHandle;
-	_presenter->BeginFrame(&frameTex, rtvHandle, rawRtvHandle);
+	_presenter->BeginFrame(&backBuffer, rtvHandle, rawRtvHandle);
 
 	uint32_t frameIndex;
 	HRESULT hr = _graphicsContext.BeginFrame(frameIndex, _pipelineState.get());
@@ -549,7 +551,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
+			backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
 		commandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -589,7 +591,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->OMSetRenderTargets(1, &rawRtvHandle, FALSE, nullptr);
 	}
 
-	hr = _cursorDrawer.Draw(curFrameSrvOffset);
+	hr = _cursorDrawer.Draw(completedFenceValue, fenceValueToSignal, curFrameSrvOffset, nullptr);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CursorDrawer2::Draw 失败", hr);
 		return hr;
@@ -597,7 +599,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT, 0);
+			backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT, 0);
 		commandList->ResourceBarrier(1, &barrier);
 	}
 

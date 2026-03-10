@@ -73,10 +73,12 @@ uint64_t FrameProducer::GetLatestFrameNumber() const noexcept {
 bool FrameProducer::ConsumerBeginFrame(
 	ID3D12Resource*& frame,
 	uint32_t& frameSrvOffset,
-	UINT64& fenceValueToSignal
+	uint64_t& completedFenceValue,
+	uint64_t& fenceValueToSignal
 ) noexcept {
 	uint32_t bufferIdx;
-	if (!_frameRingBuffer.ConsumerBeginFrame(bufferIdx, frame, fenceValueToSignal)) {
+	if (!_frameRingBuffer.ConsumerBeginFrame(
+		bufferIdx, frame, completedFenceValue, fenceValueToSignal)) {
 		return false;
 	}
 
@@ -86,7 +88,7 @@ bool FrameProducer::ConsumerBeginFrame(
 
 HRESULT FrameProducer::ConsumerEndFrame(
 	ID3D12CommandQueue* commandQueue,
-	UINT64 fenceValueToSignal
+	uint64_t fenceValueToSignal
 ) const noexcept {
 	return _frameRingBuffer.ConsumerEndFrame(commandQueue, fenceValueToSignal);
 }

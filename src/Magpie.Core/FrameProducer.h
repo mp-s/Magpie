@@ -34,12 +34,13 @@ public:
 	bool ConsumerBeginFrame(
 		ID3D12Resource*& frame,
 		uint32_t& frameSrvOffset,
-		UINT64& fenceValueToSignal
+		uint64_t& completedFenceValue,
+		uint64_t& fenceValueToSignal
 	) noexcept;
 
 	HRESULT ConsumerEndFrame(
 		ID3D12CommandQueue* commandQueue,
-		UINT64 fenceValueToSignal
+		uint64_t fenceValueToSignal
 	) const noexcept;
 
 	void OnResizedAsync(Size rendererSize, Size& outputSize, SimpleTask<HRESULT>& task) noexcept;

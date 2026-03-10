@@ -25,11 +25,15 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 	float3 origin = originTex[uint2(uv * cursorSize) + originOffset].rgb;
 	
 #ifdef MP_SRGB
+	// originTex 有两个来源，可能是完整帧，也可能是复制自渲染目标的临时纹理。如果是
+	// 前者，这里需要执行伽马校正。为了和 OS 一致，应在伽马校正后应用掩码。
 	[branch]
 	if (shouldEncodeSrgb) {
 		origin = EncodeSrgb(saturate(origin));
 	}
 #else
+	// WCG/HDR 下将颜色压缩到 0-1，应用掩码然后还原亮度。不追求和 OS 行为一致，截
+	// 至 Win11 25H2，HDR 下的单色光标和彩色掩码光标仍没有稳定的表现。
 	float white = max(max(origin.r, origin.g), max(origin.b, sdrWhiteLevel));
 	origin = saturate(origin / white);
 #endif

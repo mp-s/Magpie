@@ -1,7 +1,8 @@
 #pragma once
-#include <wil/registry.h>
-#include <parallel_hashmap/phmap.h>
 #include "ByteBuffer.h"
+#include "SmallVector.h"
+#include <parallel_hashmap/phmap.h>
+#include <wil/registry.h>
 
 namespace Magpie {
 
@@ -25,7 +26,13 @@ public:
 
 	bool CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept;
 
-	HRESULT Draw(uint32_t curFrameSrvOffset) noexcept;
+	// backBuffer 不为空表示掩码光标在叠加层上
+	HRESULT Draw(
+		uint64_t completedFenceValue,
+		uint64_t nextFenceValue,
+		uint32_t curFrameSrvOffset,
+		ID3D12Resource* backBuffer = nullptr
+	) noexcept;
 
 	void OnCursorVirtualizationStarted() noexcept {
 		_isCursorVirtualized = true;
@@ -125,11 +132,17 @@ private:
 		winrt::com_ptr<ID3D12PipelineState>& result
 	) noexcept;
 
+	void _ClearRetiredResources(uint64_t completedFenceValue) noexcept;
+
 	GraphicsContext* _graphicsContext = nullptr;
 	Size _srcSize{};
 	RECT _rendererRect{};
 	RECT _destRect{};
 	ColorInfo _colorInfo;
+
+	// 监控“指针大小”选项变化
+	wil::unique_registry_watcher_nothrow _regWatcher;
+	DWORD _cursorBaseSize = 32;
 
 	// (HCURSOR, DPI) -> _CursorInfo
 	// DPI 为 0 表示此光标不随 DPI 缩放
@@ -143,9 +156,17 @@ private:
 	POINT _curCursorPos{ std::numeric_limits<LONG>::max(), std::numeric_limits<LONG>::max() };
 	_CursorInfo* _curCursorInfo = nullptr;
 
-	// 监控“指针大小”选项变化
-	wil::unique_registry_watcher_nothrow _regWatcher;
-	DWORD _cursorBaseSize = 32;
+	// 用于从渲染目标复制光标下区域
+	winrt::com_ptr<ID3D12Resource> _tempOriginTexture;
+	Size _tempOriginTextureSize{};
+	uint32_t _tempOriginTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+	
+	struct _RetiredTempOriginTexture {
+		winrt::com_ptr<ID3D12Resource> texture;
+		uint64_t fenceValue;
+		uint32_t srvOffset;
+	};
+	SmallVector<_RetiredTempOriginTexture, 1> _retiredTempOriginTextures;
 
 	winrt::com_ptr<ID3D12RootSignature> _colorRootSignature;
 	winrt::com_ptr<ID3D12PipelineState> _colorPSO;

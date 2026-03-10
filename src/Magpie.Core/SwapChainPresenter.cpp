@@ -116,14 +116,14 @@ bool SwapChainPresenter::Initialize(
 }
 
 void SwapChainPresenter::BeginFrame(
-	ID3D12Resource** frameTex,
+	ID3D12Resource** backBuffer,
 	D3D12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
 	D3D12_CPU_DESCRIPTOR_HANDLE& rawRtvHandle
 ) noexcept {
 	_frameLatencyWaitableObject.wait(1000);
 
 	const uint32_t curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
-	*frameTex = _frameBuffers[curBufferIndex].get();
+	*backBuffer = _frameBuffers[curBufferIndex].get();
 
 	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), curBufferIndex, _rtvDescriptorSize);
