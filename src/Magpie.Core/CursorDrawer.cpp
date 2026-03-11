@@ -10,6 +10,7 @@
 #include "ScalingWindow.h"
 #include "shaders/CursorResizerPS.h"
 #include "shaders/CursorVS.h"
+#include "shaders/FullscreenVS.h"
 #include "shaders/MaskedCursorPS.h"
 #include "shaders/MaskedCursorPS_sRGB.h"
 #include "shaders/MonochromeCursorPS.h"
@@ -63,9 +64,18 @@ CursorDrawer::~CursorDrawer() noexcept {
 #ifdef _DEBUG
 	if (_graphicsContext) {
 		auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
+		auto& rtvDescriptorHeap = _graphicsContext->GetDescriptorHeap(true);
 
 		for (const auto& pair : _cursorInfos) {
-			descriptorHeap.Free(pair.second.textureSrvOffset, 1);
+			if (pair.second.textureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+				descriptorHeap.Free(pair.second.textureSrvOffset, 1);
+			}
+			if (pair.second.textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
+				rtvDescriptorHeap.Free(pair.second.textureRtvOffset, 1);
+			}
+			if (pair.second.originTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+				descriptorHeap.Free(pair.second.originTextureSrvOffset, 1);
+			}
 		}
 
 		if (_tempOriginTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
@@ -73,7 +83,9 @@ CursorDrawer::~CursorDrawer() noexcept {
 		}
 		
 		for (const _RetiredTempOriginTexture& rt : _retiredTempOriginTextures) {
-			descriptorHeap.Free(rt.srvOffset, 1);
+			if (rt.srvOffset != std::numeric_limits<uint32_t>::max()) {
+				descriptorHeap.Free(rt.srvOffset, 1);
+			}
 		}
 	}
 #endif
@@ -210,6 +222,7 @@ HRESULT CursorDrawer::Draw(
 	uint64_t completedFenceValue,
 	uint64_t nextFenceValue,
 	uint32_t curFrameSrvOffset,
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle,
 	ID3D12Resource* backBuffer
 ) noexcept {
 	_ClearRetiredResources(completedFenceValue);
@@ -219,7 +232,7 @@ HRESULT CursorDrawer::Draw(
 	}
 
 	if (!_curCursorInfo->texture) {
-		HRESULT hr = _InitializeCursorTexture(*_curCursorInfo);
+		HRESULT hr = _InitializeCursorTexture(*_curCursorInfo, rtvHandle);
 		if (FAILED(hr)) {
 			return hr;
 		}
@@ -453,6 +466,7 @@ void CursorDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 		// 渲染目标纹理格式变了
 		_tempOriginTexture = nullptr;
 		_tempOriginTextureSize = {};
+
 		if (_tempOriginTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
 			_graphicsContext->GetDescriptorHeap().Free(_tempOriginTextureSrvOffset, 1);
 			_tempOriginTextureSrvOffset = std::numeric_limits<uint32_t>::max();
@@ -900,7 +914,10 @@ bool CursorDrawer::_ResolveCursorPixels(
 	return true;
 }
 
-HRESULT CursorDrawer::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept {
+HRESULT CursorDrawer::_InitializeCursorTexture(
+	_CursorInfo& cursorInfo,
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle
+) noexcept {
 	ID3D12Device5* device = _graphicsContext->GetDevice();
 
 	CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
@@ -996,6 +1013,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept
 	} else {
 		texDesc.Width = cursorInfo.size.width;
 		texDesc.Height = cursorInfo.size.height;
+		texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
 		hr = device->CreateCommittedResource(
 			&heapProps,
@@ -1010,10 +1028,99 @@ HRESULT CursorDrawer::_InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept
 			return hr;
 		}
 
-		hr = _CreateCursorResizerPSO();
+		// 以 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 创建的资源作为渲染目标需先
+		// Discard/Clear/Copy。
+		commandList->DiscardResource(cursorInfo.texture.get(), nullptr);
+
+		auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
+		auto& rtvDescriptorHeap = _graphicsContext->GetDescriptorHeap(true);
+
+		hr = descriptorHeap.Alloc(1, cursorInfo.originTextureSrvOffset);
 		if (FAILED(hr)) {
-			Logger::Get().ComError("_CreateCursorResizerPSO 失败", hr);
+			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 			return hr;
+		}
+
+		hr = rtvDescriptorHeap.Alloc(1, cursorInfo.textureRtvOffset);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
+			return hr;
+		}
+
+		{
+			CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
+				CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
+			device->CreateShaderResourceView(
+				cursorInfo.originTexture.get(),
+				&srvDesc,
+				descriptorHeap.GetCpuHandle(cursorInfo.originTextureSrvOffset)
+			);
+		}
+
+		{
+			D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {
+				.Format = texDesc.Format,
+				.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
+			};
+			device->CreateRenderTargetView(
+				cursorInfo.texture.get(),
+				&rtvDesc,
+				rtvDescriptorHeap.GetCpuHandle(cursorInfo.textureRtvOffset)
+			);
+		}
+
+		if (!_cursorResizerPSO) {
+			hr = _CreateCursorResizerPSO();
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_CreateCursorResizerPSO 失败", hr);
+				return hr;
+			}
+		}
+		
+		commandList->SetPipelineState(_cursorResizerPSO.get());
+		commandList->SetGraphicsRootSignature(_cursorResizerRootSignature.get());
+
+		{
+			DirectXHelper::Constant32 constants[] = {
+				{.uintVal = cursorInfo.originSize.width},
+				{.uintVal = cursorInfo.originSize.height},
+				{.floatVal = 1.0f / cursorInfo.originSize.width},
+				{.floatVal = 1.0f / cursorInfo.originSize.height}
+			};
+			commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+		}
+
+		commandList->SetGraphicsRootDescriptorTable(
+			1, descriptorHeap.GetGpuHandle(cursorInfo.originTextureSrvOffset));
+
+		{
+			CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)cursorInfo.size.width, (float)cursorInfo.size.height);
+			commandList->RSSetViewports(1, &viewport);
+		}
+		{
+			CD3DX12_RECT scissorRect(0, 0, (LONG)cursorInfo.size.width, (LONG)cursorInfo.size.height);
+			commandList->RSSetScissorRects(1, &scissorRect);
+		}
+
+		{
+			D3D12_CPU_DESCRIPTOR_HANDLE rtv =
+				rtvDescriptorHeap.GetCpuHandle(_curCursorInfo->textureRtvOffset);
+			commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+		}
+		
+		commandList->DrawInstanced(3, 1, 0, 0);
+
+		// 还原渲染目标
+		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+		{
+			CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				cursorInfo.texture.get(),
+				D3D12_RESOURCE_STATE_RENDER_TARGET,
+				D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+				0
+			);
+			commandList->ResourceBarrier(1, &barrier);
 		}
 	}
 
@@ -1031,8 +1138,18 @@ void CursorDrawer::_ClearCursorInfos() noexcept {
 	_curCursorInfo = nullptr;
 
 	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
+	auto& rtvDescriptorHeap = _graphicsContext->GetDescriptorHeap(true);
+
 	for (const auto& pair : _cursorInfos) {
-		descriptorHeap.Free(pair.second.textureSrvOffset, 1);
+		if (pair.second.textureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+			descriptorHeap.Free(pair.second.textureSrvOffset, 1);
+		}
+		if (pair.second.textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
+			rtvDescriptorHeap.Free(pair.second.textureRtvOffset, 1);
+		}
+		if (pair.second.originTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+			descriptorHeap.Free(pair.second.originTextureSrvOffset, 1);
+		}
 	}
 
 	_cursorInfos.clear();
@@ -1252,6 +1369,84 @@ HRESULT CursorDrawer::_CreateMaskPSO(
 }
 
 HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
+	winrt::com_ptr<ID3DBlob> signature;
+	{
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		D3D12_ROOT_PARAMETER1 rootParams[] = {
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 4
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+			}
+		};
+		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
+			.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+			.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+			.ShaderRegister = 0
+		};
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc,
+			_graphicsContext->GetRootSignatureVersion(),
+			signature.put(),
+			nullptr
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			return hr;
+		}
+	}
+
+	HRESULT hr = _graphicsContext->GetDevice()->CreateRootSignature(
+		0,
+		signature->GetBufferPointer(),
+		signature->GetBufferSize(),
+		IID_PPV_ARGS(&_cursorResizerRootSignature)
+	);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateRootSignature 失败", hr);
+		return hr;
+	}
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _cursorResizerRootSignature.get(),
+		.VS = CD3DX12_SHADER_BYTECODE(FullscreenVS, sizeof(FullscreenVS)),
+		.PS = CD3DX12_SHADER_BYTECODE(CursorResizerPS, sizeof(CursorResizerPS)),
+		.BlendState = {
+			.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
+		},
+		.SampleMask = UINT_MAX,
+		.RasterizerState = {
+			.FillMode = D3D12_FILL_MODE_SOLID,
+			.CullMode = D3D12_CULL_MODE_NONE
+		},
+		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+		.NumRenderTargets = 1,
+		.RTVFormats = DXGI_FORMAT_R16G16B16A16_FLOAT,
+		.SampleDesc = { .Count = 1 }
+	};
+	hr = _graphicsContext->GetDevice()->CreateGraphicsPipelineState(
+		&psoDesc, IID_PPV_ARGS(&_cursorResizerPSO));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
+		return hr;
+	}
 
 	return S_OK;
 }
@@ -1275,7 +1470,9 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 
 	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
 	for (auto it1 = _retiredTempOriginTextures.begin(); it1 != it; ++it1) {
-		descriptorHeap.Free(it1->srvOffset, 1);
+		if (it1->srvOffset != std::numeric_limits<uint32_t>::max()) {
+			descriptorHeap.Free(it1->srvOffset, 1);
+		}
 	}
 
 	_retiredTempOriginTextures.erase(_retiredTempOriginTextures.begin(), it);

@@ -87,7 +87,8 @@ private:
 	Rect _outputRect{};
 
 	// 由多个 GraphicsContext 共享
-	DescriptorHeap _descriptorHeap;
+	DescriptorHeap _csuDescriptorHeap;
+	DescriptorHeap _rtvDescriptorHeap;
 	GraphicsContext _graphicsContext;
 	FrameProducer _frameProducer;
 	CursorDrawer _cursorDrawer;

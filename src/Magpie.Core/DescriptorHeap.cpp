@@ -4,23 +4,29 @@
 
 namespace Magpie {
 
-// 如果描述符大小为 32 字节，描述符堆消耗 2MiB 显存
-static uint32_t HEAP_CAPACITY = 65536;
-
 DescriptorHeap::~DescriptorHeap() noexcept {
 	// DEBUG 配置下退出前确保所有槽位都已释放
-	assert(_freeBlocks.size() == 1 && *_freeBlocks.begin() == std::make_pair(HEAP_CAPACITY, HEAP_CAPACITY));
+	assert(_freeBlocks.size() == 1 && *_freeBlocks.begin() == std::make_pair(_capacity, _capacity));
 }
 
-bool DescriptorHeap::Initialize(ID3D12Device5* device) noexcept {
-	_freeBlocks.emplace(HEAP_CAPACITY, HEAP_CAPACITY);
+bool DescriptorHeap::Initialize(
+	ID3D12Device5* device,
+	D3D12_DESCRIPTOR_HEAP_TYPE type,
+	uint32_t capacity
+) noexcept {
+#ifdef _DEBUG
+	_capacity = capacity;
+#endif
 
-	_descriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	_freeBlocks.emplace(capacity, capacity);
+
+	_descriptorSize = device->GetDescriptorHandleIncrementSize(type);
 
 	D3D12_DESCRIPTOR_HEAP_DESC desc = {
-		.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-		.NumDescriptors = HEAP_CAPACITY,
-		.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
+		.Type = type,
+		.NumDescriptors = capacity,
+		.Flags = type == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV ?
+			D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE
 	};
 
 	HRESULT hr = device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_heap));
@@ -30,7 +36,10 @@ bool DescriptorHeap::Initialize(ID3D12Device5* device) noexcept {
 	}
 
 	_cpuHandle = _heap->GetCPUDescriptorHandleForHeapStart();
-	_gpuHandle = _heap->GetGPUDescriptorHandleForHeapStart();
+
+	if (type == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) {
+		_gpuHandle = _heap->GetGPUDescriptorHandleForHeapStart();
+	}
 
 	return true;
 }
@@ -64,7 +73,7 @@ static uint32_t GetBlockOffset(const std::pair<const uint32_t, uint32_t>& freeBl
 }
 
 void DescriptorHeap::Free(uint32_t offset, uint32_t count) noexcept {
-	assert(offset != std::numeric_limits<uint32_t>::max() && offset + count <= HEAP_CAPACITY);
+	assert(offset != std::numeric_limits<uint32_t>::max() && offset + count <= _capacity);
 
 	auto lk = _freeBlocksLock.lock_exclusive();
 
@@ -96,6 +105,15 @@ void DescriptorHeap::Free(uint32_t offset, uint32_t count) noexcept {
 		}
 		_freeBlocks.emplace(offset + count, newBlockSize);
 	}
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeap::GetCpuHandle(uint32_t offset) const noexcept {
+	return CD3DX12_CPU_DESCRIPTOR_HANDLE(_cpuHandle, offset, _descriptorSize);
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeap::GetGpuHandle(uint32_t offset) const noexcept {
+	assert(_gpuHandle.ptr);
+	return CD3DX12_GPU_DESCRIPTOR_HANDLE(_gpuHandle, offset, _descriptorSize);
 }
 
 }

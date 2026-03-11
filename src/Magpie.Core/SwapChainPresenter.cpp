@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "SwapChainPresenter.h"
 #include "DebugInfo.h"
+#include "DescriptorHeap.h"
 #include "GraphicsContext.h"
 #include "Logger.h"
 #include "Win32Helper.h"
@@ -8,6 +9,20 @@
 #include <dwmapi.h>
 
 namespace Magpie {
+
+SwapChainPresenter::~SwapChainPresenter() noexcept {
+#ifdef _DEBUG
+	auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+
+	if (_rtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+		rtvDescriptorHeap.Free(_rtvBaseOffset, _bufferCount);
+	}
+
+	if (_rawRtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+		rtvDescriptorHeap.Free(_rawRtvBaseOffset, _bufferCount);
+	}
+#endif
+}
 
 bool SwapChainPresenter::Initialize(
 	GraphicsContext& graphicContext,
@@ -20,7 +35,6 @@ bool SwapChainPresenter::Initialize(
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	IDXGIFactory7* dxgiFactory = graphicContext.GetDXGIFactory();
-	ID3D12Device5* device = graphicContext.GetDevice();
 
 	// 检查撕裂支持
 	{
@@ -96,16 +110,27 @@ bool SwapChainPresenter::Initialize(
 
 	dxgiFactory->MakeWindowAssociation(hwndAttach, DXGI_MWA_NO_ALT_ENTER);
 
-	hr = _CreateRtvHeap();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateRtvHeap 失败", hr);
-		return false;
-	}
-
-	_rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
 	_frameBuffers.resize(_bufferCount);
 
+	{
+		auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+
+		hr = rtvDescriptorHeap.Alloc(_bufferCount, _rtvBaseOffset);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
+			return false;
+		}
+
+		// sRGB 下额外需要无伽马校正的 RTV
+		if (!_isScRGB) {
+			hr = rtvDescriptorHeap.Alloc(_bufferCount, _rawRtvBaseOffset);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
+				return hr;
+			}
+		}
+	}
+	
 	hr = _CreateDisplayDependentResources();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("_CreateDisplayDependentResources 失败", hr);
@@ -125,11 +150,10 @@ void SwapChainPresenter::BeginFrame(
 	const uint32_t curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 	*backBuffer = _frameBuffers[curBufferIndex].get();
 
-	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), curBufferIndex, _rtvDescriptorSize);
+	auto& rtvDescriptorHeap =_graphicContext->GetDescriptorHeap(true);
+	rtvHandle = rtvDescriptorHeap.GetCpuHandle(_rtvBaseOffset + curBufferIndex);
 	if (!_isScRGB) {
-		rawRtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-			rtvHandle, _bufferCount, _rtvDescriptorSize);
+		rawRtvHandle = rtvDescriptorHeap.GetCpuHandle(_rawRtvBaseOffset + curBufferIndex);
 	}
 }
 
@@ -347,13 +371,23 @@ HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexc
 		return S_OK;
 	}
 
-	HRESULT hr = _CreateRtvHeap();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateRtvHeap 失败", hr);
-		return hr;
+	auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+	if (_isScRGB) {
+		if (_rawRtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+			rtvDescriptorHeap.Free(_rawRtvBaseOffset, _bufferCount);
+			_rawRtvBaseOffset = std::numeric_limits<uint32_t>::max();
+		}
+	} else {
+		if (_rawRtvBaseOffset == std::numeric_limits<uint32_t>::max()) {
+			HRESULT hr = rtvDescriptorHeap.Alloc(_bufferCount, _rawRtvBaseOffset);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
+				return hr;
+			}
+		}
 	}
 
-	hr = _RecreateBuffers();
+	HRESULT hr = _RecreateBuffers();
 	if (FAILED(hr)) {
 		Logger::Get().ComError("_RecreateBuffers 失败", hr);
 		return hr;
@@ -366,22 +400,6 @@ HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexc
 	}
 
 	return hr;
-}
-
-HRESULT SwapChainPresenter::_CreateRtvHeap() noexcept {
-	ID3D12Device5* device = _graphicContext->GetDevice();
-
-	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {
-		.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-		.NumDescriptors = _isScRGB ? _bufferCount : _bufferCount * 2
-	};
-	HRESULT hr = device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&_rtvHeap));
-	if (FAILED(hr)) {
-		Logger::Get().ComError("CreateDescriptorHeap 失败", hr);
-		return hr;
-	}
-
-	return S_OK;
 }
 
 HRESULT SwapChainPresenter::_RecreateBuffers() noexcept {
@@ -412,7 +430,15 @@ HRESULT SwapChainPresenter::_RecreateBuffers() noexcept {
 
 HRESULT SwapChainPresenter::_CreateDisplayDependentResources() noexcept {
 	ID3D12Device5* device = _graphicContext->GetDevice();
-	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+	auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+
+	uint32_t descriptorSize = rtvDescriptorHeap.GetDescriptorSize();
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvDescriptorHeap.GetCpuHandle(_rtvBaseOffset));
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rawRtvHandle{};
+	if (!_isScRGB) {
+		rawRtvHandle = rtvDescriptorHeap.GetCpuHandle(_rawRtvBaseOffset);
+	}
+	
 	for (uint32_t i = 0; i < _bufferCount; ++i) {
 		HRESULT hr = _dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&_frameBuffers[i]));
 		if (FAILED(hr)) {
@@ -425,15 +451,13 @@ HRESULT SwapChainPresenter::_CreateDisplayDependentResources() noexcept {
 			.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
 		};
 		device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc, rtvHandle);
-		
-		// 处于 sRGB 空间时创建两个 RTV
+		rtvHandle.Offset(descriptorSize);
+
 		if (!_isScRGB) {
 			rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-			device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc,
-				CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvHandle, _bufferCount, _rtvDescriptorSize));
+			device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc, rawRtvHandle);
+			rawRtvHandle.Offset(descriptorSize);
 		}
-
-		rtvHandle.Offset(1, _rtvDescriptorSize);
 	}
 
 	return S_OK;

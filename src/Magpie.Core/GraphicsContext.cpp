@@ -8,15 +8,22 @@
 
 namespace Magpie {
 
+// 如果描述符大小为 32 字节，描述符堆消耗 2MiB 显存
+static uint32_t CSU_HEAP_CAPACITY = 65536;
+// 目前只有渲染到后缓冲和缩放光标时需要 RTV
+static uint32_t RTV_HEAP_CAPACITY = 1024;
+
 bool GraphicsContext::Initialize(
 	const GraphicsCardId& graphicsCardId,
 	uint32_t maxInFlightFrameCount,
 	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
-	DescriptorHeap& descriptorHeap,
+	DescriptorHeap& csuDescriptorHeap,
+	DescriptorHeap& rtvDescriptorHeap,
 	bool disableFrameFenceTracking
 ) noexcept {
-	_descriptorHeap = &descriptorHeap;
+	_csuDescriptorHeap = &csuDescriptorHeap;
+	_rtvDescriptorHeap = &rtvDescriptorHeap;
 
 	HRESULT hr = _CreateDXGIFactory();
 	if (FAILED(hr)) {
@@ -73,12 +80,20 @@ bool GraphicsContext::Initialize(
 		}
 	}
 
-	if (!_InitializeDeviceResources(maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
+	if (!_InitializeDeviceResources(
+		maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");
 		return false;
 	}
 
-	if (!_descriptorHeap->Initialize(_device.get())) {
+	if (!_csuDescriptorHeap->Initialize(
+		_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, CSU_HEAP_CAPACITY)) {
+		Logger::Get().Error("DescriptorHeap::Initialize 失败");
+		return false;
+	}
+
+	if (!_rtvDescriptorHeap->Initialize(
+		_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, RTV_HEAP_CAPACITY)) {
 		Logger::Get().Error("DescriptorHeap::Initialize 失败");
 		return false;
 	}
@@ -87,7 +102,8 @@ bool GraphicsContext::Initialize(
 }
 
 void GraphicsContext::CopyDevice(const GraphicsContext& other) {
-	_descriptorHeap = other._descriptorHeap;
+	_csuDescriptorHeap = other._csuDescriptorHeap;
+	_rtvDescriptorHeap = other._rtvDescriptorHeap;
 	_device = other._device;
 	_rootSignatureVersion = other._rootSignatureVersion;
 }

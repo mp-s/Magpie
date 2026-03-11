@@ -171,9 +171,6 @@
     <ClInclude Include="EffectsDrawer.h">
       <Filter>Render</Filter>
     </ClInclude>
-    <ClInclude Include="CursorDrawer2.h">
-      <Filter>Render</Filter>
-    </ClInclude>
     <ClInclude Include="ShaderEffectDrawer.h">
       <Filter>EffectDrawer</Filter>
     </ClInclude>
@@ -316,9 +313,6 @@
     <ClCompile Include="EffectsDrawer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
-    <ClCompile Include="CursorDrawer2.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
     <ClCompile Include="ShaderEffectDrawer.cpp">
       <Filter>EffectDrawer</Filter>
     </ClCompile>
@@ -334,12 +328,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="shaders\SimpleVS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="shaders\SimplePS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="shaders\MaskedCursorPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
@@ -383,6 +371,10 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\CursorResizerPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\TextureBlitPS.hlsl" />
+    <FxCompile Include="shaders\FullscreenVS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

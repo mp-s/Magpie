@@ -31,6 +31,7 @@ public:
 		uint64_t completedFenceValue,
 		uint64_t nextFenceValue,
 		uint32_t curFrameSrvOffset,
+		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle,
 		ID3D12Resource* backBuffer = nullptr
 	) noexcept;
 
@@ -90,12 +91,15 @@ private:
 		Size size;
 		Point hotspot;
 		winrt::com_ptr<ID3D12Resource> texture;
-		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
-
+		
 		Size originSize;
 		ByteBuffer originTextureData;
 		winrt::com_ptr<ID3D12Resource> originUploadBuffer;
 		winrt::com_ptr<ID3D12Resource> originTexture;
+
+		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
+		uint32_t textureRtvOffset = std::numeric_limits<uint32_t>::max();
+		uint32_t originTextureSrvOffset = std::numeric_limits<uint32_t>::max();
 	};
 
 	_CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
@@ -119,7 +123,10 @@ private:
 
 	bool _ResolveCursorPixels(_CursorInfo& cursorInfo, HBITMAP hColorBmp, HBITMAP hMaskBmp) const noexcept;
 
-	HRESULT _InitializeCursorTexture(_CursorInfo& cursorInfo) noexcept;
+	HRESULT _InitializeCursorTexture(
+		_CursorInfo& cursorInfo,
+		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle
+	) noexcept;
 
 	// 只能在同步 GPU 后调用
 	void _ClearCursorInfos() noexcept;

@@ -10,6 +10,8 @@ public:
 	SwapChainPresenter(const SwapChainPresenter&) = delete;
 	SwapChainPresenter(SwapChainPresenter&&) = delete;
 
+	~SwapChainPresenter() noexcept;
+
 	bool Initialize(
 		GraphicsContext& graphicContext,
 		HWND hwndAttach,
@@ -37,8 +39,6 @@ public:
 	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
-	HRESULT _CreateRtvHeap() noexcept;
-
 	HRESULT _RecreateBuffers() noexcept;
 
 	HRESULT _CreateDisplayDependentResources() noexcept;
@@ -49,13 +49,12 @@ private:
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
 	std::vector<winrt::com_ptr<ID3D12Resource>> _frameBuffers;
 
-	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
-	uint32_t _rtvDescriptorSize = 0;
-
 	Size _size{};
 	uint32_t _bufferCount = 0;
+	uint32_t _rtvBaseOffset = std::numeric_limits<uint32_t>::max();
+	uint32_t _rawRtvBaseOffset = std::numeric_limits<uint32_t>::max();
+	
 	bool _isScRGB = false;
-
 	bool _isTearingSupported = false;
 	bool _isRecreated = true;
 	bool _isResizing = false;

@@ -47,7 +47,8 @@ ScalingError Renderer2::Initialize(
 		options.Is3DGameMode() ? 2 : 6,
 		D3D12_COMMAND_QUEUE_PRIORITY_HIGH,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		_descriptorHeap
+		_csuDescriptorHeap,
+		_rtvDescriptorHeap
 	)) {
 		Logger::Get().Error("初始化 GraphicsContext 失败");
 		return ScalingError::ScalingFailedGeneral;
@@ -543,7 +544,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
 
 	{
-		ID3D12DescriptorHeap* heap = _descriptorHeap.GetHeap();
+		ID3D12DescriptorHeap* heap = _csuDescriptorHeap.GetHeap();
 		commandList->SetDescriptorHeaps(1, &heap);
 	}
 	
@@ -572,7 +573,8 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
 	}
 
-	commandList->SetGraphicsRootDescriptorTable(1, _descriptorHeap.GetGpuHandle(curFrameSrvOffset));
+	commandList->SetGraphicsRootDescriptorTable(
+		1, _csuDescriptorHeap.GetGpuHandle(curFrameSrvOffset));
 
 	{
 		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)rendererSize.width, (float)rendererSize.height);
@@ -591,7 +593,13 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		commandList->OMSetRenderTargets(1, &rawRtvHandle, FALSE, nullptr);
 	}
 
-	hr = _cursorDrawer.Draw(completedFenceValue, fenceValueToSignal, curFrameSrvOffset, nullptr);
+	hr = _cursorDrawer.Draw(
+		completedFenceValue,
+		fenceValueToSignal,
+		curFrameSrvOffset,
+		_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ? rawRtvHandle : rtvHandle,
+		nullptr
+	);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CursorDrawer::Draw 失败", hr);
 		return hr;

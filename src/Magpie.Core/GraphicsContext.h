@@ -16,7 +16,8 @@ public:
 		uint32_t maxInFlightFrameCount,
 		D3D12_COMMAND_QUEUE_PRIORITY priority,
 		D3D12_COMMAND_LIST_TYPE commandListType,
-		DescriptorHeap& descriptorHeap,
+		DescriptorHeap& csuDescriptorHeap,
+		DescriptorHeap& rtvDescriptorHeap,
 		bool disableFrameFenceTracking = false
 	) noexcept;
 
@@ -29,8 +30,8 @@ public:
 		bool disableFrameTracking = false
 	) noexcept;
 
-	DescriptorHeap& GetDescriptorHeap() const noexcept {
-		return *_descriptorHeap;
+	DescriptorHeap& GetDescriptorHeap(bool rtv = false) const noexcept {
+		return rtv ? *_rtvDescriptorHeap : *_csuDescriptorHeap;
 	}
 
 	IDXGIFactory7* GetDXGIFactory() const noexcept {
@@ -106,7 +107,8 @@ private:
 
 	bool _CreateAdapterFromDevice() noexcept;
 
-	DescriptorHeap* _descriptorHeap = nullptr;
+	DescriptorHeap* _csuDescriptorHeap = nullptr;
+	DescriptorHeap* _rtvDescriptorHeap = nullptr;
 
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<IDXGIAdapter4> _dxgiAdapter;

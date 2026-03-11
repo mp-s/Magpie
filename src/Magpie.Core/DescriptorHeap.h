@@ -13,7 +13,11 @@ public:
 
 	~DescriptorHeap() noexcept;
 
-	bool Initialize(ID3D12Device5* device) noexcept;
+	bool Initialize(
+		ID3D12Device5* device,
+		D3D12_DESCRIPTOR_HEAP_TYPE type,
+		uint32_t capacity
+	) noexcept;
 
 	HRESULT Alloc(uint32_t count, uint32_t& offset) noexcept;
 
@@ -27,13 +31,9 @@ public:
 		return _descriptorSize;
 	}
 
-	D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(uint32_t offset) const noexcept {
-		return CD3DX12_CPU_DESCRIPTOR_HANDLE(_cpuHandle, offset, _descriptorSize);
-	}
+	D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(uint32_t offset) const noexcept;
 
-	D3D12_GPU_DESCRIPTOR_HANDLE GetGpuHandle(uint32_t offset) const noexcept {
-		return CD3DX12_GPU_DESCRIPTOR_HANDLE(_gpuHandle, offset, _descriptorSize);
-	}
+	D3D12_GPU_DESCRIPTOR_HANDLE GetGpuHandle(uint32_t offset) const noexcept;
 
 private:
 	winrt::com_ptr<ID3D12DescriptorHeap> _heap;
@@ -48,6 +48,8 @@ private:
 #ifdef _DEBUG
 	// phmap::btree_map 没有 natvis，调试不方便
 	std::map<uint32_t, uint32_t> _freeBlocks;
+	// 用于断言
+	uint32_t _capacity = 0;
 #else
 	phmap::btree_map<uint32_t, uint32_t> _freeBlocks;
 #endif

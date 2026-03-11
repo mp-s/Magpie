@@ -182,6 +182,9 @@
     <FxCompile Include="shaders\CopyFrameVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
+    <FxCompile Include="shaders\FullscreenVS.hlsl">
+      <ShaderType>Vertex</ShaderType>
+    </FxCompile>
     <FxCompile Include="shaders\ImGuiImplPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
