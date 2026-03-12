@@ -34,7 +34,7 @@
     <ProjectPriFileName>resources.pri</ProjectPriFileName>
     <!-- 跳过 CreateWinMD，这一步似乎是多余的，而且 clang-cl 不支持生成 winmd -->
     <GenerateBuildCompilePassWinMD>false</GenerateBuildCompilePassWinMD>
-    <Microsoft_Direct3D_D3D12_D3D12SDKPath>app\</Microsoft_Direct3D_D3D12_D3D12SDKPath>
+    <Microsoft_Direct3D_D3D12_D3D12SDKPath>app\D3D12\</Microsoft_Direct3D_D3D12_D3D12SDKPath>
     <Microsoft_Direct3D_D3D12_SkipDebugLayerCopy Condition="'$(Configuration)' == 'Release'">true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -806,13 +806,13 @@
       </Link>
     </ItemGroup>
   </Target>
-  <!-- 将 d3d10warp.dll 和 d3d10warp.pdb 移动到 app 文件夹-->
+  <!-- 将 d3d10warp.dll 和 d3d10warp.pdb 移动到 app\D3D12 文件夹-->
   <Target Name="MoveWarpDll" BeforeTargets="PrepareForBuild">
     <ItemGroup>
       <_Warp Include="@(Content)" Condition="'%(Filename)' == 'd3d10warp'" />
       <Content Remove="@(_Warp)" />
       <Content Include="@(_Warp)">
-        <Link>app\%(FileName)%(Extension)</Link>
+        <Link>app\D3D12\%(FileName)%(Extension)</Link>
       </Content>
     </ItemGroup>
   </Target>
