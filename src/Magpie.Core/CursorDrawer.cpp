@@ -187,21 +187,46 @@ bool CursorDrawer::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 
 	if (hCursor) {
 		if (_isCursorVisible) {
-			// 检查光标是否在视口内
-			_curCursorInfo = _ResolveCursor(hCursor, cursorPos, false);
-			if (_curCursorInfo) {
-				const RECT cursorRect = {
-					cursorPos.x - (LONG)_curCursorInfo->hotspot.x,
-					cursorPos.y - (LONG)_curCursorInfo->hotspot.y,
-					cursorRect.left + (LONG)_curCursorInfo->size.width,
-					cursorRect.top + (LONG)_curCursorInfo->size.height
-				};
-				if (!Win32Helper::IsRectOverlap(cursorRect, _destRect)) {
+			static const HCURSOR hArrowCursor = STANDARD_CURSORS[0].handle;
+
+			// 无法解析的光标换为指针光标
+			if (!_unresolvableCursors.empty() && _unresolvableCursors.contains(hCursor)) {
+				if (hCursor != hArrowCursor && !_unresolvableCursors.contains(hArrowCursor)) {
+					hCursor = hArrowCursor;
+				} else {
 					hCursor = NULL;
 				}
-			} else {
-				Logger::Get().Error("_ResolveCursor 失败");
-				hCursor = NULL;
+			}
+
+			if (hCursor) {
+				while (true) {
+					_curCursorInfo = _ResolveCursor(hCursor, cursorPos, false);
+					if (_curCursorInfo) {
+						// 检查光标是否在视口内
+						const RECT cursorRect = {
+							cursorPos.x - (LONG)_curCursorInfo->hotspot.x,
+							cursorPos.y - (LONG)_curCursorInfo->hotspot.y,
+							cursorRect.left + (LONG)_curCursorInfo->size.width,
+							cursorRect.top + (LONG)_curCursorInfo->size.height
+						};
+						if (!Win32Helper::IsRectOverlap(cursorRect, _destRect)) {
+							hCursor = NULL;
+						}
+
+						break;
+					} else {
+						_unresolvableCursors.insert(hCursor);
+
+						if (hCursor == hArrowCursor) {
+							// 无法解析指针光标
+							hCursor = NULL;
+							break;
+						} else {
+							// 换为指针光标
+							hCursor = hArrowCursor;
+						}
+					}
+				}
 			}
 		} else {
 			// 截屏时暂时不渲染光标
@@ -235,6 +260,7 @@ HRESULT CursorDrawer::Draw(
 	if (!_curCursorInfo->texture) {
 		HRESULT hr = _InitializeCursorTexture(graphicsContext , *_curCursorInfo);
 		if (FAILED(hr)) {
+			Logger::Get().ComError("_InitializeCursorTexture 失败", hr);
 			return hr;
 		}
 	}

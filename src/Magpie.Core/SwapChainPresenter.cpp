@@ -12,29 +12,31 @@ namespace Magpie {
 
 SwapChainPresenter::~SwapChainPresenter() noexcept {
 #ifdef _DEBUG
-	auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+	if (_d3d12Context) {
+		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 
-	if (_rtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
-		rtvDescriptorHeap.Free(_rtvBaseOffset, _bufferCount);
-	}
+		if (_rtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+			rtvDescriptorHeap.Free(_rtvBaseOffset, _bufferCount);
+		}
 
-	if (_rawRtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
-		rtvDescriptorHeap.Free(_rawRtvBaseOffset, _bufferCount);
+		if (_rawRtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
+			rtvDescriptorHeap.Free(_rawRtvBaseOffset, _bufferCount);
+		}
 	}
 #endif
 }
 
 bool SwapChainPresenter::Initialize(
-	D3D12Context& graphicContext,
+	D3D12Context& d3d12Context,
 	HWND hwndAttach,
 	Size size,
 	const ColorInfo& colorInfo
 ) noexcept {
-	_graphicContext = &graphicContext;
+	_d3d12Context = &d3d12Context;
 	_size = size;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
-	IDXGIFactory7* dxgiFactory = graphicContext.GetDXGIFactory();
+	IDXGIFactory7* dxgiFactory = d3d12Context.GetDXGIFactory();
 
 	// 检查撕裂支持
 	{
@@ -49,7 +51,7 @@ bool SwapChainPresenter::Initialize(
 		_isTearingSupported = supportTearing;
 	}
 
-	_bufferCount = graphicContext.GetMaxInFlightFrameCount() + 1;
+	_bufferCount = d3d12Context.GetMaxInFlightFrameCount() + 1;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
 		.Width = size.width,
@@ -78,7 +80,7 @@ bool SwapChainPresenter::Initialize(
 
 	winrt::com_ptr<IDXGISwapChain1> dxgiSwapChain;
 	HRESULT hr = dxgiFactory->CreateSwapChainForHwnd(
-		graphicContext.GetCommandQueue(),
+		d3d12Context.GetCommandQueue(),
 		hwndAttach,
 		&swapChainDesc,
 		nullptr,
@@ -113,7 +115,7 @@ bool SwapChainPresenter::Initialize(
 	_frameBuffers.resize(_bufferCount);
 
 	{
-		auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+		auto& rtvDescriptorHeap = d3d12Context.GetDescriptorHeap(true);
 
 		hr = rtvDescriptorHeap.Alloc(_bufferCount, _rtvBaseOffset);
 		if (FAILED(hr)) {
@@ -275,7 +277,7 @@ HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 		// 实用价值。
 
 		// 等待渲染完成
-		HRESULT hr = _graphicContext->WaitForGpu();
+		HRESULT hr = _d3d12Context->WaitForGpu();
 		if (FAILED(hr)) {
 			Logger::Get().ComError("D3D12Context::WaitForGPU", hr);
 			return hr;
@@ -322,7 +324,7 @@ HRESULT SwapChainPresenter::OnResized(Size size) noexcept {
 
 	_size = size;
 	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
-	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;
+	_bufferCount = _isResizing ? 2 : _d3d12Context->GetMaxInFlightFrameCount() + 1;
 
 	HRESULT hr = _RecreateBuffers();
 	if (FAILED(hr)) {
@@ -342,11 +344,11 @@ HRESULT SwapChainPresenter::OnResizeEnded() noexcept {
 
 	// 恢复后备缓冲数量
 	const uint32_t oldBufferCount = _bufferCount;
-	_bufferCount = _graphicContext->GetMaxInFlightFrameCount() + 1;
+	_bufferCount = _d3d12Context->GetMaxInFlightFrameCount() + 1;
 
 	if (_bufferCount != oldBufferCount) {
 		// 调用此方法前没等待 GPU
-		HRESULT hr = _graphicContext->WaitForGpu();
+		HRESULT hr = _d3d12Context->WaitForGpu();
 		if (FAILED(hr)) {
 			Logger::Get().ComError("D3D12Context::WaitForGPU", hr);
 			return hr;
@@ -370,7 +372,7 @@ HRESULT SwapChainPresenter::OnColorInfoChanged(const ColorInfo& colorInfo) noexc
 		return S_OK;
 	}
 
-	auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+	auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 	if (_isScRGB) {
 		if (_rawRtvBaseOffset != std::numeric_limits<uint32_t>::max()) {
 			rtvDescriptorHeap.Free(_rawRtvBaseOffset, _bufferCount);
@@ -428,8 +430,8 @@ HRESULT SwapChainPresenter::_RecreateBuffers() noexcept {
 }
 
 HRESULT SwapChainPresenter::_CreateDisplayDependentResources() noexcept {
-	ID3D12Device5* device = _graphicContext->GetDevice();
-	auto& rtvDescriptorHeap = _graphicContext->GetDescriptorHeap(true);
+	ID3D12Device5* device = _d3d12Context->GetDevice();
+	auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 
 	uint32_t descriptorSize = rtvDescriptorHeap.GetDescriptorSize();
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvDescriptorHeap.GetCpuHandle(_rtvBaseOffset));

@@ -6,7 +6,8 @@ namespace Magpie {
 
 DescriptorHeap::~DescriptorHeap() noexcept {
 	// DEBUG 配置下退出前确保所有槽位都已释放
-	assert(_freeBlocks.size() == 1 && *_freeBlocks.begin() == std::make_pair(_capacity, _capacity));
+	assert(_capacity == 0 || (_freeBlocks.size() == 1 &&
+		*_freeBlocks.begin() == std::make_pair(_capacity, _capacity)));
 }
 
 bool DescriptorHeap::Initialize(

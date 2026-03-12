@@ -21,7 +21,9 @@ static uint32_t RTV_HEAP_CAPACITY = 1024;
 Renderer2::Renderer2() noexcept {}
 
 Renderer2::~Renderer2() noexcept {
-	_d3d12Context.WaitForGpu();
+	if (_d3d12Context.GetCommandQueue()) {
+		_d3d12Context.WaitForGpu();
+	}
 }
 
 static void SetGpuPriority() noexcept {

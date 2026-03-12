@@ -43,7 +43,7 @@ private:
 
 	HRESULT _CreateDisplayDependentResources() noexcept;
 
-	D3D12Context* _graphicContext = nullptr;
+	D3D12Context* _d3d12Context = nullptr;
 
 	winrt::com_ptr<IDXGISwapChain4> _dxgiSwapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;

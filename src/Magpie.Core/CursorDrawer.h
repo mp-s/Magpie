@@ -158,6 +158,9 @@ private:
 	// DPI 为 0 表示此光标不随 DPI 缩放
 	phmap::flat_hash_map<std::pair<HCURSOR, uint32_t>, _CursorInfo> _cursorInfos;
 
+	// 保存解析失败的光标以避免重复尝试
+	phmap::flat_hash_set<HCURSOR> _unresolvableCursors;
+
 	// 这两个成员用于检查自动隐藏光标
 	HCURSOR _lastRawCursorHandle = NULL;
 	std::chrono::steady_clock::time_point _lastCursorActiveTime;
