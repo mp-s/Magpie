@@ -66,7 +66,8 @@ ConanFile = conanFiles.ToArray();
     <PropertyGroup>
       <BuildOptions Condition="$(UseClangCL)">ClangCL</BuildOptions>
       <BuildOptions Condition="$(UseClangCL) And $(UseNativeMicroArch)">$(BuildOptions);UseNativeMicroArch</BuildOptions>
-      <BuildOptions Condition="!$(UseClangCL)">MSVC</BuildOptions>
+      <BuildOptions Condition="!$(UseClangCL)">$(BuildOptions);MSVC</BuildOptions>
+      <BuildOptions Condition="!$(UseClangCL)">$(BuildOptions);$(MSBuildVersion)</BuildOptions>
       <LastBuildOptionsFile>$(IntDir)\\last_build_options.txt</LastBuildOptionsFile>
     </PropertyGroup>
     <ReadLinesFromFile File="$(LastBuildOptionsFile)">
