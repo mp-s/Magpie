@@ -5,7 +5,7 @@
 
 namespace Magpie {
 
-class GraphicsContext;
+class D3D12Context;
 class DuplicateFrameChecker;
 
 enum class FrameSourceState {
@@ -25,7 +25,7 @@ public:
 	~GraphicsCaptureFrameSource() noexcept;
 
 	bool Initialize(
-		GraphicsContext& graphicsContext,
+		D3D12Context& d3d12Context,
 		const RECT& srcRect,
 		HMONITOR hMonSrc,
 		const ColorInfo& colorInfo
@@ -69,7 +69,7 @@ private:
 
 	void _StopCapture() noexcept;
 
-	GraphicsContext* _graphicsContext = nullptr;
+	D3D12Context* _d3d12Context = nullptr;
 
 	std::atomic<DWORD> _producerThreadId;
 

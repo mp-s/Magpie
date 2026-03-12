@@ -4,6 +4,8 @@
 
 namespace Magpie {
 
+class ComputeContext;
+
 class EffectsDrawer {
 public:
 	EffectsDrawer() noexcept = default;
@@ -11,13 +13,14 @@ public:
 	EffectsDrawer(EffectsDrawer&&) = delete;
 
 	bool Initialize(
-		GraphicsContext& graphicsContext,
+		D3D12Context& d3d12Context,
 		const ColorInfo& colorInfo,
 		Size inputSize,
 		Size rendererSize
 	) noexcept;
 
 	HRESULT Draw(
+		ComputeContext& computeContext,
 		uint32_t frameIndex,
 		ID3D12Resource* inputResource,
 		ID3D12Resource* outputResource,
@@ -34,7 +37,7 @@ public:
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
-	GraphicsContext* _graphicsContext = nullptr;
+	D3D12Context* _d3d12Context = nullptr;
 
 	Size _inputSize{};
 	Size _outputSize{};

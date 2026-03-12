@@ -2,13 +2,15 @@
 
 namespace Magpie {
 
-class GraphicsContext;
+class D3D12Context;
+class ComputeContext;
 
 class CatmullRomDrawer {
 public:
-	void Initialize(GraphicsContext& graphicsContext) noexcept;
+	void Initialize(D3D12Context& d3d12Context) noexcept;
 
 	HRESULT Draw(
+		ComputeContext& computeContext,
 		Size inputSize,
 		Size outputSize,
 		uint32_t inputSrvOffset,
@@ -17,7 +19,7 @@ public:
 	) noexcept;
 
 private:
-	GraphicsContext* _graphicsContext = nullptr;
+	D3D12Context* _d3d12Context = nullptr;
 
 	HRESULT _InitializeCatmullRomRootSignature() noexcept;
 	HRESULT _InitializeCopyRootSignature() noexcept;

@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "DebugInfo.h"
 #include "Logger.h"
 #include "DirectXHelper.h"
@@ -8,12 +8,7 @@
 
 namespace Magpie {
 
-// 如果描述符大小为 32 字节，描述符堆消耗 2MiB 显存
-static uint32_t CSU_HEAP_CAPACITY = 65536;
-// 目前只有渲染到后缓冲和缩放光标时需要 RTV
-static uint32_t RTV_HEAP_CAPACITY = 1024;
-
-bool GraphicsContext::Initialize(
+bool D3D12Context::Initialize(
 	const GraphicsCardId& graphicsCardId,
 	uint32_t maxInFlightFrameCount,
 	D3D12_COMMAND_QUEUE_PRIORITY priority,
@@ -86,29 +81,17 @@ bool GraphicsContext::Initialize(
 		return false;
 	}
 
-	if (!_csuDescriptorHeap->Initialize(
-		_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, CSU_HEAP_CAPACITY)) {
-		Logger::Get().Error("DescriptorHeap::Initialize 失败");
-		return false;
-	}
-
-	if (!_rtvDescriptorHeap->Initialize(
-		_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, RTV_HEAP_CAPACITY)) {
-		Logger::Get().Error("DescriptorHeap::Initialize 失败");
-		return false;
-	}
-
 	return true;
 }
 
-void GraphicsContext::CopyDevice(const GraphicsContext& other) {
+void D3D12Context::CopyDevice(const D3D12Context& other) {
 	_csuDescriptorHeap = other._csuDescriptorHeap;
 	_rtvDescriptorHeap = other._rtvDescriptorHeap;
 	_device = other._device;
 	_rootSignatureVersion = other._rootSignatureVersion;
 }
 
-bool GraphicsContext::InitializeAfterCopyDevice(
+bool D3D12Context::InitializeAfterCopyDevice(
 	uint32_t maxInFlightFrameCount,
 	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
@@ -133,7 +116,7 @@ bool GraphicsContext::InitializeAfterCopyDevice(
 	return true;
 }
 
-IDXGIFactory7* GraphicsContext::GetDXGIFactoryForEnumingAdapters() noexcept {
+IDXGIFactory7* D3D12Context::GetDXGIFactoryForEnumingAdapters() noexcept {
 	if (!_dxgiFactory->IsCurrent()) {
 		HRESULT hr = _CreateDXGIFactory();
 		if (FAILED(hr)) {
@@ -145,12 +128,12 @@ IDXGIFactory7* GraphicsContext::GetDXGIFactoryForEnumingAdapters() noexcept {
 	return _dxgiFactory.get();
 }
 
-HRESULT GraphicsContext::Signal(uint64_t& fenceValue) noexcept {
+HRESULT D3D12Context::Signal(uint64_t& fenceValue) noexcept {
 	fenceValue = ++_curFenceValue;
 	return _commandQueue->Signal(_fence.get(), _curFenceValue);
 }
 
-HRESULT GraphicsContext::WaitForFenceValue(uint64_t fenceValue) noexcept {
+HRESULT D3D12Context::WaitForFenceValue(uint64_t fenceValue) noexcept {
 	if (_fence->GetCompletedValue() >= fenceValue) {
 		return S_OK;
 	} else {
@@ -158,7 +141,7 @@ HRESULT GraphicsContext::WaitForFenceValue(uint64_t fenceValue) noexcept {
 	}
 }
 
-HRESULT GraphicsContext::WaitForGpu() noexcept {
+HRESULT D3D12Context::WaitForGpu() noexcept {
 	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
@@ -168,7 +151,7 @@ HRESULT GraphicsContext::WaitForGpu() noexcept {
 	return WaitForFenceValue(_curFenceValue);
 }
 
-HRESULT GraphicsContext::WaitForCommandQueue(ID3D12CommandQueue* commandQueue) noexcept {
+HRESULT D3D12Context::WaitForCommandQueue(ID3D12CommandQueue* commandQueue) noexcept {
 	HRESULT hr = commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12CommandQueue::Signal 失败", hr);
@@ -184,7 +167,7 @@ HRESULT GraphicsContext::WaitForCommandQueue(ID3D12CommandQueue* commandQueue) n
 	return S_OK;
 }
 
-HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState) noexcept {
+HRESULT D3D12Context::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState) noexcept {
 	if (!_frameFenceValues.empty()) {
 		HRESULT hr = WaitForFenceValue(_frameFenceValues[_curFrameIndex]);
 		if (FAILED(hr)) {
@@ -209,7 +192,7 @@ HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState
 	return S_OK;
 }
 
-HRESULT GraphicsContext::EndFrame() noexcept {
+HRESULT D3D12Context::EndFrame() noexcept {
 	if (!_frameFenceValues.empty()) {
 		HRESULT hr = Signal(_frameFenceValues[_curFrameIndex]);
 		if (FAILED(hr)) {
@@ -222,7 +205,7 @@ HRESULT GraphicsContext::EndFrame() noexcept {
 	return S_OK;
 }
 
-HRESULT GraphicsContext::_CreateDXGIFactory() noexcept {
+HRESULT D3D12Context::_CreateDXGIFactory() noexcept {
 	UINT flags = 0;
 #ifdef _DEBUG
 	flags |= DXGI_CREATE_FACTORY_DEBUG;
@@ -234,7 +217,7 @@ HRESULT GraphicsContext::_CreateDXGIFactory() noexcept {
 	return hr;
 }
 
-bool GraphicsContext::_InitializeDeviceResources(
+bool D3D12Context::_InitializeDeviceResources(
 	uint32_t maxInFlightFrameCount,
 	D3D12_COMMAND_QUEUE_PRIORITY priority,
 	D3D12_COMMAND_LIST_TYPE commandListType,
@@ -283,7 +266,7 @@ bool GraphicsContext::_InitializeDeviceResources(
 	return true;
 }
 
-bool GraphicsContext::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId) noexcept {
+bool D3D12Context::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId) noexcept {
 	winrt::com_ptr<IDXGIAdapter1> adapter;
 
 #ifdef MP_DEBUG_INFO
@@ -387,7 +370,7 @@ bool GraphicsContext::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCard
 	return true;
 }
 
-bool GraphicsContext::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept {
+bool D3D12Context::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept {
 	HRESULT hr = D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&_device));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("D3D12CreateDevice 失败", hr);
@@ -447,7 +430,7 @@ bool GraphicsContext::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& a
 	return true;
 }
 
-bool GraphicsContext::_CreateAdapterFromDevice() noexcept {
+bool D3D12Context::_CreateAdapterFromDevice() noexcept {
 	const LUID adapterLuid = _device->GetAdapterLuid();
 
 	winrt::com_ptr<IDXGIAdapter1> adapter;

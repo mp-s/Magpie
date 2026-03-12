@@ -143,7 +143,7 @@
     <ClInclude Include="GraphicsCaptureFrameSource.h">
       <Filter>Capture</Filter>
     </ClInclude>
-    <ClInclude Include="GraphicsContext.h">
+    <ClInclude Include="D3D12Context.h">
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="FrameProducer.h">
@@ -194,6 +194,9 @@
     </ClInclude>
     <ClInclude Include="ColorHelper.h">
       <Filter>Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="CommandContext.h">
+      <Filter>Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -292,7 +295,7 @@
     <ClCompile Include="GraphicsCaptureFrameSource.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
-    <ClCompile Include="GraphicsContext.cpp">
+    <ClCompile Include="D3D12Context.cpp">
       <Filter>Render</Filter>
     </ClCompile>
     <ClCompile Include="FrameProducer.cpp">
@@ -324,6 +327,9 @@
       <Filter>Helpers</Filter>
     </ClCompile>
     <ClCompile Include="DescriptorHeap.cpp">
+      <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="CommandContext.cpp">
       <Filter>Render</Filter>
     </ClCompile>
   </ItemGroup>

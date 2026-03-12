@@ -13,10 +13,15 @@
 
 namespace Magpie {
 
+// 如果描述符大小为 32 字节，描述符堆消耗 2MiB 显存
+static uint32_t CSU_HEAP_CAPACITY = 65536;
+// 目前只有渲染到后缓冲和缩放光标时需要 RTV
+static uint32_t RTV_HEAP_CAPACITY = 1024;
+
 Renderer2::Renderer2() noexcept {}
 
 Renderer2::~Renderer2() noexcept {
-	_graphicsContext.WaitForGpu();
+	_d3d12Context.WaitForGpu();
 }
 
 static void SetGpuPriority() noexcept {
@@ -42,7 +47,7 @@ ScalingError Renderer2::Initialize(
 	SetGpuPriority();
 
 	const ScalingOptions& options = ScalingWindow::Get().Options();
-	if (!_graphicsContext.Initialize(
+	if (!_d3d12Context.Initialize(
 		options.graphicsCardId,
 		options.Is3DGameMode() ? 2 : 6,
 		D3D12_COMMAND_QUEUE_PRIORITY_HIGH,
@@ -50,11 +55,11 @@ ScalingError Renderer2::Initialize(
 		_csuDescriptorHeap,
 		_rtvDescriptorHeap
 	)) {
-		Logger::Get().Error("初始化 GraphicsContext 失败");
+		Logger::Get().Error("初始化 D3D12Context 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	ID3D12Device5* device = _graphicsContext.GetDevice();
+	ID3D12Device5* device = _d3d12Context.GetDevice();
 
 #ifdef MP_DEBUG_INFO
 	{
@@ -86,6 +91,22 @@ ScalingError Renderer2::Initialize(
 	}
 #endif
 
+	if (!_csuDescriptorHeap.Initialize(
+		device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, CSU_HEAP_CAPACITY)
+	) {
+		Logger::Get().Error("DescriptorHeap::Initialize 失败");
+		return ScalingError::ScalingFailedGeneral;
+	}
+
+	if (!_rtvDescriptorHeap.Initialize(
+		device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, RTV_HEAP_CAPACITY)
+	) {
+		Logger::Get().Error("DescriptorHeap::Initialize 失败");
+		return ScalingError::ScalingFailedGeneral;
+	}
+
+	_graphicsContext.Initialize(_d3d12Context);
+
 	// 失败则回落到使用传统方法获取颜色显示能力
 	_TryInitDisplayInfo();
 
@@ -102,10 +123,10 @@ ScalingError Renderer2::Initialize(
 	Size outputSize;
 	SimpleTask<bool> task;
 	_frameProducer.InitializeAsync(
-		_graphicsContext, _colorInfo, hMonitor, srcRect, rendererSize, outputSize, task);
+		_d3d12Context, _colorInfo, hMonitor, srcRect, rendererSize, outputSize, task);
 
 	_presenter = std::make_unique<SwapChainPresenter>();
-	if (!_presenter->Initialize(_graphicsContext, hwndAttach, rendererSize, _colorInfo)) {
+	if (!_presenter->Initialize(_d3d12Context, hwndAttach, rendererSize, _colorInfo)) {
 		Logger::Get().Error("SwapChainPresenter::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -145,7 +166,7 @@ ScalingError Renderer2::Initialize(
 
 		winrt::com_ptr<ID3DBlob> signature;
 		HRESULT hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, _graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
+			&rootSignatureDesc, _d3d12Context.GetRootSignatureVersion(), signature.put(), nullptr);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
 			return ScalingError::ScalingFailedGeneral;
@@ -196,7 +217,7 @@ ScalingError Renderer2::Initialize(
 	destRect.right = rendererRect.left + (LONG)_outputRect.right;
 	destRect.bottom = rendererRect.top + (LONG)_outputRect.bottom;
 
-	if (!_cursorDrawer.Initialize(_graphicsContext, srcRect, rendererRect, destRect, _colorInfo)) {
+	if (!_cursorDrawer.Initialize(_d3d12Context, srcRect, rendererRect, destRect, _colorInfo)) {
 		Logger::Get().Error("CursorDrawer::Initialize 失败");
 		return ScalingError::ScalingFailedGeneral;
 	}
@@ -273,7 +294,7 @@ void Renderer2::OnResized(const RECT& rendererRect, RECT& destRect) noexcept {
 	}
 
 	// 确保消费者不再使用环形缓冲区
-	if (!_CheckResult(_graphicsContext.WaitForGpu(), "GraphicsContext::WaitForGpu 失败")) {
+	if (!_CheckResult(_d3d12Context.WaitForGpu(), "D3D12Context::WaitForGpu 失败")) {
 		return;
 	}
 
@@ -435,7 +456,7 @@ bool Renderer2::_UpdateColorInfo() noexcept {
 		return true;
 	}
 
-	IDXGIFactory7* dxgiFactory = _graphicsContext.GetDXGIFactoryForEnumingAdapters();
+	IDXGIFactory7* dxgiFactory = _d3d12Context.GetDXGIFactoryForEnumingAdapters();
 	if (!dxgiFactory) {
 		return false;
 	}
@@ -488,9 +509,9 @@ HRESULT Renderer2::_UpdateColorSpace() noexcept {
 	}
 
 	// 确保消费者不再使用环形缓冲区
-	HRESULT hr = _graphicsContext.WaitForGpu();
+	HRESULT hr = _d3d12Context.WaitForGpu();
 	if (FAILED(hr)) {
-		Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+		Logger::Get().ComError("D3D12Context::WaitForGpu 失败", hr);
 		return hr;
 	}
 
@@ -528,35 +549,27 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		return S_OK;
 	}
 
-	// SwapChain::BeginFrame 和 GraphicsContext::BeginFrame 无顺序要求，不过
+	// SwapChain::BeginFrame 和 D3D12Context::BeginFrame 无顺序要求，不过
 	// 前者通常等待时间更久，将它放在前面可以减少等待次数。
 	ID3D12Resource* backBuffer;
-	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle, rawRtvHandle;
-	_presenter->BeginFrame(&backBuffer, rtvHandle, rawRtvHandle);
+	uint32_t rtvOffset, rawRtvOffset;
+	_presenter->BeginFrame(&backBuffer, rtvOffset, rawRtvOffset);
 
 	uint32_t frameIndex;
-	HRESULT hr = _graphicsContext.BeginFrame(frameIndex, _pipelineState.get());
+	HRESULT hr = _d3d12Context.BeginFrame(frameIndex, _pipelineState.get());
 	if (FAILED(hr)) {
-		Logger::Get().ComError("GraphicsContext::BeginFrame 失败", hr);
+		Logger::Get().ComError("D3D12Context::BeginFrame 失败", hr);
 		return hr;
 	}
 
-	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
+	_graphicsContext.SetDescriptorHeap(_csuDescriptorHeap.GetHeap());
 
-	{
-		ID3D12DescriptorHeap* heap = _csuDescriptorHeap.GetHeap();
-		commandList->SetDescriptorHeaps(1, &heap);
-	}
-	
-	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	_graphicsContext.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, 0);
-		commandList->ResourceBarrier(1, &barrier);
-	}
+	_graphicsContext.InsertTransitionBarrier(
+		backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-	commandList->SetGraphicsRootSignature(_rootSignature.get());
+	_graphicsContext.SetRootSignature(_rootSignature.get());
 
 	const Size rendererSize = _presenter->GetSize();
 
@@ -570,55 +583,40 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 			_outputRect.left / -outputWidth,
 			_outputRect.top / -outputHeight
 		};
-		commandList->SetGraphicsRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+		_graphicsContext.SetRoot32BitConstants(0, (uint32_t)std::size(constants), constants);
 	}
 
-	commandList->SetGraphicsRootDescriptorTable(
-		1, _csuDescriptorHeap.GetGpuHandle(curFrameSrvOffset));
+	_graphicsContext.SetRootDescriptorTable(1, curFrameSrvOffset);
 
-	{
-		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)rendererSize.width, (float)rendererSize.height);
-		commandList->RSSetViewports(1, &viewport);
-	}
-	{
-		CD3DX12_RECT scissorRect(0, 0, (LONG)rendererSize.width, (LONG)rendererSize.height);
-		commandList->RSSetScissorRects(1, &scissorRect);
-	}
+	_graphicsContext.RSSetViewportAndScissorRect(CD3DX12_RECT(
+		0, 0, (LONG)rendererSize.width, (LONG)rendererSize.height));
+	
+	_graphicsContext.OMSetRenderTarget(rtvOffset);
 
-	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-	commandList->DrawInstanced(3, 1, 0, 0);
+	_graphicsContext.Draw(3);
 
 	// 为了和 OS 保持一致，SDR 下在 sRGB 空间中混合
 	if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
-		commandList->OMSetRenderTargets(1, &rawRtvHandle, FALSE, nullptr);
+		_graphicsContext.OMSetRenderTarget(rawRtvOffset);
 	}
 
-	hr = _cursorDrawer.Draw(
-		completedFenceValue,
-		fenceValueToSignal,
-		curFrameSrvOffset,
-		_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ? rawRtvHandle : rtvHandle,
-		nullptr
-	);
+	hr = _cursorDrawer.Draw(_graphicsContext, completedFenceValue, fenceValueToSignal,
+		curFrameSrvOffset, nullptr);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CursorDrawer::Draw 失败", hr);
 		return hr;
 	}
 
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT, 0);
-		commandList->ResourceBarrier(1, &barrier);
-	}
+	_graphicsContext.InsertTransitionBarrier(
+		backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
-	hr = commandList->Close();
+	ID3D12CommandQueue* commandQueue = _d3d12Context.GetCommandQueue();
+
+	hr = _graphicsContext.Execute(commandQueue);
 	if (FAILED(hr)) {
-		Logger::Get().ComError("ID3D12GraphicsCommandList::Close 失败", hr);
+		Logger::Get().ComError("CommandContext::Execute 失败", hr);
 		return hr;
 	}
-
-	ID3D12CommandQueue* commandQueue = _graphicsContext.GetCommandQueue();
-	commandQueue->ExecuteCommandLists(1, CommandListCast(&commandList));
 
 	hr =_frameProducer.ConsumerEndFrame(commandQueue, fenceValueToSignal);
 	if (FAILED(hr)) {
@@ -632,10 +630,10 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		return hr;
 	}
 
-	// GraphicsContext::EndFrame 必须在 SwapChain::EndFrame 之后
-	hr = _graphicsContext.EndFrame();
+	// D3D12Context::EndFrame 必须在 SwapChain::EndFrame 之后
+	hr = _d3d12Context.EndFrame();
 	if (FAILED(hr)) {
-		Logger::Get().ComError("GraphicsContext::EndFrame 失败", hr);
+		Logger::Get().ComError("D3D12Context::EndFrame 失败", hr);
 		return hr;
 	}
 

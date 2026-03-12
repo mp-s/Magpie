@@ -1,5 +1,6 @@
 #pragma once
-#include "GraphicsContext.h"
+#include "CommandContext.h"
+#include "D3D12Context.h"
 #include "EffectsDrawer.h"
 #include "FrameRingBuffer.h"
 #include "StepTimer.h"
@@ -18,7 +19,7 @@ public:
 	~FrameProducer() noexcept;
 
 	void InitializeAsync(
-		const GraphicsContext& graphicsContext,
+		const D3D12Context& d3d12Context,
 		const ColorInfo& colorInfo,
 		HMONITOR hMonSrc,
 		const RECT& srcRect,
@@ -84,7 +85,8 @@ private:
 
 	std::thread _monitorThread;
 
-	GraphicsContext _graphicsContext;
+	D3D12Context _d3d12Context;
+	ComputeContext _computeContext;
 	FrameRingBuffer _frameRingBuffer;
 	StepTimer _stepTimer;
 	std::unique_ptr<GraphicsCaptureFrameSource> _frameSource;

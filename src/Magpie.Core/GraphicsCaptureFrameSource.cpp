@@ -4,7 +4,7 @@
 #include "DirectXHelper.h"
 #include "DirtyRectsOptimizer.h"
 #include "DuplicateFrameChecker.h"
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "Win32Helper.h"
@@ -142,14 +142,14 @@ static uint32_t CalcCaptureFrameCount() noexcept {
 }
 
 bool GraphicsCaptureFrameSource::Initialize(
-	GraphicsContext& graphicsContext,
+	D3D12Context& d3d12Context,
 	const RECT& srcRect,
 	HMONITOR hMonSrc,
 	const ColorInfo& colorInfo
 ) noexcept {
 	assert(hMonSrc);
 
-	_graphicsContext = &graphicsContext;
+	_d3d12Context = &d3d12Context;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	if (!winrt::GraphicsCaptureSession::IsSupported()) {
@@ -200,7 +200,7 @@ bool GraphicsCaptureFrameSource::Initialize(
 
 	_producerThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
 
-	ID3D12Device5* device = graphicsContext.GetDevice();
+	ID3D12Device5* device = d3d12Context.GetDevice();
 
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc = { .Type = D3D12_COMMAND_LIST_TYPE_COPY };
@@ -313,7 +313,7 @@ HRESULT GraphicsCaptureFrameSource::CheckForNewFrame(bool& isNewFrameAvailable) 
 		}
 	}
 	
-	ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : _graphicsContext->GetDevice();
+	ID3D12Device5* dfDevice = _bridgeDevice ? _bridgeDevice.get() : _d3d12Context->GetDevice();
 
 	winrt::com_ptr<ID3D11Texture2D> d3d11Texture;
 	{
@@ -609,9 +609,9 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 		_copyCommandQueue->ExecuteCommandLists(1, &t);
 	}
 
-	hr = _graphicsContext->WaitForCommandQueue(_copyCommandQueue.get());
+	hr = _d3d12Context->WaitForCommandQueue(_copyCommandQueue.get());
 	if (FAILED(hr)) {
-		Logger::Get().ComError("GraphicsContext::WaitForCommandQueue 失败", hr);
+		Logger::Get().ComError("D3D12Context::WaitForCommandQueue 失败", hr);
 		return hr;
 	}
 
@@ -649,9 +649,9 @@ HRESULT GraphicsCaptureFrameSource::OnCursorVisibilityChanged(bool isVisible, bo
 		return S_OK;
 	}
 
-	HRESULT hr = _graphicsContext->WaitForGpu();
+	HRESULT hr = _d3d12Context->WaitForGpu();
 	if (FAILED(hr)) {
-		Logger::Get().ComError("GraphicsContext::WaitForGpu 失败", hr);
+		Logger::Get().ComError("D3D12Context::WaitForGpu 失败", hr);
 		return hr;
 	}
 
@@ -674,12 +674,12 @@ HRESULT GraphicsCaptureFrameSource::OnCursorVisibilityChanged(bool isVisible, bo
 bool GraphicsCaptureFrameSource::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept {
 	// 查找源窗口所在屏幕连接的适配器
 	winrt::com_ptr<IDXGIAdapter1> srcMonAdapter =
-		FindAdapterOfMonitor(_graphicsContext->GetDXGIFactoryForEnumingAdapters(), hMonSrc);
+		FindAdapterOfMonitor(_d3d12Context->GetDXGIFactoryForEnumingAdapters(), hMonSrc);
 	if (srcMonAdapter) {
 		DXGI_ADAPTER_DESC desc;
 		HRESULT hr = srcMonAdapter->GetDesc(&desc);
 		if (SUCCEEDED(hr)) {
-			if (desc.AdapterLuid != _graphicsContext->GetDevice()->GetAdapterLuid()) {
+			if (desc.AdapterLuid != _d3d12Context->GetDevice()->GetAdapterLuid()) {
 				// 跨适配器捕获
 				if (!_CreateBridgeDeviceResources(srcMonAdapter.get())) {
 					// 失败则使用渲染设备捕获，交给 WGC 中转
@@ -714,7 +714,7 @@ bool GraphicsCaptureFrameSource::_CreateCaptureDevice(HMONITOR hMonSrc) noexcept
 	winrt::com_ptr<ID3D11DeviceContext> d3dDC;
 	D3D_FEATURE_LEVEL featureLevel;
 	HRESULT hr = D3D11CreateDevice(
-		srcMonAdapter ? srcMonAdapter.get() : _graphicsContext->GetDXGIAdapter(),
+		srcMonAdapter ? srcMonAdapter.get() : _d3d12Context->GetDXGIAdapter(),
 		D3D_DRIVER_TYPE_UNKNOWN,
 		nullptr,
 		createDeviceFlags,
@@ -817,7 +817,7 @@ bool GraphicsCaptureFrameSource::_CreateBridgeDeviceResources(IDXGIAdapter1* dxg
 		}
 	}
 
-	ID3D12Device5* device = _graphicsContext->GetDevice();
+	ID3D12Device5* device = _d3d12Context->GetDevice();
 	const uint32_t frameCount = ScalingWindow::Get().Options().maxProducerInFlightFrames;
 
 	_crossAdapterSlots.resize(frameCount);
@@ -876,7 +876,7 @@ bool GraphicsCaptureFrameSource::_CreateBridgeDeviceResources(IDXGIAdapter1* dxg
 }
 
 HRESULT GraphicsCaptureFrameSource::_CreateDisplayDependentResources() noexcept {
-	ID3D12Device5* device = _graphicsContext->GetDevice();
+	ID3D12Device5* device = _d3d12Context->GetDevice();
 
 	// 创建每帧输出纹理
 	{

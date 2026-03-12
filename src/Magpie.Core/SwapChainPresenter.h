@@ -2,7 +2,7 @@
 
 namespace Magpie {
 
-class GraphicsContext;
+class D3D12Context;
 
 class SwapChainPresenter {
 public:
@@ -13,17 +13,17 @@ public:
 	~SwapChainPresenter() noexcept;
 
 	bool Initialize(
-		GraphicsContext& graphicContext,
+		D3D12Context& graphicContext,
 		HWND hwndAttach,
 		Size size,
 		const ColorInfo& colorInfo
 	) noexcept;
 
-	// SDR 下 rawRtvHandle 不做伽马校正，用于渲染光标
+	// SDR 下 rawRtvOffse 不做伽马校正，用于渲染光标
 	void BeginFrame(
 		ID3D12Resource** backBuffer,
-		D3D12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
-		D3D12_CPU_DESCRIPTOR_HANDLE& rawRtvHandle
+		uint32_t& rtvOffset,
+		uint32_t& rawRtvOffse
 	) noexcept;
 
 	HRESULT EndFrame(bool waitForGpu = false) noexcept;
@@ -43,7 +43,7 @@ private:
 
 	HRESULT _CreateDisplayDependentResources() noexcept;
 
-	GraphicsContext* _graphicContext = nullptr;
+	D3D12Context* _graphicContext = nullptr;
 
 	winrt::com_ptr<IDXGISwapChain4> _dxgiSwapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;

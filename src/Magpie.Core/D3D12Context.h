@@ -5,11 +5,11 @@ namespace Magpie {
 
 class DescriptorHeap;
 
-class GraphicsContext {
+class D3D12Context {
 public:
-	GraphicsContext() = default;
-	GraphicsContext(const GraphicsContext&) = delete;
-	GraphicsContext(GraphicsContext&&) = delete;
+	D3D12Context() = default;
+	D3D12Context(const D3D12Context&) = delete;
+	D3D12Context(D3D12Context&&) = delete;
 
 	bool Initialize(
 		const GraphicsCardId& graphicsCardId,
@@ -21,7 +21,7 @@ public:
 		bool disableFrameFenceTracking = false
 	) noexcept;
 
-	void CopyDevice(const GraphicsContext& other);
+	void CopyDevice(const D3D12Context& other);
 
 	bool InitializeAfterCopyDevice(
 		uint32_t maxInFlightFrameCount,

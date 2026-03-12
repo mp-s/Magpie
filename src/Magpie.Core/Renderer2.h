@@ -1,7 +1,8 @@
 #pragma once
 #include "CursorDrawer.h"
+#include "CommandContext.h"
 #include "FrameProducer.h"
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "DescriptorHeap.h"
 #include "ScalingOptions.h"
 
@@ -86,9 +87,10 @@ private:
 
 	Rect _outputRect{};
 
-	// 由多个 GraphicsContext 共享
+	// 由多个 D3D12Context 共享
 	DescriptorHeap _csuDescriptorHeap;
 	DescriptorHeap _rtvDescriptorHeap;
+	D3D12Context _d3d12Context;
 	GraphicsContext _graphicsContext;
 	FrameProducer _frameProducer;
 	CursorDrawer _cursorDrawer;

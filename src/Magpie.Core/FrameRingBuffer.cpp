@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "FrameRingBuffer.h"
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "DebugInfo.h"
@@ -9,11 +9,11 @@
 namespace Magpie {
 
 bool FrameRingBuffer::Initialize(
-	GraphicsContext& graphicsContext,
+	D3D12Context& d3d12Context,
 	Size size,
 	const ColorInfo& colorInfo
 ) noexcept {
-	_graphicsContext = &graphicsContext;
+	_d3d12Context = &d3d12Context;
 	_size = size;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
@@ -23,7 +23,7 @@ bool FrameRingBuffer::Initialize(
 	// 消费者应落后于生产者
 	_curConsumerIdx = slotCount - 1;
 
-	ID3D12Device5* device = graphicsContext.GetDevice();
+	ID3D12Device5* device = d3d12Context.GetDevice();
 
 	HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_consumerFence));
 	if (FAILED(hr)) {
@@ -236,7 +236,7 @@ HRESULT FrameRingBuffer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept
 }
 
 HRESULT FrameRingBuffer::_CreateBuffers() noexcept {
-	ID3D12Device5* device = _graphicsContext->GetDevice();
+	ID3D12Device5* device = _d3d12Context->GetDevice();
 
 	CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 

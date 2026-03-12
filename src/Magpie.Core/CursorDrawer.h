@@ -6,6 +6,7 @@
 
 namespace Magpie {
 
+class D3D12Context;
 class GraphicsContext;
 
 class CursorDrawer {
@@ -17,7 +18,7 @@ public:
 	~CursorDrawer() noexcept;
 
 	bool Initialize(
-		GraphicsContext& graphicsContext,
+		D3D12Context& d3d12Context,
 		const RECT& srcRect,
 		const RECT& rendererRect,
 		const RECT& destRect,
@@ -28,10 +29,10 @@ public:
 
 	// backBuffer 不为空表示掩码光标在叠加层上
 	HRESULT Draw(
+		GraphicsContext& graphicsContext,
 		uint64_t completedFenceValue,
 		uint64_t nextFenceValue,
 		uint32_t curFrameSrvOffset,
-		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle,
 		ID3D12Resource* backBuffer = nullptr
 	) noexcept;
 
@@ -124,8 +125,8 @@ private:
 	bool _ResolveCursorPixels(_CursorInfo& cursorInfo, HBITMAP hColorBmp, HBITMAP hMaskBmp) const noexcept;
 
 	HRESULT _InitializeCursorTexture(
-		_CursorInfo& cursorInfo,
-		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle
+		GraphicsContext& graphicsContext,
+		_CursorInfo& cursorInfo
 	) noexcept;
 
 	// 只能在同步 GPU 后调用
@@ -143,7 +144,7 @@ private:
 
 	void _ClearRetiredResources(uint64_t completedFenceValue) noexcept;
 
-	GraphicsContext* _graphicsContext = nullptr;
+	D3D12Context* _d3d12Context = nullptr;
 	Size _srcSize{};
 	RECT _rendererRect{};
 	RECT _destRect{};

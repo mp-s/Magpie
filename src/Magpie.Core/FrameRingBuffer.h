@@ -3,7 +3,7 @@
 
 namespace Magpie {
 
-class GraphicsContext;
+class D3D12Context;
 
 class FrameRingBuffer {
 public:
@@ -12,7 +12,7 @@ public:
 	FrameRingBuffer(FrameRingBuffer&&) = delete;
 
 	bool Initialize(
-		GraphicsContext& graphicsContext,
+		D3D12Context& d3d12Context,
 		Size size,
 		const ColorInfo& colorInfo
 	) noexcept;
@@ -50,7 +50,7 @@ private:
 	HRESULT _CreateBuffers() noexcept;
 
 	// 只在生产者线程访问
-	GraphicsContext* _graphicsContext = nullptr;
+	D3D12Context* _d3d12Context = nullptr;
 
 	wil::srwlock _lock;
 

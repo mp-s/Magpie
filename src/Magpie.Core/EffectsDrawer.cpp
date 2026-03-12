@@ -1,7 +1,8 @@
 #include "pch.h"
 #include "EffectsDrawer.h"
 #include "CatmullRomDrawer.h"
-#include "GraphicsContext.h"
+#include "CommandContext.h"
+#include "D3D12Context.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "StrHelper.h"
@@ -9,16 +10,16 @@
 namespace Magpie {
 
 bool EffectsDrawer::Initialize(
-	GraphicsContext& graphicsContext,
+	D3D12Context& d3d12Context,
 	const ColorInfo& colorInfo,
 	Size inputSize,
 	Size rendererSize
 ) noexcept {
-	_graphicsContext = &graphicsContext;
+	_d3d12Context = &d3d12Context;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 	_inputSize = inputSize;
 
-	ID3D12Device5* device = graphicsContext.GetDevice();
+	ID3D12Device5* device = d3d12Context.GetDevice();
 
 	// 检查半精度浮点支持
 	{
@@ -44,7 +45,7 @@ bool EffectsDrawer::Initialize(
 	}
 
 	_catmullRomDrawer.emplace();
-	_catmullRomDrawer->Initialize(graphicsContext);
+	_catmullRomDrawer->Initialize(d3d12Context);
 
 	{
 		// 每帧两个时间戳
@@ -76,7 +77,7 @@ bool EffectsDrawer::Initialize(
 			return false;
 		}
 
-		hr = graphicsContext.GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency);
+		hr = d3d12Context.GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("ID3D12CommandQueue::GetTimestampFrequency 失败", hr);
 			return false;
@@ -87,39 +88,39 @@ bool EffectsDrawer::Initialize(
 }
 
 HRESULT EffectsDrawer::Draw(
-	uint32_t frameIndex,
+	ComputeContext& computeContext,
+	uint32_t /*frameIndex*/,
 	ID3D12Resource* /*inputResource*/,
 	ID3D12Resource* /*outputResource*/,
 	uint32_t inputSrvOffset,
 	uint32_t outputUavOffset
 ) noexcept {
 	// 获取渲染时间
-	const uint32_t queryHeapIndex = 2 * frameIndex;
-	{
-		CD3DX12_RANGE range(queryHeapIndex * sizeof(UINT64), (queryHeapIndex + 2) * sizeof(UINT64));
+	// const uint32_t queryHeapIndex = 2 * frameIndex;
+	// {
+	// 	CD3DX12_RANGE range(queryHeapIndex * sizeof(UINT64), (queryHeapIndex + 2) * sizeof(UINT64));
+	   
+	// 	void* pData;
+	// 	HRESULT hr = _queryResultBuffer->Map(0, nullptr, &pData);
+	// 	if (FAILED(hr)) {
+	// 		Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
+	// 		return hr;
+	// 	}
+	   
+	// 	UINT64* timestampes = (UINT64*)pData + queryHeapIndex;
+	   
+	// 	range = {};
+	// 	_queryResultBuffer->Unmap(0, &range);
+	// }
 
-		void* pData;
-		HRESULT hr = _queryResultBuffer->Map(0, nullptr, &pData);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
-			return hr;
-		}
+	//commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
 
-		// UINT64* timestampes = (UINT64*)pData + queryHeapIndex;
+	_catmullRomDrawer->Draw(
+		computeContext, _inputSize, _outputSize, inputSrvOffset, outputUavOffset, false);
 
-		range = {};
-		_queryResultBuffer->Unmap(0, &range);
-	}
-
-	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
-
-	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
-
-	_catmullRomDrawer->Draw(_inputSize, _outputSize, inputSrvOffset, outputUavOffset, false);
-
-	commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
-	commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,
-		_queryResultBuffer.get(), queryHeapIndex * sizeof(UINT64));
+	// commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
+	// commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,
+	//	_queryResultBuffer.get(), queryHeapIndex * sizeof(UINT64));
 
 	return S_OK;
 }

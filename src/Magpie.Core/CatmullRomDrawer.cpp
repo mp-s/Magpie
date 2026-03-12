@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "CatmullRomDrawer.h"
+#include "CommandContext.h"
 #include "DirectXHelper.h"
-#include "GraphicsContext.h"
-#include "DescriptorHeap.h"
+#include "D3D12Context.h"
 #include "Logger.h"
 #include "shaders/CatmullRomCS.h"
 #include "shaders/CatmullRomCS_sRGB.h"
@@ -11,20 +11,18 @@
 
 namespace Magpie {
 
-void CatmullRomDrawer::Initialize(GraphicsContext& graphicsContext) noexcept {
-	_graphicsContext = &graphicsContext;
+void CatmullRomDrawer::Initialize(D3D12Context& d3d12Context) noexcept {
+	_d3d12Context = &d3d12Context;
 }
 
 HRESULT CatmullRomDrawer::Draw(
+	ComputeContext& computeContext,
 	Size inputSize,
 	Size outputSize,
 	uint32_t inputSrvOffset,
 	uint32_t outputUavOffset,
 	bool outputSrgb
 ) noexcept {
-	ID3D12GraphicsCommandList* commandList = _graphicsContext->GetCommandList();
-	auto& descriptorHeap = _graphicsContext->GetDescriptorHeap();
-
 	// 作为性能优化，输入和输出尺寸相同时原样复制
 	if (inputSize == outputSize) {
 		if (!_copyRootSignature) {
@@ -34,7 +32,7 @@ HRESULT CatmullRomDrawer::Draw(
 				return hr;
 			}
 		}
-		commandList->SetComputeRootSignature(_copyRootSignature.get());
+		computeContext.SetRootSignature(_copyRootSignature.get());
 
 		if (outputSrgb) {
 			if (!_copySrgbPSO) {
@@ -42,22 +40,22 @@ HRESULT CatmullRomDrawer::Draw(
 					.pRootSignature = _copyRootSignature.get(),
 					.CS = CD3DX12_SHADER_BYTECODE(CopyCS_sRGB, sizeof(CopyCS_sRGB))
 				};
-				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_copySrgbPSO));
 				if (FAILED(hr)) {
 					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
 					return hr;
 				}
 			}
-
-			commandList->SetPipelineState(_copySrgbPSO.get());
+			
+			computeContext.SetPipelineState(_copySrgbPSO.get());
 		} else {
 			if (!_copyPSO) {
 				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 					.pRootSignature = _copyRootSignature.get(),
 					.CS = CD3DX12_SHADER_BYTECODE(CopyCS, sizeof(CopyCS))
 				};
-				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_copyPSO));
 				if (FAILED(hr)) {
 					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
@@ -65,11 +63,11 @@ HRESULT CatmullRomDrawer::Draw(
 				}
 			}
 
-			commandList->SetPipelineState(_copyPSO.get());
+			computeContext.SetPipelineState(_copyPSO.get());
 		}
 
-		commandList->SetComputeRootDescriptorTable(0, descriptorHeap.GetGpuHandle(inputSrvOffset));
-		commandList->SetComputeRootDescriptorTable(1, descriptorHeap.GetGpuHandle(outputUavOffset));
+		computeContext.SetRootDescriptorTable(0, inputSrvOffset);
+		computeContext.SetRootDescriptorTable(1, outputUavOffset);
 	} else {
 		if (!_catmullRomRootSignature) {
 			HRESULT hr = _InitializeCatmullRomRootSignature();
@@ -78,7 +76,7 @@ HRESULT CatmullRomDrawer::Draw(
 				return hr;
 			}
 		}
-		commandList->SetComputeRootSignature(_catmullRomRootSignature.get());
+		computeContext.SetRootSignature(_catmullRomRootSignature.get());
 
 		if (outputSrgb) {
 			if (!_catmullRomSrgbPSO) {
@@ -86,7 +84,7 @@ HRESULT CatmullRomDrawer::Draw(
 					.pRootSignature = _catmullRomRootSignature.get(),
 					.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS_sRGB, sizeof(CatmullRomCS_sRGB))
 				};
-				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_catmullRomSrgbPSO));
 				if (FAILED(hr)) {
 					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
@@ -94,14 +92,14 @@ HRESULT CatmullRomDrawer::Draw(
 				}
 			}
 
-			commandList->SetPipelineState(_catmullRomSrgbPSO.get());
+			computeContext.SetPipelineState(_catmullRomSrgbPSO.get());
 		} else {
 			if (!_catmullRomPSO) {
 				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 					.pRootSignature = _catmullRomRootSignature.get(),
 					.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS, sizeof(CatmullRomCS))
 				};
-				HRESULT hr = _graphicsContext->GetDevice()->CreateComputePipelineState(
+				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_catmullRomPSO));
 				if (FAILED(hr)) {
 					Logger::Get().ComError("CreateComputePipelineState 失败", hr);
@@ -109,7 +107,7 @@ HRESULT CatmullRomDrawer::Draw(
 				}
 			}
 
-			commandList->SetPipelineState(_catmullRomPSO.get());
+			computeContext.SetPipelineState(_catmullRomPSO.get());
 		}
 
 		DirectXHelper::Constant32 constants[] = {
@@ -120,17 +118,16 @@ HRESULT CatmullRomDrawer::Draw(
 			{.floatVal = 1.0f / outputSize.width},
 			{.floatVal = 1.0f / outputSize.height}
 		};
-		commandList->SetComputeRoot32BitConstants(0, (UINT)std::size(constants), constants, 0);
+		computeContext.SetRoot32BitConstants(0, (UINT)std::size(constants), constants);
 
-		commandList->SetComputeRootDescriptorTable(1, descriptorHeap.GetGpuHandle(inputSrvOffset));
-		commandList->SetComputeRootDescriptorTable(2, descriptorHeap.GetGpuHandle(outputUavOffset));
+		computeContext.SetRootDescriptorTable(1, inputSrvOffset);
+		computeContext.SetRootDescriptorTable(2, outputUavOffset);
 	}
 
 	constexpr uint32_t BLOCK_SIZE = 16;
-	commandList->Dispatch(
+	computeContext.Dispatch(
 		(outputSize.width + BLOCK_SIZE - 1) / BLOCK_SIZE,
-		(outputSize.height + BLOCK_SIZE - 1) / BLOCK_SIZE,
-		1
+		(outputSize.height + BLOCK_SIZE - 1) / BLOCK_SIZE
 	);
 
 	return S_OK;
@@ -181,7 +178,7 @@ HRESULT CatmullRomDrawer::_InitializeCatmullRomRootSignature() noexcept {
 
 	HRESULT hr = D3DX12SerializeVersionedRootSignature(
 		&rootSignatureDesc,
-		_graphicsContext->GetRootSignatureVersion(),
+		_d3d12Context->GetRootSignatureVersion(),
 		signature.put(),
 		nullptr
 	);
@@ -190,7 +187,7 @@ HRESULT CatmullRomDrawer::_InitializeCatmullRomRootSignature() noexcept {
 		return hr;
 	}
 
-	hr = _graphicsContext->GetDevice()->CreateRootSignature(
+	hr = _d3d12Context->GetDevice()->CreateRootSignature(
 		0,
 		signature->GetBufferPointer(),
 		signature->GetBufferSize(),
@@ -234,7 +231,7 @@ HRESULT CatmullRomDrawer::_InitializeCopyRootSignature() noexcept {
 
 	HRESULT hr = D3DX12SerializeVersionedRootSignature(
 		&rootSignatureDesc,
-		_graphicsContext->GetRootSignatureVersion(),
+		_d3d12Context->GetRootSignatureVersion(),
 		signature.put(),
 		nullptr
 	);
@@ -243,7 +240,7 @@ HRESULT CatmullRomDrawer::_InitializeCopyRootSignature() noexcept {
 		return hr;
 	}
 
-	hr = _graphicsContext->GetDevice()->CreateRootSignature(
+	hr = _d3d12Context->GetDevice()->CreateRootSignature(
 		0,
 		signature->GetBufferPointer(),
 		signature->GetBufferSize(),

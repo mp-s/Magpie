@@ -2,7 +2,7 @@
 #include "SwapChainPresenter.h"
 #include "DebugInfo.h"
 #include "DescriptorHeap.h"
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "Logger.h"
 #include "Win32Helper.h"
 #include <dcomp.h>
@@ -25,7 +25,7 @@ SwapChainPresenter::~SwapChainPresenter() noexcept {
 }
 
 bool SwapChainPresenter::Initialize(
-	GraphicsContext& graphicContext,
+	D3D12Context& graphicContext,
 	HWND hwndAttach,
 	Size size,
 	const ColorInfo& colorInfo
@@ -142,18 +142,17 @@ bool SwapChainPresenter::Initialize(
 
 void SwapChainPresenter::BeginFrame(
 	ID3D12Resource** backBuffer,
-	D3D12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
-	D3D12_CPU_DESCRIPTOR_HANDLE& rawRtvHandle
+	uint32_t& rtvOffset,
+	uint32_t& rawRtvOffse
 ) noexcept {
 	_frameLatencyWaitableObject.wait(1000);
 
 	const uint32_t curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 	*backBuffer = _frameBuffers[curBufferIndex].get();
 
-	auto& rtvDescriptorHeap =_graphicContext->GetDescriptorHeap(true);
-	rtvHandle = rtvDescriptorHeap.GetCpuHandle(_rtvBaseOffset + curBufferIndex);
+	rtvOffset = _rtvBaseOffset + curBufferIndex;
 	if (!_isScRGB) {
-		rawRtvHandle = rtvDescriptorHeap.GetCpuHandle(_rawRtvBaseOffset + curBufferIndex);
+		rawRtvOffse = _rawRtvBaseOffset + curBufferIndex;
 	}
 }
 
@@ -278,7 +277,7 @@ HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 		// 等待渲染完成
 		HRESULT hr = _graphicContext->WaitForGpu();
 		if (FAILED(hr)) {
-			Logger::Get().ComError("GraphicsContext::WaitForGPU", hr);
+			Logger::Get().ComError("D3D12Context::WaitForGPU", hr);
 			return hr;
 		}
 
@@ -349,7 +348,7 @@ HRESULT SwapChainPresenter::OnResizeEnded() noexcept {
 		// 调用此方法前没等待 GPU
 		HRESULT hr = _graphicContext->WaitForGpu();
 		if (FAILED(hr)) {
-			Logger::Get().ComError("GraphicsContext::WaitForGPU", hr);
+			Logger::Get().ComError("D3D12Context::WaitForGPU", hr);
 			return hr;
 		}
 
