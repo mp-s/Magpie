@@ -363,6 +363,9 @@ HRESULT CursorDrawer::Draw(
 
 				CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 
+				D3D12_HEAP_FLAGS heapFlags = _d3d12Context->IsHeapFlagCreateNotZeroedSupported() ?
+					D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
+
 				CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 					isSrgb ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT,
 					_tempOriginTextureSize.width,
@@ -373,7 +376,7 @@ HRESULT CursorDrawer::Draw(
 
 				HRESULT hr = device->CreateCommittedResource(
 					&heapProps,
-					D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+					heapFlags,
 					&texDesc,
 					D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
 					nullptr,
@@ -929,6 +932,9 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 	CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 
+	D3D12_HEAP_FLAGS heapFlags = _d3d12Context->IsHeapFlagCreateNotZeroedSupported() ?
+		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
+
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
 		cursorInfo.type == _CursorType::Color ? DXGI_FORMAT_R16G16B16A16_FLOAT :
 			(cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R8G8B8A8_UNORM),
@@ -947,7 +953,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 	HRESULT hr = device->CreateCommittedResource(
 		&heapProps,
-		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+		heapFlags,
 		&bufferDesc,
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
@@ -961,7 +967,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 	heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 	hr = device->CreateCommittedResource(
 		&heapProps,
-		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+		heapFlags,
 		&texDesc,
 		D3D12_RESOURCE_STATE_COPY_DEST,
 		nullptr,
@@ -1021,7 +1027,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 		hr = device->CreateCommittedResource(
 			&heapProps,
-			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+			heapFlags,
 			&texDesc,
 			D3D12_RESOURCE_STATE_RENDER_TARGET,
 			nullptr,
@@ -1034,8 +1040,10 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 		// 以 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 创建的资源作为渲染目标需先
 		// Discard/Clear/Copy。
-		graphicsContext.DiscardResource(cursorInfo.texture.get());
-
+		if (heapFlags & D3D12_HEAP_FLAG_CREATE_NOT_ZEROED) {
+			graphicsContext.DiscardResource(cursorInfo.texture.get());
+		}
+		
 		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 
 		hr = descriptorHeap.Alloc(1, cursorInfo.originTextureSrvOffset);

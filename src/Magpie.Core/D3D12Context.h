@@ -64,6 +64,10 @@ public:
 		return _isUMA;
 	}
 
+	bool IsHeapFlagCreateNotZeroedSupported() const noexcept {
+		return _isHeapFlagCreateNotZeroedSupported;
+	}
+
 	bool IsGPUUploadHeapSupported() const noexcept {
 		return _isGPUUploadHeapSupported;
 	}
@@ -126,6 +130,7 @@ private:
 
 	D3D_ROOT_SIGNATURE_VERSION _rootSignatureVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
 	bool _isUMA = false;
+	bool _isHeapFlagCreateNotZeroedSupported = false;
 	bool _isGPUUploadHeapSupported = false;
 	bool _isSM6Supported = false;
 };

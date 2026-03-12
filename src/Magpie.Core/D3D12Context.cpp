@@ -59,6 +59,11 @@ bool D3D12Context::Initialize(
 		}
 	}
 
+	// 检查 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 支持。是否支持这个功能只和 D3D12 版本有关，
+	// 虽然我们随程序部署了 Agility SDK，但旧版 Win10 不支持加载。
+	// https://devblogs.microsoft.com/directx/coming-to-directx-12-more-control-over-memory-allocation/
+	_isHeapFlagCreateNotZeroedSupported = (bool)_device.try_as<ID3D12Device8>();
+
 	// 检查 Resizable BAR 支持
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS16 data{};
@@ -89,6 +94,7 @@ void D3D12Context::CopyDevice(const D3D12Context& other) {
 	_rtvDescriptorHeap = other._rtvDescriptorHeap;
 	_device = other._device;
 	_rootSignatureVersion = other._rootSignatureVersion;
+	_isHeapFlagCreateNotZeroedSupported = other._isHeapFlagCreateNotZeroedSupported;
 }
 
 bool D3D12Context::InitializeAfterCopyDevice(

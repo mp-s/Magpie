@@ -26,7 +26,6 @@
 #endif
 #include <dxgi1_6.h>
 
-// Debug 配置下使用 Agility SDK 辅助调试
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 619; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\app\\"; }
 
