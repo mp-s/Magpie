@@ -1,12 +1,15 @@
 #include "pch.h"
 #include "Renderer2.h"
 #include "DebugInfo.h"
+#include "DirectXHelper.h"
 #include "FrameProducer.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "SwapChainPresenter.h"
 #include "shaders/CopyFrameVS.h"
+#include "shaders/CopyFrameVS_SM5.h"
 #include "shaders/TextureBlitPS.h"
+#include "shaders/TextureBlitPS_SM5.h"
 #include "GraphicsCaptureFrameSource.h"
 #include <d3dkmthk.h>
 #include <windows.graphics.display.interop.h>
@@ -181,10 +184,12 @@ ScalingError Renderer2::Initialize(
 			return ScalingError::ScalingFailedGeneral;
 		}
 
+		bool isSM6Supported = _d3d12Context.GetShaderModel() >= D3D_SHADER_MODEL_6_0;
+
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
 			.pRootSignature = _rootSignature.get(),
-			.VS = CD3DX12_SHADER_BYTECODE(CopyFrameVS, sizeof(CopyFrameVS)),
-			.PS = CD3DX12_SHADER_BYTECODE(TextureBlitPS, sizeof(TextureBlitPS)),
+			.VS = DirectXHelper::SelectShader(isSM6Supported, CopyFrameVS, CopyFrameVS_SM5),
+			.PS = DirectXHelper::SelectShader(isSM6Supported, TextureBlitPS, TextureBlitPS_SM5),
 			.BlendState = {
 				.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
 			},

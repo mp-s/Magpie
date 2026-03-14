@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props" Condition="Exists('..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props')" />
   <Import Project="..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props')" />
   <Import Project="..\Common.Pre.props" />
   <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props')" />
@@ -16,6 +17,7 @@
     <GeneratedFilesDir>$(IntDir)\Generated Files\</GeneratedFilesDir>
     <Microsoft_Direct3D_D3D12_SkipLibraryCopy>true</Microsoft_Direct3D_D3D12_SkipLibraryCopy>
     <Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
+    <Microsoft_Direct3D_DXC_SkipLibraryCopy>true</Microsoft_Direct3D_DXC_SkipLibraryCopy>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
@@ -37,12 +39,14 @@
       <AdditionalIncludeDirectories>include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <FxCompile>
-      <ShaderModel>5.0</ShaderModel>
+      <ShaderModel>6.0</ShaderModel>
       <AllResourcesBound>true</AllResourcesBound>
       <TreatWarningAsError>true</TreatWarningAsError>
       <VariableName>%(Filename)</VariableName>
       <HeaderFileOutput>$(GeneratedFilesDir)\shaders\%(Filename).h</HeaderFileOutput>
       <ObjectFileOutput />
+      <AdditionalOptions Condition="'$(Configuration)' == 'Debug'">-Qembed_debug %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)' == 'Release'">-O3 %(AdditionalOptions)</AdditionalOptions>
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -175,12 +179,6 @@
     <FxCompile Include="shaders\CursorVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
-    <FxCompile Include="shaders\DuplicateFrameCS.hlsl">
-      <ShaderType>Compute</ShaderType>
-    </FxCompile>
-    <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
-      <ShaderType>Compute</ShaderType>
-    </FxCompile>
     <FxCompile Include="shaders\CopyFrameVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
@@ -218,12 +216,64 @@
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="shaders\Common.hlsli" />
+    <None Include="shaders\DuplicateFrameCS.hlsl" />
+    <None Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!-- 为每个着色器编译 SM5.1 版本 -->
+  <Target Name="FxCompileSM5" AfterTargets="FxCompile">
+    <ItemGroup>
+      <FxCompile>
+        <ShaderModel>5.1</ShaderModel>
+        <VariableName>%(Filename)_SM5</VariableName>
+        <HeaderFileOutput>$(GeneratedFilesDir)\shaders\%(Filename)_SM5.h</HeaderFileOutput>
+      </FxCompile>
+      <!-- 检查重复帧的着色器由 D3D11 使用 -->
+      <FxCompile Include="shaders\DuplicateFrameCS.hlsl">
+        <ShaderType>Compute</ShaderType>
+        <ShaderModel>5.0</ShaderModel>
+      </FxCompile>
+      <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
+        <ShaderType>Compute</ShaderType>
+        <ShaderModel>5.0</ShaderModel>
+      </FxCompile>
+    </ItemGroup>
+    <!-- 和 FxCompile 一致，不传 ToolPath 和 AdditionalOptions 是刻意为之 -->
+    <FXC
+        Condition                       = "'%(FxCompile.ExcludedFromBuild)' != 'true'"
+        Source                          = "%(FxCompile.Identity)"
+        AdditionalIncludeDirectories    = "%(FxCompile.AdditionalIncludeDirectories)"
+        SuppressStartupBanner           = "%(FxCompile.SuppressStartupBanner)"
+        EntryPointName                  = "%(FxCompile.EntryPointName)"
+        TreatWarningAsError             = "%(FxCompile.TreatWarningAsError)"
+        ShaderType                      = "%(FxCompile.ShaderType)"
+        ShaderModel                     = "%(FxCompile.ShaderModel)"
+        AllResourcesBound               = "%(FxCompile.AllResourcesBound)"
+        EnableUnboundedDescriptorTables = "%(FxCompile.EnableUnboundedDescriptorTables)"
+        SetRootSignature                = "%(FxCompile.SetRootSignature)"
+        PreprocessorDefinitions         = "%(FxCompile.PreprocessorDefinitions)"
+        HeaderFileOutput                = "%(FxCompile.HeaderFileOutput)"
+        ObjectFileOutput                = "%(FxCompile.ObjectFileOutput)"
+        AssemblerOutput                 = "%(FxCompile.AssemblerOutput)"
+        AssemblerOutputFile             = "%(FxCompile.AssemblerOutputFile)"
+        VariableName                    = "%(FxCompile.VariableName)"
+        DisableOptimizations            = "%(FxCompile.DisableOptimizations)"
+        EnableDebuggingInformation      = "%(FxCompile.EnableDebuggingInformation)"
+        ConsumeExportFile               = "%(FxCompile.ConsumeExportFile)"
+        ExcludedInputPaths              = "%(FxCompile.ExcludedInputPaths)"
+        ToolArchitecture                = "$(FxCompileToolArchitecture)"
+        TrackerLogDirectory             = "%(FxCompile.TrackerLogDirectory)"
+        TrackedInputFilesToIgnore       = "@(FxCompileNoDependencies)"
+        TrackedOutputFilesToIgnore      = "@(FxTrackedOutputFilesToIgnore)"
+        TrackFileAccess                 = "$(TrackFileAccess)"
+        MinimalRebuildFromTracking      = "%(FxCompile.MinimalRebuildFromTracking)"
+    />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets')" />
     <Import Project="..\..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('..\..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" />
     <Import Project="..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets')" />
+    <Import Project="..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets" Condition="Exists('..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
@@ -234,5 +284,7 @@
     <Error Condition="!Exists('..\..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets'))" />
     <Error Condition="!Exists('..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props'))" />
     <Error Condition="!Exists('..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets'))" />
+    <Error Condition="!Exists('..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props'))" />
+    <Error Condition="!Exists('..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets'))" />
   </Target>
 </Project>

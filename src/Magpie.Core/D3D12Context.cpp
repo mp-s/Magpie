@@ -41,6 +41,11 @@ bool D3D12Context::Initialize(
 	}
 #endif
 
+	if (!_QueryHighestShaderModel()) {
+		Logger::Get().Error("_QueryHighestShaderModel 失败");
+		return false;
+	}
+
 	// 检查根签名版本
 	{
 		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
@@ -73,14 +78,6 @@ bool D3D12Context::Initialize(
 		}
 	}
 
-	// 检查 shader model 6.0 支持
-	{
-		D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = D3D_SHADER_MODEL_6_0 };
-		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)))) {
-			_isSM6Supported = data.HighestShaderModel == D3D_SHADER_MODEL_6_0;
-		}
-	}
-
 	if (!_InitializeDeviceResources(
 		maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
 		Logger::Get().Error("_InitializeDeviceResources 失败");
@@ -94,8 +91,11 @@ void D3D12Context::CopyDevice(const D3D12Context& other) {
 	_csuDescriptorHeap = other._csuDescriptorHeap;
 	_rtvDescriptorHeap = other._rtvDescriptorHeap;
 	_device = other._device;
+	_shaderModel = other._shaderModel;
 	_rootSignatureVersion = other._rootSignatureVersion;
+	_isUMA = other._isUMA;
 	_isHeapFlagCreateNotZeroedSupported = other._isHeapFlagCreateNotZeroedSupported;
+	_isGPUUploadHeapSupported = other._isGPUUploadHeapSupported;
 }
 
 bool D3D12Context::InitializeAfterCopyDevice(
@@ -497,6 +497,44 @@ bool D3D12Context::_CreateAdapterFromDevice() noexcept {
 		}
 	}
 
+	return false;
+}
+
+bool D3D12Context::_QueryHighestShaderModel() noexcept {
+	// 如果运行时不知道 HighestShaderModel，CheckFeatureSupport 将返回 E_INVALIDARG
+	// （这只会发生在不支持 Agility SDK 的旧版本 Win10 上）。官方推荐从新到旧依次检查每
+	// 个版本。
+	constexpr std::array allModelVersions = {
+		D3D_SHADER_MODEL_6_9,
+		D3D_SHADER_MODEL_6_8,
+		D3D_SHADER_MODEL_6_7,
+		D3D_SHADER_MODEL_6_6,
+		D3D_SHADER_MODEL_6_5,
+		D3D_SHADER_MODEL_6_4,
+		D3D_SHADER_MODEL_6_3,
+		D3D_SHADER_MODEL_6_2,
+		D3D_SHADER_MODEL_6_1,
+		D3D_SHADER_MODEL_6_0,
+		D3D_SHADER_MODEL_5_1
+	};
+
+	for (D3D_SHADER_MODEL modelVersion : allModelVersions) {
+		D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = modelVersion };
+		HRESULT hr = _device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data));
+		if (hr == E_INVALIDARG) {
+			continue;
+		}
+
+		if (SUCCEEDED(hr)) {
+			_shaderModel = data.HighestShaderModel;
+			return true;
+		} else {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			return false;
+		}
+	}
+	
+	Logger::Get().Error("不支持 SM 5.1");
 	return false;
 }
 

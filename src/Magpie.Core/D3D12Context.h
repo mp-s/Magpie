@@ -56,6 +56,10 @@ public:
 		return _commandList.get();
 	}
 
+	D3D_SHADER_MODEL GetShaderModel() const noexcept {
+		return _shaderModel;
+	}
+
 	D3D_ROOT_SIGNATURE_VERSION GetRootSignatureVersion() const noexcept {
 		return _rootSignatureVersion;
 	}
@@ -70,10 +74,6 @@ public:
 
 	bool IsGPUUploadHeapSupported() const noexcept {
 		return _isGPUUploadHeapSupported;
-	}
-
-	bool IsSM6Supported() const noexcept {
-		return _isSM6Supported;
 	}
 
 	uint32_t GetMaxInFlightFrameCount() const noexcept {
@@ -111,6 +111,8 @@ private:
 
 	bool _CreateAdapterFromDevice() noexcept;
 
+	bool _QueryHighestShaderModel() noexcept;
+
 	DescriptorHeap* _csuDescriptorHeap = nullptr;
 	DescriptorHeap* _rtvDescriptorHeap = nullptr;
 
@@ -128,11 +130,12 @@ private:
 	std::vector<uint64_t> _frameFenceValues;
 	uint32_t _curFrameIndex = 0;
 
+	D3D_SHADER_MODEL _shaderModel = D3D_SHADER_MODEL_5_1;
 	D3D_ROOT_SIGNATURE_VERSION _rootSignatureVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+	
 	bool _isUMA = false;
 	bool _isHeapFlagCreateNotZeroedSupported = false;
 	bool _isGPUUploadHeapSupported = false;
-	bool _isSM6Supported = false;
 };
 
 }

@@ -340,16 +340,10 @@
     <FxCompile Include="shaders\MonochromeCursorPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="shaders\DuplicateFrameCS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="shaders\ImGuiImplVS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\ImGuiImplPS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\CopyFrameVS.hlsl">
@@ -387,6 +381,12 @@
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="shaders\Common.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\DuplicateFrameCS.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\DuplicateFrameCS_NoBoundsChecking.hlsl">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>

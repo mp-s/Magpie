@@ -17,6 +17,17 @@ struct DirectXHelper {
 		return desc.VendorId == 0x1414 && desc.DeviceId == 0x8c;
 	}
 
+	template <size_t Size1, size_t Size2>
+	static D3D12_SHADER_BYTECODE SelectShader(
+		bool isSM6Supported,
+		const uint8_t (&shaderBytes)[Size1],
+		const uint8_t (&sm5ShaderBytes)[Size2]
+	) noexcept {
+		return isSM6Supported ?
+			CD3DX12_SHADER_BYTECODE(shaderBytes, Size1) :
+			CD3DX12_SHADER_BYTECODE(sm5ShaderBytes, Size2);
+	}
+
 	static bool CompileComputeShader(
 		std::string_view hlsl,
 		const char* entryPoint,

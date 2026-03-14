@@ -1,22 +1,30 @@
 #include "pch.h"
 #include "CursorDrawer.h"
-#include "CommandContext.h"
 #include "ByteBuffer.h"
 #include "ColorHelper.h"
+#include "CommandContext.h"
 #include "CursorHelper.h"
+#include "D3D12Context.h"
 #include "DescriptorHeap.h"
 #include "DirectXHelper.h"
-#include "D3D12Context.h"
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "shaders/CursorResizerPS.h"
+#include "shaders/CursorResizerPS_SM5.h"
 #include "shaders/CursorVS.h"
+#include "shaders/CursorVS_SM5.h"
 #include "shaders/FullscreenVS.h"
+#include "shaders/FullscreenVS_SM5.h"
 #include "shaders/MaskedCursorPS.h"
+#include "shaders/MaskedCursorPS_SM5.h"
 #include "shaders/MaskedCursorPS_sRGB.h"
+#include "shaders/MaskedCursorPS_sRGB_SM5.h"
 #include "shaders/MonochromeCursorPS.h"
+#include "shaders/MonochromeCursorPS_SM5.h"
 #include "shaders/MonochromeCursorPS_sRGB.h"
+#include "shaders/MonochromeCursorPS_sRGB_SM5.h"
 #include "shaders/TextureBlitPS.h"
+#include "shaders/TextureBlitPS_SM5.h"
 #include "Win32Helper.h"
 #include <DirectXPackedVector.h>
 #include <ShellScalingApi.h>
@@ -1215,10 +1223,12 @@ HRESULT CursorDrawer::_CreateColorPSO(
 		}
 	}
 
+	bool isSM6Supported = _d3d12Context->GetShaderModel() >= D3D_SHADER_MODEL_6_0;
+
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
 		.pRootSignature = _colorRootSignature.get(),
-		.VS = CD3DX12_SHADER_BYTECODE(CursorVS, sizeof(CursorVS)),
-		.PS = CD3DX12_SHADER_BYTECODE(TextureBlitPS, sizeof(TextureBlitPS)),
+		.VS = DirectXHelper::SelectShader(isSM6Supported, CursorVS, CursorVS_SM5),
+		.PS = DirectXHelper::SelectShader(isSM6Supported, TextureBlitPS, TextureBlitPS_SM5),
 		.BlendState = {
 			.RenderTarget = {{
 				// FinalColor = CursorColor.rgb + ScreenColor * CursorColor.a
@@ -1325,28 +1335,30 @@ HRESULT CursorDrawer::_CreateMaskPSO(
 		}
 	}
 
+	bool isSM6Supported = _d3d12Context->GetShaderModel() >= D3D_SHADER_MODEL_6_0;
+
 	D3D12_SHADER_BYTECODE psByteCode;
 	if (isMonochrome) {
 		if (isSrgb) {
-			psByteCode = CD3DX12_SHADER_BYTECODE(
-				MonochromeCursorPS_sRGB, sizeof(MonochromeCursorPS_sRGB));
+			psByteCode = DirectXHelper::SelectShader(
+				isSM6Supported, MonochromeCursorPS_sRGB, MonochromeCursorPS_sRGB_SM5);
 		} else {
-			psByteCode = CD3DX12_SHADER_BYTECODE(
-				MonochromeCursorPS, sizeof(MonochromeCursorPS));
+			psByteCode = DirectXHelper::SelectShader(
+				isSM6Supported, MonochromeCursorPS, MonochromeCursorPS_SM5);
 		}
 	} else {
 		if (isSrgb) {
-			psByteCode = CD3DX12_SHADER_BYTECODE(
-				MaskedCursorPS_sRGB, sizeof(MaskedCursorPS_sRGB));
+			psByteCode = DirectXHelper::SelectShader(
+				isSM6Supported, MaskedCursorPS_sRGB, MaskedCursorPS_sRGB_SM5);
 		} else {
-			psByteCode = CD3DX12_SHADER_BYTECODE(
-				MaskedCursorPS, sizeof(MaskedCursorPS));
+			psByteCode = DirectXHelper::SelectShader(
+				isSM6Supported, MaskedCursorPS, MaskedCursorPS_SM5);
 		}
 	}
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
 		.pRootSignature = _maskRootSignature.get(),
-		.VS = CD3DX12_SHADER_BYTECODE(CursorVS, sizeof(CursorVS)),
+		.VS = DirectXHelper::SelectShader(isSM6Supported, CursorVS, CursorVS_SM5),
 		.PS = psByteCode,
 		.BlendState = {
 			.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
@@ -1427,10 +1439,12 @@ HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
 		return hr;
 	}
 
+	bool isSM6Supported = _d3d12Context->GetShaderModel() >= D3D_SHADER_MODEL_6_0;
+
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
 		.pRootSignature = _cursorResizerRootSignature.get(),
-		.VS = CD3DX12_SHADER_BYTECODE(FullscreenVS, sizeof(FullscreenVS)),
-		.PS = CD3DX12_SHADER_BYTECODE(CursorResizerPS, sizeof(CursorResizerPS)),
+		.VS = DirectXHelper::SelectShader(isSM6Supported, FullscreenVS, FullscreenVS_SM5),
+		.PS = DirectXHelper::SelectShader(isSM6Supported, CursorResizerPS, CursorResizerPS_SM5),
 		.BlendState = {
 			.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
 		},

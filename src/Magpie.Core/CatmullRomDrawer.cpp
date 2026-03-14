@@ -1,13 +1,17 @@
 #include "pch.h"
 #include "CatmullRomDrawer.h"
 #include "CommandContext.h"
-#include "DirectXHelper.h"
 #include "D3D12Context.h"
+#include "DirectXHelper.h"
 #include "Logger.h"
 #include "shaders/CatmullRomCS.h"
+#include "shaders/CatmullRomCS_SM5.h"
 #include "shaders/CatmullRomCS_sRGB.h"
+#include "shaders/CatmullRomCS_sRGB_SM5.h"
 #include "shaders/CopyCS.h"
+#include "shaders/CopyCS_SM5.h"
 #include "shaders/CopyCS_sRGB.h"
+#include "shaders/CopyCS_sRGB_SM5.h"
 
 namespace Magpie {
 
@@ -38,7 +42,11 @@ HRESULT CatmullRomDrawer::Draw(
 			if (!_copySrgbPSO) {
 				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 					.pRootSignature = _copyRootSignature.get(),
-					.CS = CD3DX12_SHADER_BYTECODE(CopyCS_sRGB, sizeof(CopyCS_sRGB))
+					.CS = DirectXHelper::SelectShader(
+						_d3d12Context->GetShaderModel() >= D3D_SHADER_MODEL_6_0,
+						CopyCS_sRGB,
+						CopyCS_sRGB_SM5
+					)
 				};
 				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_copySrgbPSO));
@@ -53,7 +61,11 @@ HRESULT CatmullRomDrawer::Draw(
 			if (!_copyPSO) {
 				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 					.pRootSignature = _copyRootSignature.get(),
-					.CS = CD3DX12_SHADER_BYTECODE(CopyCS, sizeof(CopyCS))
+					.CS = DirectXHelper::SelectShader(
+						_d3d12Context->GetShaderModel() >= D3D_SHADER_MODEL_6_0,
+						CopyCS,
+						CopyCS_SM5
+					)
 				};
 				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_copyPSO));
@@ -82,7 +94,11 @@ HRESULT CatmullRomDrawer::Draw(
 			if (!_catmullRomSrgbPSO) {
 				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 					.pRootSignature = _catmullRomRootSignature.get(),
-					.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS_sRGB, sizeof(CatmullRomCS_sRGB))
+					.CS = DirectXHelper::SelectShader(
+						_d3d12Context->GetShaderModel() >= D3D_SHADER_MODEL_6_0,
+						CatmullRomCS_sRGB,
+						CatmullRomCS_sRGB_SM5
+					)
 				};
 				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_catmullRomSrgbPSO));
@@ -97,7 +113,11 @@ HRESULT CatmullRomDrawer::Draw(
 			if (!_catmullRomPSO) {
 				D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {
 					.pRootSignature = _catmullRomRootSignature.get(),
-					.CS = CD3DX12_SHADER_BYTECODE(CatmullRomCS, sizeof(CatmullRomCS))
+					.CS = DirectXHelper::SelectShader(
+						_d3d12Context->GetShaderModel() >= D3D_SHADER_MODEL_6_0,
+						CatmullRomCS,
+						CatmullRomCS_SM5
+					)
 				};
 				HRESULT hr = _d3d12Context->GetDevice()->CreateComputePipelineState(
 					&psoDesc, IID_PPV_ARGS(&_catmullRomPSO));
