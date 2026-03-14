@@ -79,6 +79,8 @@ private:
 
 	bool _CheckResult(HRESULT hr, std::string_view errorMsg) noexcept;
 
+	HRESULT _CreateCopyFramePSO(bool isSrgb, winrt::com_ptr<ID3D12PipelineState>& result) noexcept;
+
 	// 不使用 Initializing 状态
 	ComponentState _state = ComponentState::NoError;
 
@@ -101,8 +103,9 @@ private:
 
 	uint64_t _lastProducerFrameNumber = 0;
 
-	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
-	winrt::com_ptr<ID3D12PipelineState> _pipelineState;
+	winrt::com_ptr<ID3D12RootSignature> _copyRootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _copyFramePSO;
+	winrt::com_ptr<ID3D12PipelineState> _copyFrameSrgbPSO;
 };
 
 }

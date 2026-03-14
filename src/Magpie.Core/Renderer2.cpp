@@ -136,81 +136,6 @@ ScalingError Renderer2::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	{
-		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
-			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
-		D3D12_ROOT_PARAMETER1 rootParams[] = {
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-				.Constants = {
-					.Num32BitValues = 4
-				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
-			},
-			{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-				.DescriptorTable = {
-					.NumDescriptorRanges = 1,
-					.pDescriptorRanges = &srvRange
-				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-			}
-		};
-		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
-			.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
-			.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
-			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
-			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
-			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
-			// 边界外使用黑色填充
-			.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
-			.ShaderRegister = 0
-		};
-		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-		winrt::com_ptr<ID3DBlob> signature;
-		HRESULT hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, _d3d12Context.GetRootSignatureVersion(), signature.put(), nullptr);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
-			return ScalingError::ScalingFailedGeneral;
-		}
-
-		hr = device->CreateRootSignature(
-			0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateRootSignature 失败", hr);
-			return ScalingError::ScalingFailedGeneral;
-		}
-
-		bool isSM6Supported = _d3d12Context.GetShaderModel() >= D3D_SHADER_MODEL_6_0;
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
-			.pRootSignature = _rootSignature.get(),
-			.VS = DirectXHelper::SelectShader(isSM6Supported, CopyFrameVS, CopyFrameVS_SM5),
-			.PS = DirectXHelper::SelectShader(isSM6Supported, TextureBlitPS, TextureBlitPS_SM5),
-			.BlendState = {
-				.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
-			},
-			.SampleMask = UINT_MAX,
-			.RasterizerState = {
-				.FillMode = D3D12_FILL_MODE_SOLID,
-				.CullMode = D3D12_CULL_MODE_NONE
-			},
-			.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
-			.NumRenderTargets = 1,
-			.RTVFormats = { _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-				DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
-			.SampleDesc = { .Count = 1 }
-		};
-		hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
-			return ScalingError::ScalingFailedGeneral;
-		}
-	}
-
 	// 同步点，使生产者线程的修改可见
 	if (!task.GetResult(std::memory_order_acquire)) {
 		Logger::Get().Error("FrameProducer::InitializeAsync 失败");
@@ -562,13 +487,25 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	uint32_t rtvOffset, rawRtvOffset;
 	_presenter->BeginFrame(&backBuffer, rtvOffset, rawRtvOffset);
 
-	uint32_t frameIndex;
-	HRESULT hr = _d3d12Context.BeginFrame(frameIndex, _pipelineState.get());
-	if (FAILED(hr)) {
-		Logger::Get().ComError("D3D12Context::BeginFrame 失败", hr);
-		return hr;
-	}
+	{
+		bool isSrgb = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange;
+		winrt::com_ptr<ID3D12PipelineState>& pso = isSrgb ? _copyFrameSrgbPSO : _copyFramePSO;
+		if (!pso) {
+			HRESULT hr = _CreateCopyFramePSO(isSrgb, pso);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("_CreateCopyFramePSO 失败", hr);
+				return hr;
+			}
+		}
 
+		uint32_t frameIndex;
+		HRESULT hr = _d3d12Context.BeginFrame(frameIndex, pso.get());
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3D12Context::BeginFrame 失败", hr);
+			return hr;
+		}
+	}
+	
 	_graphicsContext.SetDescriptorHeap(_csuDescriptorHeap.GetHeap());
 
 	_graphicsContext.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
@@ -576,7 +513,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 	_graphicsContext.InsertTransitionBarrier(
 		backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-	_graphicsContext.SetRootSignature(_rootSignature.get());
+	_graphicsContext.SetRootSignature(_copyRootSignature.get());
 
 	const Size rendererSize = _presenter->GetSize();
 
@@ -607,7 +544,7 @@ HRESULT Renderer2::_RenderImpl(bool waitForGpu) noexcept {
 		_graphicsContext.OMSetRenderTarget(rawRtvOffset);
 	}
 
-	hr = _cursorDrawer.Draw(_graphicsContext, completedFenceValue, fenceValueToSignal,
+	HRESULT hr = _cursorDrawer.Draw(_graphicsContext, completedFenceValue, fenceValueToSignal,
 		curFrameSrvOffset, nullptr);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CursorDrawer::Draw 失败", hr);
@@ -705,6 +642,86 @@ bool Renderer2::_CheckResult(HRESULT hr, std::string_view errorMsg) noexcept {
 
 	Logger::Get().ComError(errorMsg, hr);
 	return false;
+}
+
+HRESULT Renderer2::_CreateCopyFramePSO(bool isSrgb, winrt::com_ptr<ID3D12PipelineState>& result) noexcept {
+	ID3D12Device5* device = _d3d12Context.GetDevice();
+
+	if (!_copyRootSignature) {
+		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
+			D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE);
+		D3D12_ROOT_PARAMETER1 rootParams[] = {
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 4
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX
+			},
+			{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+				.DescriptorTable = {
+					.NumDescriptorRanges = 1,
+					.pDescriptorRanges = &srvRange
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+			}
+		};
+		D3D12_STATIC_SAMPLER_DESC samplerDesc = {
+			.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT,
+			.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+			.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+			.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+			.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+			// 边界外使用黑色填充
+			.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+			.ShaderRegister = 0
+		};
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			(UINT)std::size(rootParams), rootParams, 1, &samplerDesc, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+		winrt::com_ptr<ID3DBlob> signature;
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc, _d3d12Context.GetRootSignatureVersion(), signature.put(), nullptr);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("D3DX12SerializeVersionedRootSignature 失败", hr);
+			return hr;
+		}
+
+		hr = device->CreateRootSignature(
+			0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_copyRootSignature));
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateRootSignature 失败", hr);
+			return hr;
+		}
+	}
+	
+	bool isSM6Supported = _d3d12Context.GetShaderModel() >= D3D_SHADER_MODEL_6_0;
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _copyRootSignature.get(),
+		.VS = DirectXHelper::SelectShader(isSM6Supported, CopyFrameVS, CopyFrameVS_SM5),
+		.PS = DirectXHelper::SelectShader(isSM6Supported, TextureBlitPS, TextureBlitPS_SM5),
+		.BlendState = {
+			.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
+		},
+		.SampleMask = UINT_MAX,
+		.RasterizerState = {
+			.FillMode = D3D12_FILL_MODE_SOLID,
+			.CullMode = D3D12_CULL_MODE_NONE
+		},
+		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+		.NumRenderTargets = 1,
+		.RTVFormats = { isSrgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
+		.SampleDesc = { .Count = 1 }
+	};
+	HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&result));
+	if (FAILED(hr)) {
+		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
+		return hr;
+	}
+
+	return S_OK;
 }
 
 }

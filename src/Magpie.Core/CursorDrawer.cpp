@@ -1034,6 +1034,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 		(cursorInfo.size.width > cursorInfo.originSize.width &&
 			ScalingWindow::Get().Options().cursorInterpolationMode == CursorInterpolationMode::Bicubic))
 	) {
+		// SDR 色域下由于预乘 alpha 无法在线性空间插值
 		texDesc.Width = cursorInfo.size.width;
 		texDesc.Height = cursorInfo.size.height;
 		texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
@@ -1177,6 +1178,8 @@ HRESULT CursorDrawer::_CreateColorPSO(
 	bool isSrgb,
 	winrt::com_ptr<ID3D12PipelineState>& result
 ) noexcept {
+	ID3D12Device5* device = _d3d12Context->GetDevice();
+
 	if (!_colorRootSignature) {
 		winrt::com_ptr<ID3DBlob> signature;
 		{
@@ -1218,7 +1221,7 @@ HRESULT CursorDrawer::_CreateColorPSO(
 			}
 		}
 
-		HRESULT hr = _d3d12Context->GetDevice()->CreateRootSignature(
+		HRESULT hr = device->CreateRootSignature(
 			0,
 			signature->GetBufferPointer(),
 			signature->GetBufferSize(),
@@ -1259,8 +1262,7 @@ HRESULT CursorDrawer::_CreateColorPSO(
 		.RTVFormats = { isSrgb ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT },
 		.SampleDesc = { .Count = 1 }
 	};
-	HRESULT hr = _d3d12Context->GetDevice()->CreateGraphicsPipelineState(
-		&psoDesc, IID_PPV_ARGS(&result));
+	HRESULT hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&result));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
 		return hr;
@@ -1391,6 +1393,8 @@ HRESULT CursorDrawer::_CreateMaskPSO(
 }
 
 HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
+	ID3D12Device5* device = _d3d12Context->GetDevice();
+
 	winrt::com_ptr<ID3DBlob> signature;
 	{
 		CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0,
@@ -1435,7 +1439,7 @@ HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
 		}
 	}
 
-	HRESULT hr = _d3d12Context->GetDevice()->CreateRootSignature(
+	HRESULT hr = device->CreateRootSignature(
 		0,
 		signature->GetBufferPointer(),
 		signature->GetBufferSize(),
@@ -1465,8 +1469,7 @@ HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
 		.RTVFormats = { DXGI_FORMAT_R16G16B16A16_FLOAT },
 		.SampleDesc = { .Count = 1 }
 	};
-	hr = _d3d12Context->GetDevice()->CreateGraphicsPipelineState(
-		&psoDesc, IID_PPV_ARGS(&_cursorResizerPSO));
+	hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_cursorResizerPSO));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("CreateGraphicsPipelineState 失败", hr);
 		return hr;
