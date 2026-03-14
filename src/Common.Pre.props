@@ -41,6 +41,5 @@
     <PlatformToolset Condition="!$(UseClangCL) And $(VS17)">v143</PlatformToolset>
     <PlatformToolset Condition="!$(UseClangCL) And !$(VS17)">v145</PlatformToolset>
     <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
-    <WholeProgramOptimization Condition="'$(Configuration)' == 'Release'">true</WholeProgramOptimization>
   </PropertyGroup>
 </Project>
