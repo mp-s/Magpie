@@ -1025,10 +1025,15 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 	auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
 
-	// 单色光标和彩色掩码光标始终使用最近邻采样，无需缩放
-	if (cursorInfo.type != _CursorType::Color || cursorInfo.size == cursorInfo.originSize) {
-		cursorInfo.texture = std::move(cursorInfo.originTexture);
-	} else {
+	// * 单色光标和彩色掩码光标始终使用最近邻采样
+	// * 不需要缩放时执行最近邻采样
+	// * 需要缩小时始终使用 CatmullRom
+	// * 需要放大时是否使用 CatmullRom 取决于 cursorInterpolationMode
+	if (cursorInfo.type == _CursorType::Color && 
+		(cursorInfo.size.width < cursorInfo.originSize.width ||
+		(cursorInfo.size.width > cursorInfo.originSize.width &&
+			ScalingWindow::Get().Options().cursorInterpolationMode == CursorInterpolationMode::Bicubic))
+	) {
 		texDesc.Width = cursorInfo.size.width;
 		texDesc.Height = cursorInfo.size.height;
 		texDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
@@ -1127,6 +1132,8 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 			D3D12_RESOURCE_STATE_RENDER_TARGET,
 			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
 		);
+	} else {
+		cursorInfo.texture = std::move(cursorInfo.originTexture);
 	}
 
 	hr = descriptorHeap.Alloc(1, cursorInfo.textureSrvOffset);

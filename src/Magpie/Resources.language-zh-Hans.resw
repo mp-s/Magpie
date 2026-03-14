@@ -540,8 +540,8 @@
   <data name="Profile_Cursor_DrawCursor_Interpolation.Header" xml:space="preserve">
     <value>插值算法</value>
   </data>
-  <data name="Profile_Cursor_DrawCursor_Interpolation_Bilinear.Content" xml:space="preserve">
-    <value>双线性</value>
+  <data name="Profile_Cursor_DrawCursor_Interpolation_Bicubic.Content" xml:space="preserve">
+    <value>双三次</value>
   </data>
   <data name="Profile_Cursor_DrawCursor_Interpolation_NearestNeighbor.Content" xml:space="preserve">
     <value>最近邻</value>

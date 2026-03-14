@@ -20,7 +20,7 @@ enum class MultiMonitorUsage {
 
 enum class CursorInterpolationMode {
 	NearestNeighbor,
-	Bilinear,
+	Bicubic,
 	COUNT
 };
 
