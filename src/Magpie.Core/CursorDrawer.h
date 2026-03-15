@@ -8,6 +8,7 @@ namespace Magpie {
 
 class D3D12Context;
 class GraphicsContext;
+class DescriptorHeap;
 
 class CursorDrawer {
 public:
@@ -105,6 +106,7 @@ private:
 		Size size;
 		Point hotspot;
 		winrt::com_ptr<ID3D12Resource> texture;
+		uint64_t lastUseFenceValue = 0;
 		
 		Size originSize;
 		ByteBuffer originTextureData;
@@ -116,6 +118,11 @@ private:
 		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
 		uint32_t textureRtvOffset = std::numeric_limits<uint32_t>::max();
 		uint32_t originTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+
+		void FreeDescriptors(
+			DescriptorHeap& csuDescriptorHeap,
+			DescriptorHeap& rtvDescriptorHeap
+		) const noexcept;
 	};
 
 	std::pair<const _CursorInfoKey, _CursorInfo>* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;

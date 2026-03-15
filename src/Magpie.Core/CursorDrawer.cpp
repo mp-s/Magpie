@@ -72,28 +72,20 @@ static DWORD GetCursorBaseSize() noexcept {
 CursorDrawer::~CursorDrawer() noexcept {
 #ifdef _DEBUG
 	if (_d3d12Context) {
-		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
+		auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
 		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 
 		for (const auto& pair : _cursorInfos) {
-			if (pair.second.textureSrvOffset != std::numeric_limits<uint32_t>::max()) {
-				descriptorHeap.Free(pair.second.textureSrvOffset, 1);
-			}
-			if (pair.second.textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
-				rtvDescriptorHeap.Free(pair.second.textureRtvOffset, 1);
-			}
-			if (pair.second.originTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
-				descriptorHeap.Free(pair.second.originTextureSrvOffset, 1);
-			}
+			pair.second.FreeDescriptors(csuDescriptorHeap, rtvDescriptorHeap);
 		}
 
 		if (_tempOriginTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
-			descriptorHeap.Free(_tempOriginTextureSrvOffset, 1);
+			csuDescriptorHeap.Free(_tempOriginTextureSrvOffset, 1);
 		}
 		
 		for (const _RetiredTempOriginTexture& rt : _retiredTempOriginTextures) {
 			if (rt.srvOffset != std::numeric_limits<uint32_t>::max()) {
-				descriptorHeap.Free(rt.srvOffset, 1);
+				csuDescriptorHeap.Free(rt.srvOffset, 1);
 			}
 		}
 	}
@@ -211,7 +203,7 @@ bool CursorDrawer::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 					_curCursorInfoKeyValue = _ResolveCursor(hCursor, cursorPos, false);
 					if (_curCursorInfoKeyValue) {
 						const _CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
-						// 检查光标是否在视口内
+						// 检查光标是否在视口内。hCursor 不为 NULL 说明光标已在缩放窗口内，因此这个检查很少失败
 						const RECT cursorRect = {
 							cursorPos.x - (LONG)cursorInfo.hotspot.x,
 							cursorPos.y - (LONG)cursorInfo.hotspot.y,
@@ -260,13 +252,15 @@ HRESULT CursorDrawer::Draw(
 	uint32_t curFrameSrvOffset,
 	ID3D12Resource* backBuffer
 ) noexcept {
-	_ClearRetiredResources(completedFenceValue);
-
 	if (!_hCurCursor || !_curCursorInfoKeyValue) {
 		return S_OK;
 	}
 
 	_CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
+	cursorInfo.lastUseFenceValue = nextFenceValue;
+
+	// 可能会清理 _CursorInfo，但这不会导致 cursorInfo 失效
+	_ClearRetiredResources(completedFenceValue);
 
 	if (!cursorInfo.texture) {
 		HRESULT hr = _InitializeCursorTexture(graphicsContext , cursorInfo);
@@ -1162,19 +1156,10 @@ void CursorDrawer::_ClearCursorInfos() noexcept {
 	_hCurCursor = NULL;
 	_curCursorInfoKeyValue = nullptr;
 
-	auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
+	auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
 	auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
-
 	for (const auto& pair : _cursorInfos) {
-		if (pair.second.textureSrvOffset != std::numeric_limits<uint32_t>::max()) {
-			descriptorHeap.Free(pair.second.textureSrvOffset, 1);
-		}
-		if (pair.second.textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
-			rtvDescriptorHeap.Free(pair.second.textureRtvOffset, 1);
-		}
-		if (pair.second.originTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
-			descriptorHeap.Free(pair.second.originTextureSrvOffset, 1);
-		}
+		pair.second.FreeDescriptors(csuDescriptorHeap, rtvDescriptorHeap);
 	}
 
 	_cursorInfos.clear();
@@ -1487,57 +1472,91 @@ HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
 
 void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept {
 	if (!_cursorInfosWithTempResources.empty()) {
+		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
+
 		// fenceValue 按升序排列
-		auto it = std::find_if(
-			_cursorInfosWithTempResources.begin(),
-			_cursorInfosWithTempResources.end(),
-			[&](const _CursorInfoKey& cursorInfoKey) {
-				auto it1 = _cursorInfos.find(cursorInfoKey);
-				if (it1 == _cursorInfos.end()) {
-					// 不会出现这种情况，万一出现可以安全删除
-					assert(false);
-					return false;
-				} else {
-					return it1->second.tempResourcesFenceValue > completedFenceValue;
+		auto it = _cursorInfosWithTempResources.begin();
+		for (; it != _cursorInfosWithTempResources.end(); ++it) {
+			auto it1 = _cursorInfos.find(*it);
+			if (it1 == _cursorInfos.end()) {
+				// 不会出现这种情况，万一出现可以安全删除
+				assert(false);
+			} else {
+				if (it1->second.tempResourcesFenceValue > completedFenceValue) {
+					break;
 				}
-			}
-		);
-		if (it == _cursorInfosWithTempResources.begin()) {
-			return;
-		}
 
-		for (auto it1 = _cursorInfosWithTempResources.begin(); it1 != it; ++it1) {
-			auto it2 = _cursorInfos.find(*it1);
-			if (it2 != _cursorInfos.end()) {
-				it2->second.originUploadBuffer = nullptr;
-				it2->second.originTexture = nullptr;
+				it1->second.originUploadBuffer = nullptr;
+				it1->second.originTexture = nullptr;
 			}
 		}
 
-		_cursorInfosWithTempResources.erase(_cursorInfosWithTempResources.begin(), it);
+		if (it != _cursorInfosWithTempResources.begin()) {
+			_cursorInfosWithTempResources.erase(_cursorInfosWithTempResources.begin(), it);
+		}
+	}
+
+	// _cursorInfos 成员太多时清理使用频率较低的
+	static constexpr uint32_t MAX_CURSOR_INFO_COUNT = 63;
+	if (_cursorInfos.size() > MAX_CURSOR_INFO_COUNT) {
+		std::vector<const std::pair<const _CursorInfoKey, _CursorInfo>*> cursorInfos;
+		for (const auto& pair : _cursorInfos) {
+			cursorInfos.push_back(&pair);
+		}
+
+		// 以最近使用的顺序排序
+		std::sort(cursorInfos.begin(), cursorInfos.end(), [](auto l, auto r) {
+			return l->second.lastUseFenceValue < r->second.lastUseFenceValue;
+		});
+
+		auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
+		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
+		// 最多删除一半成员
+		for (uint32_t i = 0; i < (MAX_CURSOR_INFO_COUNT + 1) / 2; ++i) {
+			const _CursorInfo& curCursorInfo = cursorInfos[i]->second;
+
+			if (curCursorInfo.lastUseFenceValue <= completedFenceValue) {
+				curCursorInfo.FreeDescriptors(csuDescriptorHeap, rtvDescriptorHeap);
+				_cursorInfos.erase(cursorInfos[i]->first);
+			} else {
+				break;
+			}
+		}
 	}
 
 	if (!_retiredTempOriginTextures.empty()) {
-		// fenceValue 按升序排列
-		auto it = std::find_if(
-			_retiredTempOriginTextures.begin(),
-			_retiredTempOriginTextures.end(),
-			[&](const _RetiredTempOriginTexture& rt) {
-				return rt.fenceValue > completedFenceValue;
-			}
-		);
-		if (it == _retiredTempOriginTextures.begin()) {
-			return;
-		}
-
 		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
-		for (auto it1 = _retiredTempOriginTextures.begin(); it1 != it; ++it1) {
-			if (it1->srvOffset != std::numeric_limits<uint32_t>::max()) {
-				descriptorHeap.Free(it1->srvOffset, 1);
+
+		// fenceValue 按升序排列
+		auto it = _retiredTempOriginTextures.begin();
+		for (; it != _retiredTempOriginTextures.end(); ++it) {
+			if (it->fenceValue > completedFenceValue) {
+				break;
+			}
+
+			if (it->srvOffset != std::numeric_limits<uint32_t>::max()) {
+				descriptorHeap.Free(it->srvOffset, 1);
 			}
 		}
 
-		_retiredTempOriginTextures.erase(_retiredTempOriginTextures.begin(), it);
+		if (it != _retiredTempOriginTextures.begin()) {
+			_retiredTempOriginTextures.erase(_retiredTempOriginTextures.begin(), it);
+		}
+	}
+}
+
+void CursorDrawer::_CursorInfo::FreeDescriptors(
+	DescriptorHeap& csuDescriptorHeap,
+	DescriptorHeap& rtvDescriptorHeap
+) const noexcept {
+	if (textureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+		csuDescriptorHeap.Free(textureSrvOffset, 1);
+	}
+	if (textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
+		rtvDescriptorHeap.Free(textureRtvOffset, 1);
+	}
+	if (originTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+		csuDescriptorHeap.Free(originTextureSrvOffset, 1);
 	}
 }
 
