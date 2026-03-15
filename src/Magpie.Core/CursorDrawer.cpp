@@ -1472,7 +1472,8 @@ HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
 
 void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept {
 	if (!_cursorInfosWithTempResources.empty()) {
-		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
+		auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
+		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 
 		// fenceValue 按升序排列
 		auto it = _cursorInfosWithTempResources.begin();
@@ -1482,12 +1483,23 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 				// 不会出现这种情况，万一出现可以安全删除
 				assert(false);
 			} else {
-				if (it1->second.tempResourcesFenceValue > completedFenceValue) {
+				_CursorInfo& cursorInfo = it1->second;
+
+				if (cursorInfo.tempResourcesFenceValue > completedFenceValue) {
 					break;
 				}
 
-				it1->second.originUploadBuffer = nullptr;
-				it1->second.originTexture = nullptr;
+				cursorInfo.originUploadBuffer = nullptr;
+				cursorInfo.originTexture = nullptr;
+
+				if (cursorInfo.textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
+					rtvDescriptorHeap.Free(cursorInfo.textureRtvOffset, 1);
+					cursorInfo.textureRtvOffset = std::numeric_limits<uint32_t>::max();
+				}
+				if (cursorInfo.originTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+					csuDescriptorHeap.Free(cursorInfo.originTextureSrvOffset, 1);
+					cursorInfo.originTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+				}
 			}
 		}
 
@@ -1525,7 +1537,7 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 	}
 
 	if (!_retiredTempOriginTextures.empty()) {
-		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
+		auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
 
 		// fenceValue 按升序排列
 		auto it = _retiredTempOriginTextures.begin();
@@ -1535,7 +1547,7 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 			}
 
 			if (it->srvOffset != std::numeric_limits<uint32_t>::max()) {
-				descriptorHeap.Free(it->srvOffset, 1);
+				csuDescriptorHeap.Free(it->srvOffset, 1);
 			}
 		}
 
