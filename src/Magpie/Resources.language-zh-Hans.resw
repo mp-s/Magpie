@@ -1055,7 +1055,7 @@
     <value>使用软件渲染</value>
   </data>
   <data name="Home_Advanced_DeveloperOptions_HighestShaderModel.Header" xml:space="preserve">
-    <value>最高 shader model</value>
+    <value>最高 shader model 版本</value>
   </data>
   <data name="Home_Advanced_DeveloperOptions_HighestShaderModel_NotLimited.Content" xml:space="preserve">
     <value>不限制</value>

@@ -271,6 +271,9 @@ HRESULT CursorDrawer::Draw(
 			Logger::Get().ComError("_InitializeCursorTexture 失败", hr);
 			return hr;
 		}
+
+		_curCursorInfo->originResourcesFenceValue = nextFenceValue;
+		_cursorInfosWithOriginResources.push_back(_curCursorInfo);
 	}
 
 	const RECT cursorRect = {
@@ -1172,6 +1175,7 @@ void CursorDrawer::_ClearCursorInfos() noexcept {
 	}
 
 	_cursorInfos.clear();
+	_cursorInfosWithOriginResources.clear();
 }
 
 HRESULT CursorDrawer::_CreateColorPSO(
@@ -1479,30 +1483,50 @@ HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
 }
 
 void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept {
-	if (_retiredTempOriginTextures.empty()) {
-		return;
-	}
-
-	// _retiredTempOriginTextures 中元素的 fenceValue 按升序排列
-	auto it = std::find_if(
-		_retiredTempOriginTextures.begin(),
-		_retiredTempOriginTextures.end(),
-		[&](const _RetiredTempOriginTexture& rt) {
-			return rt.fenceValue > completedFenceValue;
+	if (!_cursorInfosWithOriginResources.empty()) {
+		// fenceValue 按升序排列
+		auto it = std::find_if(
+			_cursorInfosWithOriginResources.begin(),
+			_cursorInfosWithOriginResources.end(),
+			[&](_CursorInfo* cursorInfo) {
+				return cursorInfo->originResourcesFenceValue > completedFenceValue;
+			}
+		);
+		if (it == _cursorInfosWithOriginResources.begin()) {
+			return;
 		}
-	);
-	if (it == _retiredTempOriginTextures.begin()) {
-		return;
-	}
 
-	auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
-	for (auto it1 = _retiredTempOriginTextures.begin(); it1 != it; ++it1) {
-		if (it1->srvOffset != std::numeric_limits<uint32_t>::max()) {
-			descriptorHeap.Free(it1->srvOffset, 1);
+		for (auto it1 = _cursorInfosWithOriginResources.begin(); it1 != it; ++it1) {
+			_CursorInfo& cursorInfo = **it1;
+			cursorInfo.originUploadBuffer = nullptr;
+			cursorInfo.originTexture = nullptr;
 		}
+
+		_cursorInfosWithOriginResources.erase(_cursorInfosWithOriginResources.begin(), it);
 	}
 
-	_retiredTempOriginTextures.erase(_retiredTempOriginTextures.begin(), it);
+	if (!_retiredTempOriginTextures.empty()) {
+		// fenceValue 按升序排列
+		auto it = std::find_if(
+			_retiredTempOriginTextures.begin(),
+			_retiredTempOriginTextures.end(),
+			[&](const _RetiredTempOriginTexture& rt) {
+				return rt.fenceValue > completedFenceValue;
+			}
+		);
+		if (it == _retiredTempOriginTextures.begin()) {
+			return;
+		}
+
+		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
+		for (auto it1 = _retiredTempOriginTextures.begin(); it1 != it; ++it1) {
+			if (it1->srvOffset != std::numeric_limits<uint32_t>::max()) {
+				descriptorHeap.Free(it1->srvOffset, 1);
+			}
+		}
+
+		_retiredTempOriginTextures.erase(_retiredTempOriginTextures.begin(), it);
+	}
 }
 
 }

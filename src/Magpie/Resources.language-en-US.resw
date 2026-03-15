@@ -1055,7 +1055,7 @@
     <value>Use software rendering</value>
   </data>
   <data name="Home_Advanced_DeveloperOptions_HighestShaderModel.Header" xml:space="preserve">
-    <value>Highest shader model</value>
+    <value>Highest shader model version</value>
   </data>
   <data name="Home_Advanced_DeveloperOptions_HighestShaderModel_NotLimited.Content" xml:space="preserve">
     <value>Not limited</value>

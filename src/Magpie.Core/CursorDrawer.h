@@ -95,8 +95,10 @@ private:
 		
 		Size originSize;
 		ByteBuffer originTextureData;
+		// 这两个纹理使用完毕后在 _ClearRetiredResources 中释放
 		winrt::com_ptr<ID3D12Resource> originUploadBuffer;
 		winrt::com_ptr<ID3D12Resource> originTexture;
+		uint64_t originResourcesFenceValue = 0;
 
 		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
 		uint32_t textureRtvOffset = std::numeric_limits<uint32_t>::max();
@@ -157,6 +159,9 @@ private:
 	// (HCURSOR, DPI) -> _CursorInfo
 	// DPI 为 0 表示此光标不随 DPI 缩放
 	phmap::flat_hash_map<std::pair<HCURSOR, uint32_t>, _CursorInfo> _cursorInfos;
+
+	// 保存临时纹理资源未被释放的 _CursorInfo
+	SmallVector<_CursorInfo*, 1> _cursorInfosWithOriginResources;
 
 	// 保存解析失败的光标以避免重复尝试
 	phmap::flat_hash_set<HCURSOR> _unresolvableCursors;
