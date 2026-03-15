@@ -609,6 +609,26 @@ void HomeViewModel::DuplicateFrameDetectionMode(int value) {
 	RaisePropertyChanged(L"DuplicateFrameDetectionMode");
 }
 
+int HomeViewModel::HighestShaderModel() const noexcept {
+	return (int)AppSettings::Get().HighestShaderModel();
+}
+
+void HomeViewModel::HighestShaderModel(int value) {
+	if (value < 0) {
+		return;
+	}
+
+	auto version = (::Magpie::HighestShaderModel)value;
+
+	AppSettings& settings = AppSettings::Get();
+	if (settings.HighestShaderModel() == version) {
+		return;
+	}
+
+	settings.HighestShaderModel(version);
+	RaisePropertyChanged(L"HighestShaderModel");
+}
+
 void HomeViewModel::_ScalingService_IsTimerOnChanged(bool value, bool) {
 	if (!value) {
 		RaisePropertyChanged(L"TimerProgressRingValue");

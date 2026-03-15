@@ -66,6 +66,7 @@ void ScalingOptions::Prepare() noexcept {
 	IsWindowedMode: {}
 	IsDebugMode: {}
 	IsBenchmarkMode: {}
+	UseWarp: {}
 	IsTopmostDisabled: {}
 	IsFP16Disabled: {}
 	IsEffectCacheDisabled: {}
@@ -94,11 +95,14 @@ void ScalingOptions::Prepare() noexcept {
 	duplicateFrameDetectionMode: {}
 	fullscreenInitialToolbarState: {}
 	windowedInitialToolbarState: {}
+	initialWindowedScaleFactor: {},
+	highestShaderModel: {},
 	screenshotsDir: {}
 	effects: {})",
 		IsWindowedMode(),
 		IsDebugMode(),
 		IsBenchmarkMode(),
+		UseWarp(),
 		IsTopmostDisabled(),
 		IsFP16Disabled(),
 		IsEffectCacheDisabled(),
@@ -120,12 +124,14 @@ void ScalingOptions::Prepare() noexcept {
 		minFrameRate,
 		maxFrameRate.has_value() ? *maxFrameRate : 0.0f,
 		cursorScale,
-		(int)captureMethod,
-		(int)multiMonitorUsage,
-		(int)cursorInterpolationMode,
-		(int)duplicateFrameDetectionMode,
-		(int)fullscreenInitialToolbarState,
-		(int)windowedInitialToolbarState,
+		(uint32_t)captureMethod,
+		(uint32_t)multiMonitorUsage,
+		(uint32_t)cursorInterpolationMode,
+		(uint32_t)duplicateFrameDetectionMode,
+		(uint32_t)fullscreenInitialToolbarState,
+		(uint32_t)windowedInitialToolbarState,
+		initialWindowedScaleFactor,
+		(uint32_t)highestShaderModel,
 		StrHelper::UTF16ToUTF8(screenshotsDir.native()),
 		LogEffects(effects)
 	));

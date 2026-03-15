@@ -19,6 +19,30 @@ struct JsonHelper {
 		bool required = false
 	) noexcept;
 
+	template <typename Enum>
+	static bool ReadEnum(
+		const rapidjson::GenericObject<true, rapidjson::Value>& obj,
+		const char* name,
+		Enum& result,
+		bool required = false
+	) noexcept {
+		auto node = obj.FindMember(name);
+		if (node == obj.MemberEnd()) {
+			return !required;
+		}
+
+		if (!node->value.IsUint()) {
+			return false;
+		}
+
+		uint32_t value = node->value.GetUint();
+		if (value < (uint32_t)Enum::COUNT) {
+			result = (Enum)value;
+		}
+
+		return true;
+	}
+
 	static bool ReadUInt(
 		const rapidjson::GenericObject<true, rapidjson::Value>& obj,
 		const char* name,

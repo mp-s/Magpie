@@ -375,6 +375,7 @@ void AppSettings::IsDeveloperMode(bool value) noexcept {
 		_isSaveEffectSources = false;
 		_isWarningsAreErrors = false;
 		_duplicateFrameDetectionMode = DuplicateFrameDetectionMode::Dynamic;
+		_highestShaderModel = HighestShaderModel::NotLimited;
 		_isFP16Disabled = false;
 	}
 
@@ -623,6 +624,8 @@ bool AppSettings::_Save(const _AppSettingsData& data) noexcept {
 	writer.Int64(data._updateCheckDate.time_since_epoch().count());
 	writer.Key("duplicateFrameDetectionMode");
 	writer.Uint((uint32_t)data._duplicateFrameDetectionMode);
+	writer.Key("highestShaderModel");
+	writer.Uint((uint32_t)data._highestShaderModel);
 	writer.Key("minFrameRate");
 	writer.Double(data._minFrameRate);
 	writer.Key("disableFP16");
@@ -818,14 +821,9 @@ void AppSettings::_LoadSettings(const rapidjson::GenericObject<true, rapidjson::
 		using std::chrono::system_clock;
 		_updateCheckDate = system_clock::time_point(system_clock::duration(d));
 	}
-	{
-		uint32_t duplicateFrameDetectionMode = (uint32_t)DuplicateFrameDetectionMode::Dynamic;
-		JsonHelper::ReadUInt(root, "duplicateFrameDetectionMode", duplicateFrameDetectionMode);
-		if (duplicateFrameDetectionMode > 2) {
-			duplicateFrameDetectionMode = (uint32_t)DuplicateFrameDetectionMode::Dynamic;
-		}
-		_duplicateFrameDetectionMode = (::Magpie::DuplicateFrameDetectionMode)duplicateFrameDetectionMode;
-	}
+	
+	JsonHelper::ReadEnum(root, "duplicateFrameDetectionMode", _duplicateFrameDetectionMode);
+	JsonHelper::ReadEnum(root, "highestShaderModel", _highestShaderModel);
 	JsonHelper::ReadFloat(root, "minFrameRate", _minFrameRate);
 	JsonHelper::ReadBool(root, "disableFP16", _isFP16Disabled);
 
@@ -868,27 +866,13 @@ void AppSettings::_LoadSettings(const rapidjson::GenericObject<true, rapidjson::
 	if (overlayNode != root.MemberEnd() && overlayNode->value.IsObject()) {
 		auto overlayObj = overlayNode->value.GetObj();
 
-		uint32_t initialToolbarState = (uint32_t)ToolbarState::AutoHide;
-		if (JsonHelper::ReadUInt(overlayObj, "fullscreenInitialToolbarState", initialToolbarState, true)) {
-			if (initialToolbarState >= (uint32_t)ToolbarState::COUNT) {
-				initialToolbarState = (uint32_t)ToolbarState::AutoHide;
-			}
-			_fullscreenInitialToolbarState = (ToolbarState)initialToolbarState;
-
-			initialToolbarState = (uint32_t)ToolbarState::AutoHide;
-			JsonHelper::ReadUInt(overlayObj, "windowedInitialToolbarState", initialToolbarState);
-			if (initialToolbarState >= (uint32_t)ToolbarState::COUNT) {
-				initialToolbarState = (uint32_t)ToolbarState::AutoHide;
-			}
-			_windowedInitialToolbarState = (ToolbarState)initialToolbarState;
+		if (JsonHelper::ReadEnum(overlayObj, "fullscreenInitialToolbarState",
+			_fullscreenInitialToolbarState, true)) {
+			JsonHelper::ReadEnum(overlayObj, "windowedInitialToolbarState", _windowedInitialToolbarState);
 		} else {
 			// v0.12.0-preview1 中工具栏初始状态不区分全屏和窗口模式缩放
-			JsonHelper::ReadUInt(overlayObj, "initialToolbarState", initialToolbarState);
-			if (initialToolbarState >= (uint32_t)ToolbarState::COUNT) {
-				initialToolbarState = (uint32_t)ToolbarState::AutoHide;
-			}
-			_fullscreenInitialToolbarState = (ToolbarState)initialToolbarState;
-			_windowedInitialToolbarState = (ToolbarState)initialToolbarState;
+			JsonHelper::ReadEnum(overlayObj, "initialToolbarState", _fullscreenInitialToolbarState);
+			_windowedInitialToolbarState = _fullscreenInitialToolbarState;
 		}
 
 		{
@@ -992,42 +976,23 @@ bool AppSettings::_LoadProfile(
 		profile.scalingMode = -1;
 	}
 
-	{
-		uint32_t captureMethod = (uint32_t)CaptureMethod::GraphicsCapture;
-		if (!JsonHelper::ReadUInt(profileObj, "captureMethod", captureMethod, true)) {
-			// v0.10.0-preview1 使用 captureMode
-			JsonHelper::ReadUInt(profileObj, "captureMode", captureMethod);
+	if (!JsonHelper::ReadEnum(profileObj, "captureMethod", profile.captureMethod, true)) {
+		// v0.10.0-preview1 使用 captureMode
+		JsonHelper::ReadEnum(profileObj, "captureMode", profile.captureMethod);
+	}
+	
+	if (profile.captureMethod == CaptureMethod::DesktopDuplication) {
+		// Desktop Duplication 捕获模式要求 Win10 20H1+
+		if (!Win32Helper::GetOSVersion().Is20H1OrNewer()) {
+			profile.captureMethod = CaptureMethod::GraphicsCapture;
 		}
-		
-		if (captureMethod >= (uint32_t)CaptureMethod::COUNT) {
-			captureMethod = (uint32_t)CaptureMethod::GraphicsCapture;
-		} else if (captureMethod == (uint32_t)CaptureMethod::DesktopDuplication) {
-			// Desktop Duplication 捕获模式要求 Win10 20H1+
-			if (!Win32Helper::GetOSVersion().Is20H1OrNewer()) {
-				captureMethod = (uint32_t)CaptureMethod::GraphicsCapture;
-			}
-		}
-		profile.captureMethod = (CaptureMethod)captureMethod;
 	}
 
-	{
-		uint32_t multiMonitorUsage = (uint32_t)MultiMonitorUsage::Closest;
-		JsonHelper::ReadUInt(profileObj, "multiMonitorUsage", multiMonitorUsage);
-		if (multiMonitorUsage >= (uint32_t)MultiMonitorUsage::COUNT) {
-			multiMonitorUsage = (uint32_t)MultiMonitorUsage::Closest;
-		}
-		profile.multiMonitorUsage = (MultiMonitorUsage)multiMonitorUsage;
-	}
+	JsonHelper::ReadEnum(profileObj, "multiMonitorUsage", profile.multiMonitorUsage);
 
-	{
-		uint32_t factor = (uint32_t)InitialWindowedScaleFactor::Auto;
-		JsonHelper::ReadUInt(profileObj, "initialWindowedScaleFactor", factor);
-		if (factor >= (uint32_t)InitialWindowedScaleFactor::COUNT) {
-			factor = (uint32_t)InitialWindowedScaleFactor::Auto;
-		}
-		profile.initialWindowedScaleFactor = (InitialWindowedScaleFactor)factor;
-	}
-
+	JsonHelper::ReadEnum(profileObj, "initialWindowedScaleFactor",
+		profile.initialWindowedScaleFactor);
+	
 	JsonHelper::ReadFloat(profileObj, "customInitialWindowedScaleFactor",
 		profile.customInitialWindowedScaleFactor);
 	if (profile.customInitialWindowedScaleFactor < 1.0f) {
@@ -1088,29 +1053,14 @@ bool AppSettings::_LoadProfile(
 		profile.scalingFlags = (ScalingFlags)flags;
 	}
 	
-	{
-		uint32_t cursorScaling = (uint32_t)CursorScaling::NoScaling;
-		JsonHelper::ReadUInt(profileObj, "cursorScaling", cursorScaling);
-		if (cursorScaling >= (uint32_t)CursorScaling::COUNT) {
-			cursorScaling = (uint32_t)CursorScaling::NoScaling;
-		}
-		profile.cursorScaling = (CursorScaling)cursorScaling;
-	}
+	JsonHelper::ReadEnum(profileObj, "cursorScaling", profile.cursorScaling);
 	
 	JsonHelper::ReadFloat(profileObj, "customCursorScaling", profile.customCursorScaling);
 	if (profile.customCursorScaling < 0) {
 		profile.customCursorScaling = 1.0f;
 	}
 
-	{
-		uint32_t cursorInterpolationMode = (uint32_t)CursorInterpolationMode::NearestNeighbor;
-		JsonHelper::ReadUInt(profileObj, "cursorInterpolationMode", cursorInterpolationMode);
-		if (cursorInterpolationMode >= (uint32_t)CursorInterpolationMode::COUNT) {
-			cursorInterpolationMode = (uint32_t)CursorInterpolationMode::NearestNeighbor;
-		}
-		profile.cursorInterpolationMode = (CursorInterpolationMode)cursorInterpolationMode;
-	}
-
+	JsonHelper::ReadEnum(profileObj, "cursorInterpolationMode", profile.cursorInterpolationMode);
 	JsonHelper::ReadBool(profileObj, "autoHideCursorEnabled", profile.isAutoHideCursorEnabled);
 	JsonHelper::ReadFloat(profileObj, "autoHideCursorDelay", profile.autoHideCursorDelay);
 	if (profile.autoHideCursorDelay <= 0.1f - FLOAT_EPSILON<float> ||
@@ -1138,14 +1088,7 @@ bool AppSettings::_LoadProfile(
 		}
 	}
 
-	{
-		uint32_t outputAlignment = (uint32_t)OutputAlignment::Center;
-		JsonHelper::ReadUInt(profileObj, "outputAlignment", outputAlignment);
-		if (outputAlignment >= (uint32_t)OutputAlignment::COUNT) {
-			outputAlignment = (uint32_t)OutputAlignment::Center;
-		}
-		profile.outputAlignment = (OutputAlignment)outputAlignment;
-	}
+	JsonHelper::ReadEnum(profileObj, "outputAlignment", profile.outputAlignment);
 
 	return true;
 }

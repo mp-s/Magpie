@@ -77,7 +77,8 @@ struct EffectOption {
 enum class DuplicateFrameDetectionMode {
 	Always,
 	Dynamic,
-	Never
+	Never,
+	COUNT
 };
 
 enum class ToolbarState {
@@ -102,6 +103,22 @@ struct OverlayWindowOption {
 
 struct OverlayOptions {
 	phmap::flat_hash_map<std::string, OverlayWindowOption> windows;
+};
+
+enum class HighestShaderModel {
+	NotLimited,
+	SM_6_9,
+	SM_6_8,
+	SM_6_7,
+	SM_6_6,
+	SM_6_5,
+	SM_6_4,
+	SM_6_3,
+	SM_6_2,
+	SM_6_1,
+	SM_6_0,
+	SM_5_1,
+	COUNT
 };
 
 enum class ScalingError {
@@ -208,6 +225,7 @@ struct ScalingOptions {
 	ToolbarState fullscreenInitialToolbarState = ToolbarState::AutoHide;
 	ToolbarState windowedInitialToolbarState = ToolbarState::AutoHide;
 	float initialWindowedScaleFactor = 0.0f;
+	HighestShaderModel highestShaderModel = HighestShaderModel::NotLimited;
 	std::filesystem::path screenshotsDir;
 
 	// 下面的成员支持在缩放时修改

@@ -117,6 +117,9 @@ struct HomeViewModel : HomeViewModelT<HomeViewModel>, wil::notify_property_chang
 	int DuplicateFrameDetectionMode() const noexcept;
 	void DuplicateFrameDetectionMode(int value);
 
+	int HighestShaderModel() const noexcept;
+	void HighestShaderModel(int value);
+
 private:
 	void _ScalingService_IsTimerOnChanged(bool value, bool windowedMode);
 

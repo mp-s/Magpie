@@ -47,6 +47,7 @@ struct _AppSettingsData {
 
 	DuplicateFrameDetectionMode _duplicateFrameDetectionMode =
 		DuplicateFrameDetectionMode::Dynamic;
+	HighestShaderModel _highestShaderModel = HighestShaderModel::NotLimited;
 
 	float _minFrameRate = 10.0f;
 
@@ -309,6 +310,15 @@ public:
 
 	void DuplicateFrameDetectionMode(enum DuplicateFrameDetectionMode value) noexcept {
 		_duplicateFrameDetectionMode = value;
+		SaveAsync();
+	}
+
+	HighestShaderModel HighestShaderModel() const noexcept {
+		return _highestShaderModel;
+	}
+
+	void HighestShaderModel(enum HighestShaderModel value) noexcept {
+		_highestShaderModel = value;
 		SaveAsync();
 	}
 

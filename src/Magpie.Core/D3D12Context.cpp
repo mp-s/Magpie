@@ -513,9 +513,13 @@ bool D3D12Context::_QueryHighestShaderModel() noexcept {
 		D3D_SHADER_MODEL_6_0,
 		D3D_SHADER_MODEL_5_1
 	};
+	constexpr uint32_t versionCount = (uint32_t)std::size(allModelVersions);
 
-	for (D3D_SHADER_MODEL modelVersion : allModelVersions) {
-		D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = modelVersion };
+	HighestShaderModel versionLimit = ScalingWindow::Get().Options().highestShaderModel;
+	uint32_t startIdx = versionLimit == HighestShaderModel::NotLimited ? 0 : (uint32_t)versionLimit - 1;
+
+	for (uint32_t i = startIdx; i < versionCount; ++i) {
+		D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = allModelVersions[i]};
 		HRESULT hr = _device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data));
 		if (hr == E_INVALIDARG) {
 			continue;
