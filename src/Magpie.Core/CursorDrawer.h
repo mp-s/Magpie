@@ -87,6 +87,19 @@ private:
 		MaskedColor
 	};
 
+	struct _CursorInfoKey {
+		HCURSOR hCursor;
+		// DPI 为 0 表示此光标不随 DPI 缩放
+		uint32_t dpi;
+
+		bool operator==(const _CursorInfoKey&) const = default;
+
+		// 供 phmap 使用
+		friend size_t hash_value(const _CursorInfoKey& key) noexcept {
+			return phmap::HashState().combine(phmap::Hash<HCURSOR>()(key.hCursor), key.dpi);
+		}
+	};
+
 	struct _CursorInfo {
 		_CursorType type;
 		Size size;
@@ -98,14 +111,14 @@ private:
 		// 这两个纹理使用完毕后在 _ClearRetiredResources 中释放
 		winrt::com_ptr<ID3D12Resource> originUploadBuffer;
 		winrt::com_ptr<ID3D12Resource> originTexture;
-		uint64_t originResourcesFenceValue = 0;
+		uint64_t tempResourcesFenceValue = 0;
 
 		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
 		uint32_t textureRtvOffset = std::numeric_limits<uint32_t>::max();
 		uint32_t originTextureSrvOffset = std::numeric_limits<uint32_t>::max();
 	};
 
-	_CursorInfo* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
+	std::pair<const _CursorInfoKey, _CursorInfo>* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
 
 	Size _CalcCursorSize(
 		Size cursorBmpSize,
@@ -156,12 +169,10 @@ private:
 	wil::unique_registry_watcher_nothrow _regWatcher;
 	DWORD _cursorBaseSize = 32;
 
-	// (HCURSOR, DPI) -> _CursorInfo
-	// DPI 为 0 表示此光标不随 DPI 缩放
-	phmap::flat_hash_map<std::pair<HCURSOR, uint32_t>, _CursorInfo> _cursorInfos;
+	phmap::flat_hash_map<_CursorInfoKey, _CursorInfo> _cursorInfos;
 
-	// 保存临时纹理资源未被释放的 _CursorInfo
-	SmallVector<_CursorInfo*, 1> _cursorInfosWithOriginResources;
+	// 保存临时资源未被释放的 _CursorInfo。保存键而不是指针，以防 _cursorInfos 扩容后失效。
+	SmallVector<_CursorInfoKey, 1> _cursorInfosWithTempResources;
 
 	// 保存解析失败的光标以避免重复尝试
 	phmap::flat_hash_set<HCURSOR> _unresolvableCursors;
@@ -172,7 +183,7 @@ private:
 	// 上次绘制的光标形状和位置
 	HCURSOR _hCurCursor = NULL;
 	POINT _curCursorPos{ std::numeric_limits<LONG>::max(), std::numeric_limits<LONG>::max() };
-	_CursorInfo* _curCursorInfo = nullptr;
+	std::pair<const _CursorInfoKey, _CursorInfo>* _curCursorInfoKeyValue = nullptr;
 
 	// 用于从渲染目标复制光标下区域
 	winrt::com_ptr<ID3D12Resource> _tempOriginTexture;

@@ -208,14 +208,15 @@ bool CursorDrawer::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 
 			if (hCursor) {
 				while (true) {
-					_curCursorInfo = _ResolveCursor(hCursor, cursorPos, false);
-					if (_curCursorInfo) {
+					_curCursorInfoKeyValue = _ResolveCursor(hCursor, cursorPos, false);
+					if (_curCursorInfoKeyValue) {
+						const _CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
 						// 检查光标是否在视口内
 						const RECT cursorRect = {
-							cursorPos.x - (LONG)_curCursorInfo->hotspot.x,
-							cursorPos.y - (LONG)_curCursorInfo->hotspot.y,
-							cursorRect.left + (LONG)_curCursorInfo->size.width,
-							cursorRect.top + (LONG)_curCursorInfo->size.height
+							cursorPos.x - (LONG)cursorInfo.hotspot.x,
+							cursorPos.y - (LONG)cursorInfo.hotspot.y,
+							cursorRect.left + (LONG)cursorInfo.size.width,
+							cursorRect.top + (LONG)cursorInfo.size.height
 						};
 						if (!Win32Helper::IsRectOverlap(cursorRect, _destRect)) {
 							hCursor = NULL;
@@ -261,31 +262,33 @@ HRESULT CursorDrawer::Draw(
 ) noexcept {
 	_ClearRetiredResources(completedFenceValue);
 
-	if (!_hCurCursor || !_curCursorInfo) {
+	if (!_hCurCursor || !_curCursorInfoKeyValue) {
 		return S_OK;
 	}
 
-	if (!_curCursorInfo->texture) {
-		HRESULT hr = _InitializeCursorTexture(graphicsContext , *_curCursorInfo);
+	_CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
+
+	if (!cursorInfo.texture) {
+		HRESULT hr = _InitializeCursorTexture(graphicsContext , cursorInfo);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("_InitializeCursorTexture 失败", hr);
 			return hr;
 		}
 
-		_curCursorInfo->originResourcesFenceValue = nextFenceValue;
-		_cursorInfosWithOriginResources.push_back(_curCursorInfo);
+		cursorInfo.tempResourcesFenceValue = nextFenceValue;
+		_cursorInfosWithTempResources.push_back(_curCursorInfoKeyValue->first);
 	}
 
 	const RECT cursorRect = {
-		.left = _curCursorPos.x - (LONG)_curCursorInfo->hotspot.x,
-		.top = _curCursorPos.y - (LONG)_curCursorInfo->hotspot.y,
-		.right = cursorRect.left + (LONG)_curCursorInfo->size.width,
-		.bottom = cursorRect.top + (LONG)_curCursorInfo->size.height
+		.left = _curCursorPos.x - (LONG)cursorInfo.hotspot.x,
+		.top = _curCursorPos.y - (LONG)cursorInfo.hotspot.y,
+		.right = cursorRect.left + (LONG)cursorInfo.size.width,
+		.bottom = cursorRect.top + (LONG)cursorInfo.size.height
 	};
 
 	const bool isSrgb = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange;
 	
-	if (_curCursorInfo->type == _CursorType::Color) {
+	if (cursorInfo.type == _CursorType::Color) {
 		winrt::com_ptr<ID3D12PipelineState>& pso = isSrgb ? _colorSrgbPSO : _colorPSO;
 		if (!pso) {
 			HRESULT hr = _CreateColorPSO(isSrgb, pso);
@@ -298,7 +301,7 @@ HRESULT CursorDrawer::Draw(
 		graphicsContext.SetPipelineState(pso.get());
 		graphicsContext.SetRootSignature(_colorRootSignature.get());
 	} else {
-		bool isMonochrome = _curCursorInfo->type == _CursorType::Monochrome;
+		bool isMonochrome = cursorInfo.type == _CursorType::Monochrome;
 		
 		winrt::com_ptr<ID3D12PipelineState>& pso = isMonochrome ?
 			(isSrgb ? _monochromeSrgbPSO : _monochromePSO) :
@@ -329,20 +332,20 @@ HRESULT CursorDrawer::Draw(
 		float constants[] = {
 			(cursorRect.left - _destRect.left) * 2 / (float)viewportSize.cx - 1.0f,	// left
 			1.0f - (cursorRect.top - _destRect.top) * 2 / (float)viewportSize.cy,	// top
-			_curCursorInfo->size.width * 2 / (float)viewportSize.cx,	// width
-			_curCursorInfo->size.height * 2 / (float)-viewportSize.cy	// height
+			cursorInfo.size.width * 2 / (float)viewportSize.cx,	// width
+			cursorInfo.size.height * 2 / (float)-viewportSize.cy	// height
 		};
 		graphicsContext.SetRoot32BitConstants(0, (UINT)std::size(constants), constants);
 	}
 
-	if (_curCursorInfo->type == _CursorType::Color) {
-		graphicsContext.SetRootDescriptorTable(1, _curCursorInfo->textureSrvOffset);
+	if (cursorInfo.type == _CursorType::Color) {
+		graphicsContext.SetRootDescriptorTable(1, cursorInfo.textureSrvOffset);
 	} else {
 		DirectXHelper::Constant32 constants[] = {
-			{.uintVal = _curCursorInfo->originSize.width},
-			{.uintVal = _curCursorInfo->originSize.height},
-			{.uintVal = _curCursorInfo->size.width},
-			{.uintVal = _curCursorInfo->size.height},
+			{.uintVal = cursorInfo.originSize.width},
+			{.uintVal = cursorInfo.originSize.height},
+			{.uintVal = cursorInfo.size.width},
+			{.uintVal = cursorInfo.size.height},
 			{.uintVal = backBuffer ? 0u :uint32_t(cursorRect.left - _destRect.left)},
 			{.uintVal = backBuffer ? 0u : uint32_t(cursorRect.top - _destRect.top)},
 			// 原始帧需要伽马校正，从渲染目标复制的临时纹理不需要。WCG/HDR 下这个参数有不同的意义
@@ -351,12 +354,12 @@ HRESULT CursorDrawer::Draw(
 		};
 		graphicsContext.SetRoot32BitConstants(1, (UINT)std::size(constants), constants);
 
-		graphicsContext.SetRootDescriptorTable(2, _curCursorInfo->textureSrvOffset);
+		graphicsContext.SetRootDescriptorTable(2, cursorInfo.textureSrvOffset);
 
 		if (backBuffer) {
 			// 掩码光标在叠加层上时需要从渲染目标复制光标下区域到临时纹理
-			if (_tempOriginTextureSize.width < _curCursorInfo->size.width ||
-				_tempOriginTextureSize.height < _curCursorInfo->size.height
+			if (_tempOriginTextureSize.width < cursorInfo.size.width ||
+				_tempOriginTextureSize.height < cursorInfo.size.height
 			) {
 				if (_tempOriginTexture) {
 					_retiredTempOriginTextures.emplace_back(_RetiredTempOriginTexture{
@@ -367,8 +370,8 @@ HRESULT CursorDrawer::Draw(
 				}
 
 				// 对齐到 32 的倍数
-				_tempOriginTextureSize.width = (_curCursorInfo->size.width + 31) & ~31;
-				_tempOriginTextureSize.height = (_curCursorInfo->size.height + 31) & ~31;
+				_tempOriginTextureSize.width = (cursorInfo.size.width + 31) & ~31;
+				_tempOriginTextureSize.height = (cursorInfo.size.height + 31) & ~31;
 
 				ID3D12Device5* device = _d3d12Context->GetDevice();
 
@@ -437,8 +440,8 @@ HRESULT CursorDrawer::Draw(
 				uint32_t destTop = uint32_t(std::max(0l,
 					viewportRect.top - cursorRect.top + _rendererRect.top));
 
-				assert(destLeft + srcBox.right - srcBox.left <= _curCursorInfo->size.width);
-				assert(destTop + srcBox.bottom - srcBox.top <= _curCursorInfo->size.height);
+				assert(destLeft + srcBox.right - srcBox.left <= cursorInfo.size.width);
+				assert(destTop + srcBox.bottom - srcBox.top <= cursorInfo.size.height);
 
 				graphicsContext.CopyTextureRegion(
 					_tempOriginTexture.get(), destLeft, destTop, backBuffer, &srcBox);
@@ -516,7 +519,7 @@ static bool GetCursorSizeFromBmps(HBITMAP hColorBmp, HBITMAP hMaskBmp, Size& siz
 	return true;
 }
 
-CursorDrawer::_CursorInfo* CursorDrawer::_ResolveCursor(
+std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* CursorDrawer::_ResolveCursor(
 	HCURSOR hCursor,
 	POINT cursorPos,
 	bool isAni
@@ -538,15 +541,15 @@ CursorDrawer::_CursorInfo* CursorDrawer::_ResolveCursor(
 	UINT monitorDpi = USER_DEFAULT_SCREEN_DPI;
 	GetDpiForMonitor(hCurMon, MDT_EFFECTIVE_DPI, &monitorDpi, &monitorDpi);
 	
-	auto it = _cursorInfos.find(std::make_pair(hCursor, monitorDpi));
+	auto it = _cursorInfos.find(_CursorInfoKey{ hCursor, monitorDpi });
 	if (it != _cursorInfos.end()) {
-		return &it->second;
+		return &*it;
 	}
 
 	// 检查此光标是否不随 DPI 缩放
-	it = _cursorInfos.find(std::make_pair(hCursor, 0));
+	it = _cursorInfos.find(_CursorInfoKey{ hCursor, 0 });
 	if (it != _cursorInfos.end()) {
-		return &it->second;
+		return &*it;
 	}
 
 	_CursorInfo cursorInfo{};
@@ -657,8 +660,8 @@ CursorDrawer::_CursorInfo* CursorDrawer::_ResolveCursor(
 		return nullptr;
 	}
 
-	return &_cursorInfos.emplace(std::make_pair(hCursor, isCursorDpiAware ? monitorDpi : 0),
-		std::move(cursorInfo)).first->second;
+	return &*_cursorInfos.emplace(_CursorInfoKey{ hCursor, isCursorDpiAware ? monitorDpi : 0 },
+		std::move(cursorInfo)).first;
 }
 
 Size CursorDrawer::_CalcCursorSize(
@@ -1124,7 +1127,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 			0, 0, (LONG)cursorInfo.size.width, (LONG)cursorInfo.size.height));
 
 		uint32_t oldRtvOffset = graphicsContext.OMGetRenderTarget();
-		graphicsContext.OMSetRenderTarget(_curCursorInfo->textureRtvOffset);
+		graphicsContext.OMSetRenderTarget(cursorInfo.textureRtvOffset);
 		
 		graphicsContext.Draw(3);
 
@@ -1157,7 +1160,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 void CursorDrawer::_ClearCursorInfos() noexcept {
 	_lastRawCursorHandle = NULL;
 	_hCurCursor = NULL;
-	_curCursorInfo = nullptr;
+	_curCursorInfoKeyValue = nullptr;
 
 	auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
 	auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
@@ -1175,7 +1178,7 @@ void CursorDrawer::_ClearCursorInfos() noexcept {
 	}
 
 	_cursorInfos.clear();
-	_cursorInfosWithOriginResources.clear();
+	_cursorInfosWithTempResources.clear();
 }
 
 HRESULT CursorDrawer::_CreateColorPSO(
@@ -1483,26 +1486,35 @@ HRESULT CursorDrawer::_CreateCursorResizerPSO() noexcept {
 }
 
 void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept {
-	if (!_cursorInfosWithOriginResources.empty()) {
+	if (!_cursorInfosWithTempResources.empty()) {
 		// fenceValue 按升序排列
 		auto it = std::find_if(
-			_cursorInfosWithOriginResources.begin(),
-			_cursorInfosWithOriginResources.end(),
-			[&](_CursorInfo* cursorInfo) {
-				return cursorInfo->originResourcesFenceValue > completedFenceValue;
+			_cursorInfosWithTempResources.begin(),
+			_cursorInfosWithTempResources.end(),
+			[&](const _CursorInfoKey& cursorInfoKey) {
+				auto it1 = _cursorInfos.find(cursorInfoKey);
+				if (it1 == _cursorInfos.end()) {
+					// 不会出现这种情况，万一出现可以安全删除
+					assert(false);
+					return false;
+				} else {
+					return it1->second.tempResourcesFenceValue > completedFenceValue;
+				}
 			}
 		);
-		if (it == _cursorInfosWithOriginResources.begin()) {
+		if (it == _cursorInfosWithTempResources.begin()) {
 			return;
 		}
 
-		for (auto it1 = _cursorInfosWithOriginResources.begin(); it1 != it; ++it1) {
-			_CursorInfo& cursorInfo = **it1;
-			cursorInfo.originUploadBuffer = nullptr;
-			cursorInfo.originTexture = nullptr;
+		for (auto it1 = _cursorInfosWithTempResources.begin(); it1 != it; ++it1) {
+			auto it2 = _cursorInfos.find(*it1);
+			if (it2 != _cursorInfos.end()) {
+				it2->second.originUploadBuffer = nullptr;
+				it2->second.originTexture = nullptr;
+			}
 		}
 
-		_cursorInfosWithOriginResources.erase(_cursorInfosWithOriginResources.begin(), it);
+		_cursorInfosWithTempResources.erase(_cursorInfosWithTempResources.begin(), it);
 	}
 
 	if (!_retiredTempOriginTextures.empty()) {
