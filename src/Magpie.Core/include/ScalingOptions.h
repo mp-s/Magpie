@@ -146,33 +146,36 @@ enum class ScalingError {
 	CreateFenceFailed
 };
 
-struct ScalingFlags {
-	static constexpr uint32_t WindowedMode = 1;
-	static constexpr uint32_t DebugMode = 1 << 1;
-	static constexpr uint32_t DisableEffectCache = 1 << 2;
-	static constexpr uint32_t SaveEffectSources = 1 << 3;
-	static constexpr uint32_t WarningsAreErrors = 1 << 4;
-	static constexpr uint32_t SimulateExclusiveFullscreen = 1 << 5;
-	static constexpr uint32_t Is3DGameMode = 1 << 6;
-	static constexpr uint32_t CaptureTitleBar = 1 << 10;
-	static constexpr uint32_t AdjustCursorSpeed = 1 << 11;
-	static constexpr uint32_t DisableDirectFlip = 1 << 13;
-	static constexpr uint32_t DisableFontCache = 1 << 14;
-	static constexpr uint32_t AllowScalingMaximized = 1 << 15;
+enum ScalingFlags : uint32_t {
+	WindowedMode = 1,
+	DebugMode = 1 << 1,
+	DisableEffectCache = 1 << 2,
+	SaveEffectSources = 1 << 3,
+	WarningsAreErrors = 1 << 4,
+	SimulateExclusiveFullscreen = 1 << 5,
+	Is3DGameMode = 1 << 6,
+	CaptureTitleBar = 1 << 10,
+	AdjustCursorSpeed = 1 << 11,
+	DisableDirectFlip = 1 << 13,
+	DisableFontCache = 1 << 14,
+	AllowScalingMaximized = 1 << 15,
 	// 只影响缩放行为，Magpie.Core 不负责启动 TouchHelper.exe
-	static constexpr uint32_t TouchSupportEnabled = 1 << 17;
-	static constexpr uint32_t InlineParams = 1 << 18;
-	static constexpr uint32_t DisableFP16 = 1 << 19;
-	static constexpr uint32_t BenchmarkMode = 1 << 20;
-	static constexpr uint32_t DeveloperMode = 1 << 21;
-	static constexpr uint32_t DisableTopmost = 1 << 22;
+	TouchSupportEnabled = 1 << 17,
+	InlineParams = 1 << 18,
+	DisableFP16 = 1 << 19,
+	BenchmarkMode = 1 << 20,
+	DeveloperMode = 1 << 21,
+	DisableTopmost = 1 << 22,
+	UseWarp = 1 << 23
 };
+DEFINE_ENUM_FLAG_OPERATORS(ScalingFlags)
 
 struct ScalingOptions {
 	DEFINE_FLAG_ACCESSOR(IsWindowedMode, ScalingFlags::WindowedMode, flags)
 	DEFINE_FLAG_ACCESSOR(IsDeveloperMode, ScalingFlags::DeveloperMode, flags)
 	DEFINE_FLAG_ACCESSOR(IsDebugMode, ScalingFlags::DebugMode, flags)
 	DEFINE_FLAG_ACCESSOR(IsBenchmarkMode, ScalingFlags::BenchmarkMode, flags)
+	DEFINE_FLAG_ACCESSOR(UseWarp, ScalingFlags::UseWarp, flags)
 	DEFINE_FLAG_ACCESSOR(IsTopmostDisabled, ScalingFlags::DisableTopmost, flags)
 	DEFINE_FLAG_ACCESSOR(IsFP16Disabled, ScalingFlags::DisableFP16, flags)
 	DEFINE_FLAG_ACCESSOR(IsEffectCacheDisabled, ScalingFlags::DisableEffectCache, flags)
@@ -189,7 +192,7 @@ struct ScalingOptions {
 	DEFINE_FLAG_ACCESSOR(IsDirectFlipDisabled, ScalingFlags::DisableDirectFlip, flags)
 
 	std::vector<EffectOption> effects;
-	uint32_t flags = ScalingFlags::AdjustCursorSpeed;
+	ScalingFlags flags = ScalingFlags::AdjustCursorSpeed;
 	Cropping cropping{};
 	GraphicsCardId graphicsCardId;
 	float minFrameRate = 0.0f;

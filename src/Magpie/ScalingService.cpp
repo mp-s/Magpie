@@ -440,6 +440,7 @@ ScalingError ScalingService::_StartScaleImpl(HWND hWnd, const Profile& profile, 
 	options.IsDeveloperMode(settings.IsDeveloperMode());
 	options.IsDebugMode(settings.IsDebugMode());
 	options.IsBenchmarkMode(settings.IsBenchmarkMode());
+	options.UseWarp(settings.UseWarp());
 	options.IsTopmostDisabled(settings.IsTopmostDisabled());
 	options.IsEffectCacheDisabled(settings.IsEffectCacheDisabled());
 	options.IsFontCacheDisabled(settings.IsFontCacheDisabled());

@@ -93,6 +93,9 @@ struct HomeViewModel : HomeViewModelT<HomeViewModel>, wil::notify_property_chang
 	bool IsBenchmarkMode() const noexcept;
 	void IsBenchmarkMode(bool value);
 
+	bool UseWarp() const noexcept;
+	void UseWarp(bool value);
+
 	bool IsTopmostDisabled() const noexcept;
 	void IsTopmostDisabled(bool value);
 

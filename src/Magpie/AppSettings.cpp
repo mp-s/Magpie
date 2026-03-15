@@ -369,6 +369,7 @@ void AppSettings::IsDeveloperMode(bool value) noexcept {
 		// 关闭开发者模式则禁用所有开发者选项
 		_isDebugMode = false;
 		_isBenchmarkMode = false;
+		_useWarp = false;
 		_isEffectCacheDisabled = false;
 		_isFontCacheDisabled = false;
 		_isSaveEffectSources = false;
@@ -592,6 +593,8 @@ bool AppSettings::_Save(const _AppSettingsData& data) noexcept {
 	writer.Bool(data._isDebugMode);
 	writer.Key("benchmarkMode");
 	writer.Bool(data._isBenchmarkMode);
+	writer.Key("useWarp");
+	writer.Bool(data._useWarp);
 	writer.Key("disableTopmost");
 	writer.Bool(data._isTopmostDisabled);
 	writer.Key("disableEffectCache");
@@ -789,6 +792,7 @@ void AppSettings::_LoadSettings(const rapidjson::GenericObject<true, rapidjson::
 	JsonHelper::ReadBool(root, "developerMode", _isDeveloperMode);
 	JsonHelper::ReadBool(root, "debugMode", _isDebugMode);
 	JsonHelper::ReadBool(root, "benchmarkMode", _isBenchmarkMode);
+	JsonHelper::ReadBool(root, "useWarp", _useWarp);
 	JsonHelper::ReadBool(root, "disableTopmost", _isTopmostDisabled);
 	JsonHelper::ReadBool(root, "disableEffectCache", _isEffectCacheDisabled);
 	JsonHelper::ReadBool(root, "disableFontCache", _isFontCacheDisabled);
@@ -1072,14 +1076,18 @@ bool AppSettings::_LoadProfile(
 		profile.maxFrameRate = 60.0f;
 	}
 
-	JsonHelper::ReadBoolFlag(profileObj, "3DGameMode", ScalingFlags::Is3DGameMode, profile.scalingFlags);
-	if (!JsonHelper::ReadBoolFlag(profileObj, "captureTitleBar", ScalingFlags::CaptureTitleBar, profile.scalingFlags, true)) {
-		// v0.10.0-preview1 使用 reserveTitleBar
-		JsonHelper::ReadBoolFlag(profileObj, "reserveTitleBar", ScalingFlags::CaptureTitleBar, profile.scalingFlags);
+	{
+		uint32_t flags = 0;
+		JsonHelper::ReadBoolFlag(profileObj, "3DGameMode", ScalingFlags::Is3DGameMode, flags);
+		if (!JsonHelper::ReadBoolFlag(profileObj, "captureTitleBar", ScalingFlags::CaptureTitleBar, flags, true)) {
+			// v0.10.0-preview1 使用 reserveTitleBar
+			JsonHelper::ReadBoolFlag(profileObj, "reserveTitleBar", ScalingFlags::CaptureTitleBar, flags);
+		}
+		JsonHelper::ReadBoolFlag(profileObj, "adjustCursorSpeed", ScalingFlags::AdjustCursorSpeed, flags);
+		JsonHelper::ReadBoolFlag(profileObj, "disableDirectFlip", ScalingFlags::DisableDirectFlip, flags);
+		profile.scalingFlags = (ScalingFlags)flags;
 	}
-	JsonHelper::ReadBoolFlag(profileObj, "adjustCursorSpeed", ScalingFlags::AdjustCursorSpeed, profile.scalingFlags);
-	JsonHelper::ReadBoolFlag(profileObj, "disableDirectFlip", ScalingFlags::DisableDirectFlip, profile.scalingFlags);
-
+	
 	{
 		uint32_t cursorScaling = (uint32_t)CursorScaling::NoScaling;
 		JsonHelper::ReadUInt(profileObj, "cursorScaling", cursorScaling);

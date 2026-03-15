@@ -484,6 +484,21 @@ void HomeViewModel::IsBenchmarkMode(bool value) {
 	RaisePropertyChanged(L"IsBenchmarkMode");
 }
 
+bool HomeViewModel::UseWarp() const noexcept {
+	return AppSettings::Get().UseWarp();
+}
+
+void HomeViewModel::UseWarp(bool value) {
+	AppSettings& settings = AppSettings::Get();
+
+	if (settings.UseWarp() == value) {
+		return;
+	}
+
+	settings.UseWarp(value);
+	RaisePropertyChanged(L"UseWarp");
+}
+
 bool HomeViewModel::IsTopmostDisabled() const noexcept {
 	return AppSettings::Get().IsTopmostDisabled();
 }

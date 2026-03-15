@@ -12,8 +12,6 @@ struct DebugInfo {
 	bool enableGPUBasedValidation = false;
 	// 禁用 GPU 的动态时钟频率调整，需要启用开发人员模式
 	bool enableStablePower = false;
-	// 使用 CPU 渲染
-	bool useWarp = false;
 	// 窗口模式缩放时把用于调整窗口尺寸的辅助窗口标示出来
 	bool highlightBorder = false;
 	// 验证 DirtyRectsOptimizer 的正确性，特定路径下消耗大量 CPU 时间

@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "D3D12Context.h"
-#include "DebugInfo.h"
+#include "ScalingWindow.h"
 #include "Logger.h"
 #include "DirectXHelper.h"
 #include "StrHelper.h"
@@ -304,9 +304,7 @@ static void FixD3D10WarpDll(IDXGIAdapter1* warpAdapter) noexcept {
 bool D3D12Context::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId) noexcept {
 	winrt::com_ptr<IDXGIAdapter1> adapter;
 
-#ifdef MP_DEBUG_INFO
-	if (!DEBUG_INFO.useWarp) {
-#endif
+	if (!ScalingWindow::Get().Options().UseWarp()) {
 		// 记录不支持 D3D12 的显卡索引，防止重复尝试
 		int failedIdx = -1;
 
@@ -383,9 +381,7 @@ bool D3D12Context::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId)
 				return true;
 			}
 		}
-#ifdef MP_DEBUG_INFO
 	}
-#endif
 
 	// 作为最后手段，回落到 CPU 渲染 (WARP)
 	// https://docs.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp

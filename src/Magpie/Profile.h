@@ -97,7 +97,7 @@ struct Profile {
 	std::wstring launchParameters;
 	OutputAlignment outputAlignment = OutputAlignment::Center;
 
-	uint32_t scalingFlags = ScalingFlags::AdjustCursorSpeed;
+	ScalingFlags scalingFlags = ScalingFlags::AdjustCursorSpeed;
 
 	bool isPackaged = false;
 	bool isCroppingEnabled = false;

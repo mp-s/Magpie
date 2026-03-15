@@ -62,6 +62,7 @@ struct _AppSettingsData {
 	bool _isDeveloperMode = false;
 	bool _isDebugMode = false;
 	bool _isBenchmarkMode = false;
+	bool _useWarp = false;
 	bool _isTopmostDisabled = false;
 	bool _isEffectCacheDisabled = false;
 	bool _isFontCacheDisabled = false;
@@ -158,6 +159,15 @@ public:
 
 	void IsBenchmarkMode(bool value) noexcept {
 		_isBenchmarkMode = value;
+		SaveAsync();
+	}
+
+	bool UseWarp() noexcept {
+		return _useWarp;
+	}
+
+	void UseWarp(bool value) noexcept {
+		_useWarp = value;
 		SaveAsync();
 	}
 

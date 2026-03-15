@@ -42,6 +42,7 @@ namespace Magpie {
 		void LocateUpdaterLogs();
 		Boolean IsDebugMode;
 		Boolean IsBenchmarkMode;
+		Boolean UseWarp;
 		Boolean IsTopmostDisabled;
 		Boolean IsEffectCacheDisabled;
 		Boolean IsFontCacheDisabled;
