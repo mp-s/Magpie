@@ -143,9 +143,16 @@ bool CursorDrawer::Initialize(
 	wil::unique_hkey key;
 	wil::reg::open_unique_key_nothrow(HKEY_CURRENT_USER, L"Control Panel\\Cursors", key);
 	_regWatcher = wil::make_registry_watcher_nothrow(std::move(key), false, [this](wil::RegistryChangeKind) {
+		uint32_t oldRunId = ScalingWindow::RunId();
+
+		// 系统可能正在生成新光标，保险起见等待一段时间。当前在线程池中，可直接 Sleep
+		Sleep(500);
+
+		// HKEY_CURRENT_USER\Control Panel\Cursors 中任何键有改变都触发重新解析，
+		// 这可以覆盖所有鼠标指针相关设置的更改。
 		ScalingWindow::Dispatcher().TryEnqueue(
-			[this, cursorBaseSize(GetCursorBaseSize()), runId(ScalingWindow::RunId())]() {
-			if (ScalingWindow::RunId() != runId || _cursorBaseSize == cursorBaseSize) {
+			[this, cursorBaseSize(GetCursorBaseSize()), oldRunId]() {
+			if (ScalingWindow::RunId() != oldRunId || !ScalingWindow::Get().Handle()) {
 				return;
 			}
 
