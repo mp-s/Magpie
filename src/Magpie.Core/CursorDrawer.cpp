@@ -79,6 +79,10 @@ CursorDrawer::~CursorDrawer() noexcept {
 			pair.second.FreeDescriptors(csuDescriptorHeap, rtvDescriptorHeap);
 		}
 
+		for (const _CursorInfo& cursorInfo : _retiredCursorInfos) {
+			cursorInfo.FreeDescriptors(csuDescriptorHeap, rtvDescriptorHeap);
+		}
+
 		if (_tempOriginTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
 			csuDescriptorHeap.Free(_tempOriginTextureSrvOffset, 1);
 		}
@@ -146,8 +150,25 @@ bool CursorDrawer::Initialize(
 			}
 
 			_cursorBaseSize = cursorBaseSize;
-			// 清空已解析的光标
-			_d3d12Context->WaitForGpu();
+
+			// _cursorBaseSize 改变后现有 _CursorInfo 失效
+			for (auto& pair : _cursorInfos) {
+				_retiredCursorInfos.push_back(std::move(pair.second));
+				// 所有权已经转移，避免重复释放
+				pair.second.textureSrvOffset = std::numeric_limits<uint32_t>::max();
+				pair.second.textureRtvOffset = std::numeric_limits<uint32_t>::max();
+				pair.second.originTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+			}
+
+			// 将 fenceValue 按升序排列
+			std::sort(
+				_retiredCursorInfos.begin(),
+				_retiredCursorInfos.end(),
+				[](const _CursorInfo& l, const _CursorInfo& r) {
+					return l.lastUseFenceValue < r.lastUseFenceValue;
+				}
+			);
+
 			_ClearCursorInfos();
 		});
 	});
@@ -156,7 +177,7 @@ bool CursorDrawer::Initialize(
 	return true;
 }
 
-bool CursorDrawer::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
+void CursorDrawer::PrepareForDraw(HCURSOR hCursor, POINT cursorPos, bool& needRedraw) noexcept {
 	const ScalingWindow& scalingWindow = ScalingWindow::Get();
 	const ScalingOptions& options = scalingWindow.Options();
 
@@ -200,7 +221,7 @@ bool CursorDrawer::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 
 			if (hCursor) {
 				while (true) {
-					_curCursorInfoKeyValue = _ResolveCursor(hCursor, cursorPos, false);
+					_curCursorInfoKeyValue = _ResolveCursor(hCursor, cursorPos, needRedraw);
 					if (_curCursorInfoKeyValue) {
 						const _CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
 						// 检查光标是否在视口内。hCursor 不为 NULL 说明光标已在缩放窗口内，因此这个检查很少失败
@@ -235,13 +256,12 @@ bool CursorDrawer::CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept {
 		}
 	}
 
-	// 光标形状或位置变化时需要重新绘制
-	if (hCursor != _hCurCursor || (hCursor && cursorPos != _curCursorPos)) {
+	// 光标形状或位置变化时总是需要重新绘制；有时即使不变也需要重新绘制，比如色域
+	// 或 _cursorBaseSize 变化后。
+	needRedraw |= hCursor != _hCurCursor || (hCursor && cursorPos != _curCursorPos);
+	if (needRedraw) {
 		_hCurCursor = hCursor;
 		_curCursorPos = cursorPos;
-		return true;
-	} else {
-		return false;
 	}
 }
 
@@ -516,7 +536,7 @@ static bool GetCursorSizeFromBmps(HBITMAP hColorBmp, HBITMAP hMaskBmp, Size& siz
 std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* CursorDrawer::_ResolveCursor(
 	HCURSOR hCursor,
 	POINT cursorPos,
-	bool isAni
+	bool& needRedraw
 ) noexcept {
 	assert(hCursor);
 
@@ -548,7 +568,7 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 
 	_CursorInfo cursorInfo{};
 	// 如果不能确定光标是否随 DPI 缩放则假设为真，绝大多数情况下是对的
-	bool isCursorDpiAware = !isAni;
+	bool isCursorDpiAware = true;
 
 	ICONINFOEX iconInfoEx = { .cbSize = sizeof(iconInfoEx) };
 	if (!GetIconInfoEx(hCursor, &iconInfoEx)) {
@@ -653,6 +673,8 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		Logger::Get().Error("_ResolveCursorPixels 失败");
 		return nullptr;
 	}
+
+	needRedraw = true;
 
 	return &*_cursorInfos.emplace(_CursorInfoKey{ hCursor, isCursorDpiAware ? monitorDpi : 0 },
 		std::move(cursorInfo)).first;
@@ -1533,6 +1555,25 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 			} else {
 				break;
 			}
+		}
+	}
+
+	if (!_retiredCursorInfos.empty()) {
+		auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
+		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
+
+		// fenceValue 按升序排列
+		auto it = _retiredCursorInfos.begin();
+		for (; it != _retiredCursorInfos.end(); ++it) {
+			if (it->lastUseFenceValue > completedFenceValue) {
+				break;
+			}
+
+			it->FreeDescriptors(csuDescriptorHeap, rtvDescriptorHeap);
+		}
+
+		if (it != _retiredCursorInfos.begin()) {
+			_retiredCursorInfos.erase(_retiredCursorInfos.begin(), it);
 		}
 	}
 

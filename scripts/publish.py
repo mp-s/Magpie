@@ -82,7 +82,7 @@ def remove_file(file):
         pass
 
 
-for file in glob.glob("*.lib"):
+for file in glob.glob("*.lib", ".exp"):
     remove_file(file)
 
 print("清理完毕", flush=True)

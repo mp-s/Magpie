@@ -26,7 +26,7 @@ public:
 		const ColorInfo& colorInfo
 	) noexcept;
 
-	bool CheckForRedraw(HCURSOR hCursor, POINT cursorPos) noexcept;
+	void PrepareForDraw(HCURSOR hCursor, POINT cursorPos, bool& needRedraw) noexcept;
 
 	// backBuffer 不为空表示掩码光标在叠加层上
 	HRESULT Draw(
@@ -125,7 +125,11 @@ private:
 		) const noexcept;
 	};
 
-	std::pair<const _CursorInfoKey, _CursorInfo>* _ResolveCursor(HCURSOR hCursor, POINT cursorPos, bool isAni) noexcept;
+	std::pair<const _CursorInfoKey, _CursorInfo>* _ResolveCursor(
+		HCURSOR hCursor,
+		POINT cursorPos,
+		bool& needRedraw
+	) noexcept;
 
 	Size _CalcCursorSize(
 		Size cursorBmpSize,
@@ -178,8 +182,11 @@ private:
 
 	phmap::flat_hash_map<_CursorInfoKey, _CursorInfo> _cursorInfos;
 
-	// 保存临时资源未被释放的 _CursorInfo。保存键而不是指针，以防 _cursorInfos 扩容后失效。
+	// 保存临时资源未被释放的 _CursorInfo。保存键而不是指针，以防 _cursorInfos 扩容后失效
 	SmallVector<_CursorInfoKey, 1> _cursorInfosWithTempResources;
+
+	// 保存 _cursorBaseSize 改变后失效的 _CursorInfo
+	SmallVector<_CursorInfo, 0> _retiredCursorInfos;
 
 	// 保存解析失败的光标以避免重复尝试
 	phmap::flat_hash_set<HCURSOR> _unresolvableCursors;

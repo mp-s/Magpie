@@ -174,6 +174,8 @@ ComponentState Renderer2::Render(
 		return _state;
 	}
 
+	bool needRedraw = false;
+
 	{
 		const uint64_t latestProducerFrameNumber = _frameProducer.GetLatestFrameNumber();
 		if (latestProducerFrameNumber == 0) {
@@ -183,15 +185,22 @@ ComponentState Renderer2::Render(
 			return _state;
 		}
 
-		if (latestProducerFrameNumber == _lastProducerFrameNumber &&
-			!_cursorDrawer.CheckForRedraw(hCursor, cursorPos)) {
-			return _state;
+		if (latestProducerFrameNumber != _lastProducerFrameNumber) {
+			needRedraw = true;
+			_lastProducerFrameNumber = latestProducerFrameNumber;
 		}
-
-		_lastProducerFrameNumber = latestProducerFrameNumber;
 	}
 
-	_CheckResult(_RenderImpl(waitForGpu), "_RenderImpl 失败");
+	{
+		bool cursorNeedRedraw = false;
+		_cursorDrawer.PrepareForDraw(hCursor, cursorPos, cursorNeedRedraw);
+		needRedraw |= cursorNeedRedraw;
+	}
+	
+	if (needRedraw) {
+		_CheckResult(_RenderImpl(waitForGpu), "_RenderImpl 失败");
+	}
+
 	return _state;
 }
 
