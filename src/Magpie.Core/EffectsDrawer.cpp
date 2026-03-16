@@ -21,18 +21,6 @@ bool EffectsDrawer::Initialize(
 
 	ID3D12Device5* device = d3d12Context.GetDevice();
 
-	// 检查半精度浮点支持
-	{
-		D3D12_FEATURE_DATA_D3D12_OPTIONS featureData{};
-		HRESULT hr = device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &featureData, sizeof(featureData));
-		if (SUCCEEDED(hr)) {
-			_isFP16Supported = featureData.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;
-			Logger::Get().Info(StrHelper::Concat("FP16 支持: ", _isFP16Supported ? "是" : "否"));
-		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-		}
-	}
-
 	if (ScalingWindow::Get().Options().IsWindowedMode()) {
 		_outputSize = rendererSize;
 	} else {

@@ -1,6 +1,5 @@
 #pragma once
 #include "CatmullRomDrawer.h"
-#include "SmallVector.h"
 
 namespace Magpie {
 
@@ -49,7 +48,6 @@ private:
 	UINT64 _timestampFrequency = 0;
 
 	bool _isScRGB = false;
-	bool _isFP16Supported = false;
 };
 
 }

@@ -50,18 +50,25 @@ bool D3D12Context::Initialize(
 	{
 		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
 		hr = _device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData));
-		if (FAILED(hr)) {
+
+		if (SUCCEEDED(hr)) {
+			_rootSignatureVersion = featureData.HighestVersion;
+		} else {
 			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
 			return false;
 		}
-		_rootSignatureVersion = featureData.HighestVersion;
 	}
 
 	// 检查是否是集成显卡
 	{
 		D3D12_FEATURE_DATA_ARCHITECTURE1 data{};
-		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &data, sizeof(data)))) {
+		hr = _device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &data, sizeof(data));
+
+		if (SUCCEEDED(hr)) {
 			_isUMA = data.UMA;
+		} else {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			return false;
 		}
 	}
 
@@ -73,10 +80,30 @@ bool D3D12Context::Initialize(
 	// 检查 Resizable BAR 支持
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS16 data{};
-		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &data, sizeof(data)))) {
+		hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &data, sizeof(data));
+
+		if (SUCCEEDED(hr)) {
 			_isGPUUploadHeapSupported = data.GPUUploadHeapSupported;
+		} else {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			return false;
 		}
 	}
+
+	// 检查 FP16 支持
+	{
+		D3D12_FEATURE_DATA_D3D12_OPTIONS data{};
+		HRESULT hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &data, sizeof(data));
+
+		if (SUCCEEDED(hr)) {
+			_isFP16Supported = data.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;
+		} else {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			return false;
+		}
+	}
+
+	_LogDeviceInfo();
 
 	if (!_InitializeDeviceResources(
 		maxInFlightFrameCount, priority, commandListType, disableFrameFenceTracking)) {
@@ -96,6 +123,7 @@ void D3D12Context::CopyDevice(const D3D12Context& other) {
 	_isUMA = other._isUMA;
 	_isHeapFlagCreateNotZeroedSupported = other._isHeapFlagCreateNotZeroedSupported;
 	_isGPUUploadHeapSupported = other._isGPUUploadHeapSupported;
+	_isFP16Supported = other._isFP16Supported;
 }
 
 bool D3D12Context::InitializeAfterCopyDevice(
@@ -406,52 +434,14 @@ bool D3D12Context::_CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId)
 	return true;
 }
 
-bool D3D12Context::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept {
+bool D3D12Context::_TryCreateD3DDevice(
+	const winrt::com_ptr<IDXGIAdapter1>& adapter,
+	const DXGI_ADAPTER_DESC1& adapterDesc
+) noexcept {
 	HRESULT hr = D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&_device));
 	if (FAILED(hr)) {
 		Logger::Get().ComError("D3D12CreateDevice 失败", hr);
 		return false;
-	}
-
-	{
-		D3D_FEATURE_LEVEL featureLevels[] = {
-			D3D_FEATURE_LEVEL_12_2,
-			D3D_FEATURE_LEVEL_12_1,
-			D3D_FEATURE_LEVEL_12_0,
-			D3D_FEATURE_LEVEL_11_1,
-			D3D_FEATURE_LEVEL_11_0
-		};
-		D3D12_FEATURE_DATA_FEATURE_LEVELS featureData{
-			.NumFeatureLevels = (UINT)std::size(featureLevels),
-			.pFeatureLevelsRequested = featureLevels
-		};
-		hr = _device->CheckFeatureSupport(D3D12_FEATURE_FEATURE_LEVELS, &featureData, sizeof(featureData));
-		if (SUCCEEDED(hr)) {
-			std::string_view flStr;
-			switch (featureData.MaxSupportedFeatureLevel) {
-			case D3D_FEATURE_LEVEL_12_2:
-				flStr = "12.2";
-				break;
-			case D3D_FEATURE_LEVEL_12_1:
-				flStr = "12.1";
-				break;
-			case D3D_FEATURE_LEVEL_12_0:
-				flStr = "12.0";
-				break;
-			case D3D_FEATURE_LEVEL_11_1:
-				flStr = "11.1";
-				break;
-			case D3D_FEATURE_LEVEL_11_0:
-				flStr = "11.0";
-				break;
-			default:
-				flStr = "未知";
-				break;
-			}
-			Logger::Get().Info(fmt::format("已创建 D3D12 设备\n\t功能级别: {}", flStr));
-		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-		}
 	}
 
 	_dxgiAdapter = adapter.try_as<IDXGIAdapter4>();
@@ -460,7 +450,7 @@ bool D3D12Context::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adap
 		return false;
 	}
 
-	Logger::Get().Info(fmt::format("当前图形适配器: \n\tVendorId: {:#x}\n\tDeviceId: {:#x}\n\tDescription: {}",
+	Logger::Get().Info(fmt::format("图形适配器\n\tVendorId: {:#x}\n\tDeviceId: {:#x}\n\tDescription: {}",
 		adapterDesc.VendorId, adapterDesc.DeviceId, StrHelper::UTF16ToUTF8(adapterDesc.Description)));
 
 	return true;
@@ -536,6 +526,107 @@ bool D3D12Context::_QueryHighestShaderModel() noexcept {
 	
 	Logger::Get().Error("不支持 SM 5.1");
 	return false;
+}
+
+void D3D12Context::_LogDeviceInfo() noexcept {
+	std::string_view featureLevel;
+	{
+		D3D_FEATURE_LEVEL featureLevels[] = {
+			D3D_FEATURE_LEVEL_12_2,
+			D3D_FEATURE_LEVEL_12_1,
+			D3D_FEATURE_LEVEL_12_0,
+			D3D_FEATURE_LEVEL_11_1,
+			D3D_FEATURE_LEVEL_11_0
+		};
+		D3D12_FEATURE_DATA_FEATURE_LEVELS featureData = {
+			.NumFeatureLevels = (UINT)std::size(featureLevels),
+			.pFeatureLevelsRequested = featureLevels
+		};
+		HRESULT hr = _device->CheckFeatureSupport(
+			D3D12_FEATURE_FEATURE_LEVELS, &featureData, sizeof(featureData));
+		if (SUCCEEDED(hr)) {
+			switch (featureData.MaxSupportedFeatureLevel) {
+			case D3D_FEATURE_LEVEL_12_2:
+				featureLevel = "12.2";
+				break;
+			case D3D_FEATURE_LEVEL_12_1:
+				featureLevel = "12.1";
+				break;
+			case D3D_FEATURE_LEVEL_12_0:
+				featureLevel = "12.0";
+				break;
+			case D3D_FEATURE_LEVEL_11_1:
+				featureLevel = "11.1";
+				break;
+			case D3D_FEATURE_LEVEL_11_0:
+				featureLevel = "11.0";
+				break;
+			default:
+				featureLevel = "未知";
+				break;
+			}
+			
+		} else {
+			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			featureLevel = "未知";
+		}
+	}
+
+	std::string_view shaderModel;
+	switch (_shaderModel) {
+	case D3D_SHADER_MODEL_6_9:
+		shaderModel = "6.9";
+		break;
+	case D3D_SHADER_MODEL_6_8:
+		shaderModel = "6.8";
+		break;
+	case D3D_SHADER_MODEL_6_7:
+		shaderModel = "6.7";
+		break;
+	case D3D_SHADER_MODEL_6_6:
+		shaderModel = "6.6";
+		break;
+	case D3D_SHADER_MODEL_6_5:
+		shaderModel = "6.5";
+		break;
+	case D3D_SHADER_MODEL_6_4:
+		shaderModel = "6.4";
+		break;
+	case D3D_SHADER_MODEL_6_3:
+		shaderModel = "6.3";
+		break;
+	case D3D_SHADER_MODEL_6_2:
+		shaderModel = "6.2";
+		break;
+	case D3D_SHADER_MODEL_6_1:
+		shaderModel = "6.1";
+		break;
+	case D3D_SHADER_MODEL_6_0:
+		shaderModel = "6.0";
+		break;
+	default:
+		shaderModel = "5.1";
+		break;
+	}
+
+	constexpr const char* boolStrs[] = { "否","是" };
+
+	Logger::Get().Info(fmt::format(R"(已创建 D3D12 设备
+	功能级别: {}
+	shader model 版本: {}
+	根签名版本: {}
+	集成显卡: {}
+	D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 支持: {}
+	Resizable BAR 支持: {}
+	FP16 支持: {})",
+		featureLevel,
+		shaderModel,
+		_rootSignatureVersion == D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0",
+		boolStrs[_isUMA],
+		boolStrs[_isHeapFlagCreateNotZeroedSupported],
+		boolStrs[_isGPUUploadHeapSupported],
+		boolStrs[_isFP16Supported]
+	));
 }
 
 }

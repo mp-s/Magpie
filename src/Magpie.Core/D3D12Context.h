@@ -76,6 +76,10 @@ public:
 		return _isGPUUploadHeapSupported;
 	}
 
+	bool IsFP16Supported() const noexcept {
+		return _isFP16Supported;
+	}
+
 	uint32_t GetMaxInFlightFrameCount() const noexcept {
 		return (uint32_t)_commandAllocators.size();
 	}
@@ -107,11 +111,16 @@ private:
 
 	bool _CreateAdapterAndDevice(const GraphicsCardId& graphicsCardId) noexcept;
 
-	bool _TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& adapter, const DXGI_ADAPTER_DESC1& adapterDesc) noexcept;
+	bool _TryCreateD3DDevice(
+		const winrt::com_ptr<IDXGIAdapter1>& adapter,
+		const DXGI_ADAPTER_DESC1& adapterDesc
+	) noexcept;
 
 	bool _CreateAdapterFromDevice() noexcept;
 
 	bool _QueryHighestShaderModel() noexcept;
+
+	void _LogDeviceInfo() noexcept;
 
 	DescriptorHeap* _csuDescriptorHeap = nullptr;
 	DescriptorHeap* _rtvDescriptorHeap = nullptr;
@@ -136,6 +145,7 @@ private:
 	bool _isUMA = false;
 	bool _isHeapFlagCreateNotZeroedSupported = false;
 	bool _isGPUUploadHeapSupported = false;
+	bool _isFP16Supported = false;
 };
 
 }

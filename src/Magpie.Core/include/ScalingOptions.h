@@ -218,7 +218,7 @@ struct ScalingOptions {
 	CaptureMethod captureMethod = CaptureMethod::GraphicsCapture;
 	MultiMonitorUsage multiMonitorUsage = MultiMonitorUsage::Closest;
 	OutputAlignment outputAlignment = OutputAlignment::Center;
-	CursorInterpolationMode cursorInterpolationMode = CursorInterpolationMode::NearestNeighbor;
+	CursorInterpolationMode cursorInterpolationMode = CursorInterpolationMode::Bicubic;
 	std::optional<float> autoHideCursorDelay;
 	DuplicateFrameDetectionMode duplicateFrameDetectionMode = DuplicateFrameDetectionMode::Dynamic;
 	uint32_t maxProducerInFlightFrames = 2;
