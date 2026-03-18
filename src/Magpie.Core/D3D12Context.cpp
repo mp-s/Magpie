@@ -93,7 +93,7 @@ bool D3D12Context::Initialize(
 	// 检查 FP16 支持
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS data{};
-		HRESULT hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &data, sizeof(data));
+		hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &data, sizeof(data));
 
 		if (SUCCEEDED(hr)) {
 			_isFP16Supported = data.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;

@@ -101,24 +101,29 @@ private:
 		}
 	};
 
-	struct _CursorInfo {
-		_CursorType type;
-		Size size;
-		Point hotspot;
+	struct _CursorFrame {
+		std::chrono::steady_clock::duration duration = std::chrono::steady_clock::duration::max();
 		winrt::com_ptr<ID3D12Resource> texture;
-		uint64_t lastUseFenceValue = 0;
-		
-		Size originSize;
-		ByteBuffer originTextureData;
-		// 这两个纹理使用完毕后在 _ClearRetiredResources 中释放
-		winrt::com_ptr<ID3D12Resource> originUploadBuffer;
-		winrt::com_ptr<ID3D12Resource> originTexture;
+		ByteBuffer resTextureData;
+		// 这两个资源使用完毕后在 _ClearRetiredResources 中释放
+		winrt::com_ptr<ID3D12Resource> uploadBuffer;
+		winrt::com_ptr<ID3D12Resource> resTexture;
+
 		uint64_t tempResourcesFenceValue = 0;
 
 		uint32_t textureSrvOffset = std::numeric_limits<uint32_t>::max();
 		uint32_t textureRtvOffset = std::numeric_limits<uint32_t>::max();
-		uint32_t originTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+		uint32_t resTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+	};
 
+	struct _CursorInfo {
+		_CursorType type;
+		Size size;
+		Point hotspot;
+		SmallVector<_CursorFrame, 1> frames;
+		Size resSize;
+		uint64_t lastUseFenceValue = 0;
+		
 		void FreeDescriptors(
 			DescriptorHeap& csuDescriptorHeap,
 			DescriptorHeap& rtvDescriptorHeap
@@ -134,25 +139,29 @@ private:
 	Size _CalcCursorSize(
 		Size cursorBmpSize,
 		uint32_t cursorDpi,
-		uint32_t monitorDpi
+		uint32_t monitorDpi,
+		bool isCursorDpiAware
 	) const noexcept;
 
-	wil::unique_hcursor _TryResolveCursorResource(
+	void _TryResolveCursorFromOriginResource(
+		HCURSOR hCursor,
 		const ICONINFOEX& iconInfoEx,
-		uint32_t preferedWidth
+		uint32_t preferedWidth,
+		SmallVectorImpl<wil::unique_hcursor>& result
 	) const noexcept;
 
-	wil::unique_hcursor _TryResolveStandardCursor(
-		const wchar_t* regValueName,
-		int resId,
-		uint32_t preferedWidth
+	bool _ResolveCursorFramePixels(
+		_CursorInfo& cursorInfo,
+		_CursorFrame& cursorFrame,
+		HBITMAP hColorBmp,
+		HBITMAP hMaskBmp
 	) const noexcept;
-
-	bool _ResolveCursorPixels(_CursorInfo& cursorInfo, HBITMAP hColorBmp, HBITMAP hMaskBmp) const noexcept;
 
 	HRESULT _InitializeCursorTexture(
 		GraphicsContext& graphicsContext,
-		_CursorInfo& cursorInfo
+		_CursorInfo& cursorInfo,
+		uint32_t cursorFrameIdx,
+		uint64_t completedFenceValue
 	) noexcept;
 
 	// 只能在同步 GPU 后调用
@@ -169,6 +178,8 @@ private:
 	HRESULT _CreateCursorResizerPSO() noexcept;
 
 	void _ClearRetiredResources(uint64_t completedFenceValue) noexcept;
+
+	void _OnCursorsRegChanged(wil::RegistryChangeKind) noexcept;
 
 	D3D12Context* _d3d12Context = nullptr;
 	Size _srcSize{};
