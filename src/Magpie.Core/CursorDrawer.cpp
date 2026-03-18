@@ -195,11 +195,13 @@ void CursorDrawer::PrepareForDraw(HCURSOR hCursor, POINT cursorPos, bool& needRe
 				while (true) {
 					_curCursorInfoKeyValue = _ResolveCursor(hCursor, cursorPos, needRedraw);
 					if (_curCursorInfoKeyValue) {
+						const uint32_t cursorFrameIdx = 0;
 						const _CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
+						const _CursorFrame& curCursorFrame = _curCursorInfoKeyValue->second.frames[cursorFrameIdx];
 						// 检查光标是否在视口内。hCursor 不为 NULL 说明光标已在缩放窗口内，因此这个检查很少失败
 						const RECT cursorRect = {
-							cursorPos.x - (LONG)cursorInfo.hotspot.x,
-							cursorPos.y - (LONG)cursorInfo.hotspot.y,
+							cursorPos.x - (LONG)curCursorFrame.hotspot.x,
+							cursorPos.y - (LONG)curCursorFrame.hotspot.y,
 							cursorRect.left + (LONG)cursorInfo.size.width,
 							cursorRect.top + (LONG)cursorInfo.size.height
 						};
@@ -268,7 +270,7 @@ HRESULT CursorDrawer::Draw(
 
 		cursorFrame.tempResourcesFenceValue = nextFenceValue;
 
-		// 所有帧都初始化后再考虑清理临时资源，因为初始化新帧时可能会复用旧帧的临时资源
+		// 所有帧都初始化后再清理临时资源，因为初始化新帧时可能会复用旧帧的临时资源
 		if (std::all_of(
 			cursorInfo.frames.begin(),
 			cursorInfo.frames.end(),
@@ -281,15 +283,15 @@ HRESULT CursorDrawer::Draw(
 	}
 
 	const RECT cursorRect = {
-		.left = _curCursorPos.x - (LONG)cursorInfo.hotspot.x,
-		.top = _curCursorPos.y - (LONG)cursorInfo.hotspot.y,
+		.left = _curCursorPos.x - (LONG)cursorFrame.hotspot.x,
+		.top = _curCursorPos.y - (LONG)cursorFrame.hotspot.y,
 		.right = cursorRect.left + (LONG)cursorInfo.size.width,
 		.bottom = cursorRect.top + (LONG)cursorInfo.size.height
 	};
 
 	const bool isSrgb = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange;
 	
-	if (cursorInfo.type == _CursorType::Color) {
+	if (cursorFrame.type == _CursorType::Color) {
 		winrt::com_ptr<ID3D12PipelineState>& pso = isSrgb ? _colorSrgbPSO : _colorPSO;
 		if (!pso) {
 			HRESULT hr = _CreateColorPSO(isSrgb, pso);
@@ -302,7 +304,7 @@ HRESULT CursorDrawer::Draw(
 		graphicsContext.SetPipelineState(pso.get());
 		graphicsContext.SetRootSignature(_colorRootSignature.get());
 	} else {
-		bool isMonochrome = cursorInfo.type == _CursorType::Monochrome;
+		bool isMonochrome = cursorFrame.type == _CursorType::Monochrome;
 		
 		winrt::com_ptr<ID3D12PipelineState>& pso = isMonochrome ?
 			(isSrgb ? _monochromeSrgbPSO : _monochromePSO) :
@@ -339,12 +341,12 @@ HRESULT CursorDrawer::Draw(
 		graphicsContext.SetRoot32BitConstants(0, (UINT)std::size(constants), constants);
 	}
 
-	if (cursorInfo.type == _CursorType::Color) {
+	if (cursorFrame.type == _CursorType::Color) {
 		graphicsContext.SetRootDescriptorTable(1, cursorFrame.textureSrvOffset);
 	} else {
 		DirectXHelper::Constant32 constants[] = {
-			{.uintVal = cursorInfo.resSize.width},
-			{.uintVal = cursorInfo.resSize.height},
+			{.uintVal = cursorFrame.resSize.width},
+			{.uintVal = cursorFrame.resSize.height},
 			{.uintVal = cursorInfo.size.width},
 			{.uintVal = cursorInfo.size.height},
 			{.uintVal = backBuffer ? 0u :uint32_t(cursorRect.left - _destRect.left)},
@@ -606,16 +608,16 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		cursorInfo.size = _CalcCursorSize(cursorSizeDpi96, 96, monitorDpi, isCursorDpiAware);
 	}
 
-	SmallVector<wil::unique_hcursor, 1> resCursors;
+	SmallVector<std::pair<wil::unique_hcursor, _steady_duration>, 1> cursorFrames;
 	Point resHotspot = { cursorIconInfoEx.xHotspot, cursorIconInfoEx.yHotspot };
 
 	// 尝试从光标原始来源加载指定尺寸的资源，如果失败旧只能使用 GetIconInfo 得到的位图，
 	// DPI 虚拟化机制可能导致图像质量严重下降。
-	_TryResolveCursorFromOriginResource(
-		hCursor, cursorIconInfoEx, cursorInfo.size.width, resCursors);
+	_TryResolveCursorFramesFromSource(hCursor, cursorIconInfoEx,
+		cursorInfo.size.width, cursorFrames, cursorInfo.frameSequence);
 
 	// 尝试使用未记录的 API 提取动画光标的每一帧
-	if (resCursors.empty() && GetCursorFrameInfo) {
+	if (cursorFrames.empty() && GetCursorFrameInfo) {
 		/*DWORD jifRate;
 		int stepCount;
 		HCURSOR hTmpCursor = GetCursorFrameInfo(hCursor, nullptr, 0, &jifRate, &stepCount);
@@ -624,21 +626,29 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		}*/
 	}
 
-	if (resCursors.empty()) {
-		cursorInfo.resSize = cursorBmpSize;
+	if (cursorFrames.empty()) {
 		cursorInfo.frames.resize(1);
 
-		if (!_ResolveCursorFramePixels(
-			cursorInfo, cursorInfo.frames[0], hResColorBmp.get(), hResMaskBmp.get())) {
+		_CursorFrame& cursorFrame = cursorInfo.frames[0];
+		cursorFrame.resSize = cursorBmpSize;
+		cursorFrame.hotspot.x = (uint32_t)lround(
+			resHotspot.x * cursorInfo.size.width / (double)cursorFrame.resSize.width);
+		cursorFrame.hotspot.y = (uint32_t)lround(
+			resHotspot.y * cursorInfo.size.height / (double)cursorFrame.resSize.height);
+
+		if (!_ResolveCursorFramePixels(cursorFrame, hResColorBmp.get(), hResMaskBmp.get())) {
 			Logger::Get().Error("_ResolveCursorFramePixels 失败");
 			return nullptr;
 		}
 	} else {
-		cursorInfo.frames.resize(resCursors.size());
+		cursorInfo.frames.resize(cursorFrames.size());
 
-		for (uint32_t i = 0; i < resCursors.size(); ++i) {
+		for (uint32_t i = 0; i < cursorFrames.size(); ++i) {
+			_CursorFrame& curCursorFrame = cursorInfo.frames[i];
+			curCursorFrame.duration = cursorFrames[i].second;
+
 			ICONINFO iconInfo{};
-			if (!GetIconInfo(resCursors[0].get(), &iconInfo)) {
+			if (!GetIconInfo(cursorFrames[i].first.get(), &iconInfo)) {
 				Logger::Get().Win32Error("GetIconInfo 失败");
 				return nullptr;
 			}
@@ -646,35 +656,23 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 			hResColorBmp.reset(iconInfo.hbmColor);
 			hResMaskBmp.reset(iconInfo.hbmMask);
 
-			Size resSize;
-			if (!GetCursorSizeFromBmps(hResColorBmp.get(), hResMaskBmp.get(), resSize)) {
+			if (!GetCursorSizeFromBmps(hResColorBmp.get(), hResMaskBmp.get(), curCursorFrame.resSize)) {
 				Logger::Get().Error("GetCursorSizeFromBmps 失败");
 				return nullptr;
 			}
 
-			// Windows 中动态光标不支持中途更改尺寸和热点
-			if (i == 0) {
-				cursorInfo.resSize = resSize;
-				resHotspot = { iconInfo.xHotspot,iconInfo.yHotspot };
-			} else {
-				if (cursorInfo.resSize != resSize) {
-					Logger::Get().Error(fmt::format("帧 {} 和帧 0 尺寸不同", i));
-					return nullptr;
-				}
-			}
-			
+			curCursorFrame.hotspot.x = (uint32_t)lround(
+				iconInfo.xHotspot * cursorInfo.size.width / (double)curCursorFrame.resSize.width);
+			curCursorFrame.hotspot.y = (uint32_t)lround(
+				iconInfo.yHotspot * cursorInfo.size.height / (double)curCursorFrame.resSize.height);
+
 			if (!_ResolveCursorFramePixels(
-				cursorInfo, cursorInfo.frames[i], hResColorBmp.get(), hResMaskBmp.get())) {
+				cursorInfo.frames[i], hResColorBmp.get(), hResMaskBmp.get())) {
 				Logger::Get().Error("_ResolveCursorFramePixels 失败");
 				return nullptr;
 			}
 		}
 	}
-
-	cursorInfo.hotspot.x = (uint32_t)lround(
-		resHotspot.x * cursorInfo.size.width / (double)cursorInfo.resSize.width);
-	cursorInfo.hotspot.y = (uint32_t)lround(
-		resHotspot.y * cursorInfo.size.height / (double)cursorInfo.resSize.height);
 
 	needRedraw = true;
 
@@ -705,13 +703,14 @@ Size CursorDrawer::_CalcCursorSize(
 		(uint32_t)std::lroundf(cursorBmpSize.height * scale) };
 }
 
-void CursorDrawer::_TryResolveCursorFromOriginResource(
+void CursorDrawer::_TryResolveCursorFramesFromSource(
 	HCURSOR hCursor,
 	const ICONINFOEX& iconInfoEx,
 	uint32_t preferedWidth,
-	SmallVectorImpl<wil::unique_hcursor>& result
+	SmallVectorImpl<std::pair<wil::unique_hcursor, _steady_duration>>& frames,
+	SmallVectorImpl<uint32_t>& frameSequence
 ) const noexcept {
-	assert(result.empty());
+	assert(frames.empty());
 
 	auto it = std::find_if(
 		STANDARD_CURSORS.begin(),
@@ -731,7 +730,7 @@ void CursorDrawer::_TryResolveCursorFromOriginResource(
 				wil::unique_hcursor hResCursor =
 					CursorHelper::ExtractCursorFromModule(hModule.get(), resName, preferedWidth);
 				if (hResCursor) {
-					result.push_back(std::move(hResCursor));
+					frames.emplace_back(std::move(hResCursor), _steady_duration::max());
 				}
 			} else {
 				Logger::Get().Win32Error("LoadLibraryEx 失败");
@@ -744,7 +743,7 @@ void CursorDrawer::_TryResolveCursorFromOriginResource(
 			wil::unique_hcursor hResCursor = CursorHelper::ExtractCursorFromModule(
 				hUser32, MAKEINTRESOURCE(it->resId), preferedWidth);
 			if (hResCursor) {
-				result.push_back(std::move(hResCursor));
+				frames.emplace_back(std::move(hResCursor), _steady_duration::max());
 			} else {
 				Logger::Get().Error("CursorHelper::ExtractCursorFromModule 失败");
 			}
@@ -763,19 +762,16 @@ void CursorDrawer::_TryResolveCursorFromOriginResource(
 			}
 
 			// 路径中可能包含环境变量字符串
-			std::wstring curPath;
-			hr = wil::ExpandEnvironmentStringsW(regValue.get(), curPath);
+			std::wstring filePath;
+			hr = wil::ExpandEnvironmentStringsW(regValue.get(), filePath);
 			if (FAILED(hr)) {
 				Logger::Get().ComError("wil::ExpandEnvironmentStringsW 失败", hr);
 				return;
 			}
 
-			wil::unique_hcursor hResCursor =
-				CursorHelper::ExtractCursorFromCurFile(curPath.c_str(), preferedWidth);
-			if (hResCursor) {
-				result.push_back(std::move(hResCursor));
-			} else {
-				Logger::Get().Error("CursorHelper::ExtractCursorFromCurFile 失败");
+			if (!CursorHelper::ExtractCursorFramesFromFile(
+				filePath.c_str(), preferedWidth, frames, frameSequence)) {
+				Logger::Get().Error("CursorHelper::ExtractCursorFramesFromFile 失败");
 			}
 		}
 	}
@@ -806,14 +802,13 @@ static void FillColorCursorRGB(
 }
 
 bool CursorDrawer::_ResolveCursorFramePixels(
-	_CursorInfo& cursorInfo,
 	_CursorFrame& cursorFrame,
 	HBITMAP hColorBmp,
 	HBITMAP hMaskBmp
 ) const noexcept {
 	const Size bmpSize = {
-		cursorInfo.resSize.width,
-		hColorBmp ? cursorInfo.resSize.height : cursorInfo.resSize.height * 2
+		cursorFrame.resSize.width,
+		hColorBmp ? cursorFrame.resSize.height : cursorFrame.resSize.height * 2
 	};
 
 	// 单色光标也转换成 32 位以方便处理
@@ -850,7 +845,7 @@ bool CursorDrawer::_ResolveCursorFramePixels(
 
 		if (hasAlpha) {
 			// 彩色光标
-			cursorInfo.type = _CursorType::Color;
+			cursorFrame.type = _CursorType::Color;
 			cursorFrame.resTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
 			HALF* textureData = (HALF*)cursorFrame.resTextureData.Data();
@@ -885,7 +880,7 @@ bool CursorDrawer::_ResolveCursorFramePixels(
 
 			if (canConvertToColor) {
 				// 转换为彩色光标以获得更好的插值效果和渲染性能
-				cursorInfo.type = _CursorType::Color;
+				cursorFrame.type = _CursorType::Color;
 				cursorFrame.resTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
 				HALF* textureData = (HALF*)cursorFrame.resTextureData.Data();
@@ -900,7 +895,7 @@ bool CursorDrawer::_ResolveCursorFramePixels(
 					}
 				}
 			} else {
-				cursorInfo.type = _CursorType::MaskedColor;
+				cursorFrame.type = _CursorType::MaskedColor;
 
 				// 将 XOR 掩码复制到透明通道中
 				for (uint32_t i = 0; i < bi.bmiHeader.biSizeImage; i += 4) {
@@ -927,7 +922,7 @@ bool CursorDrawer::_ResolveCursorFramePixels(
 		
 		if (canConvertToColor) {
 			// 转换为彩色光标以获得更好的插值效果和渲染性能
-			cursorInfo.type = _CursorType::Color;
+			cursorFrame.type = _CursorType::Color;
 			cursorFrame.resTextureData.Resize(bi.bmiHeader.biSizeImage * 2);
 
 			HALF* textureData = (HALF*)cursorFrame.resTextureData.Data();
@@ -947,7 +942,7 @@ bool CursorDrawer::_ResolveCursorFramePixels(
 				}
 			}
 		} else {
-			cursorInfo.type = _CursorType::Monochrome;
+			cursorFrame.type = _CursorType::Monochrome;
 
 			// 位图数据：上半部分是 AND 掩码，下半部分是 XOR 掩码
 			// 纹理数据：高四位是 AND 掩码，低四位是 XOR 掩码
@@ -975,17 +970,18 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 	uint64_t completedFenceValue
 ) noexcept {
 	ID3D12Device5* device = _d3d12Context->GetDevice();
-	_CursorFrame& cursorFrame = cursorInfo.frames[cursorFrameIdx];
+	_CursorFrame& curCursorFrame = cursorInfo.frames[cursorFrameIdx];
 
-	for (uint32_t i = 0; i < cursorFrameIdx; ++i) {
-		_CursorFrame& oldFrame = cursorInfo.frames[i];
-		if (oldFrame.uploadBuffer) {
-			if (oldFrame.tempResourcesFenceValue <= completedFenceValue) {
-				cursorFrame.uploadBuffer = std::move(oldFrame.uploadBuffer);
-				cursorFrame.resTexture = std::move(oldFrame.resTexture);
-				std::swap(cursorFrame.resTextureSrvOffset, oldFrame.resTextureSrvOffset);
-			}
-
+	// 尝试复用旧帧的临时资源。基本上动态光标的所有帧都是相同类型和尺寸，因此能复用的概率很高
+	for (_CursorFrame& frame : cursorInfo.frames) {
+		if (frame.uploadBuffer &&
+			frame.tempResourcesFenceValue <= completedFenceValue &&
+			frame.resSize == curCursorFrame.resSize &&
+			frame.type == curCursorFrame.type
+		) {
+			curCursorFrame.uploadBuffer = std::move(frame.uploadBuffer);
+			curCursorFrame.resTexture = std::move(frame.resTexture);
+			std::swap(curCursorFrame.resTextureSrvOffset, frame.resTextureSrvOffset);
 			break;
 		}
 	}
@@ -996,9 +992,9 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 		D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
 
 	CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-		cursorInfo.type == _CursorType::Color ? DXGI_FORMAT_R16G16B16A16_FLOAT :
-		(cursorInfo.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R8G8B8A8_UNORM),
-		cursorInfo.resSize.width, cursorInfo.resSize.height, 1, 1);
+		curCursorFrame.type == _CursorType::Color ? DXGI_FORMAT_R16G16B16A16_FLOAT :
+		(curCursorFrame.type == _CursorType::Monochrome ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R8G8B8A8_UNORM),
+		curCursorFrame.resSize.width, curCursorFrame.resSize.height, 1, 1);
 
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT textureLayout;
 	UINT64 textureRowSizeInBytes;
@@ -1006,10 +1002,10 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 	device->GetCopyableFootprints(&texDesc, 0, 1, 0,
 		&textureLayout, nullptr, &textureRowSizeInBytes, &textureSize);
 
-	assert(textureRowSizeInBytes == cursorInfo.resSize.width *
-		(cursorInfo.type == _CursorType::Color ? 8 : (cursorInfo.type == _CursorType::Monochrome ? 1 : 4)));
+	assert(textureRowSizeInBytes == curCursorFrame.resSize.width *
+		(curCursorFrame.type == _CursorType::Color ? 8 : (curCursorFrame.type == _CursorType::Monochrome ? 1 : 4)));
 
-	if (!cursorFrame.uploadBuffer) {
+	if (!curCursorFrame.uploadBuffer) {
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(textureSize);
 
 		HRESULT hr = device->CreateCommittedResource(
@@ -1018,7 +1014,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 			&bufferDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
-			IID_PPV_ARGS(&cursorFrame.uploadBuffer)
+			IID_PPV_ARGS(&curCursorFrame.uploadBuffer)
 		);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateCommittedResource 失败", hr);
@@ -1028,14 +1024,14 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 	heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 
-	if (!cursorFrame.resTexture) {
+	if (!curCursorFrame.resTexture) {
 		HRESULT hr = device->CreateCommittedResource(
 			&heapProps,
 			heapFlags,
 			&texDesc,
 			D3D12_RESOURCE_STATE_COPY_DEST,
 			nullptr,
-			IID_PPV_ARGS(&cursorFrame.resTexture)
+			IID_PPV_ARGS(&curCursorFrame.resTexture)
 		);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateCommittedResource 失败", hr);
@@ -1045,38 +1041,38 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 	CD3DX12_RANGE emptyRange{};
 	void* pData;
-	HRESULT hr = cursorFrame.uploadBuffer->Map(0, &emptyRange, &pData);
+	HRESULT hr = curCursorFrame.uploadBuffer->Map(0, &emptyRange, &pData);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
 		return hr;
 	}
 
 	if (textureRowSizeInBytes == textureLayout.Footprint.RowPitch) {
-		std::memcpy(pData, cursorFrame.resTextureData.Data(),
-			textureRowSizeInBytes * cursorInfo.resSize.height);
+		std::memcpy(pData, curCursorFrame.resTextureData.Data(),
+			textureRowSizeInBytes * curCursorFrame.resSize.height);
 	} else {
-		for (uint32_t i = 0; i < cursorInfo.resSize.height; ++i) {
+		for (uint32_t i = 0; i < curCursorFrame.resSize.height; ++i) {
 			std::memcpy(
 				(uint8_t*)pData + textureLayout.Footprint.RowPitch * i,
-				&cursorFrame.resTextureData[(uint32_t)textureRowSizeInBytes * i],
+				&curCursorFrame.resTextureData[(uint32_t)textureRowSizeInBytes * i],
 				textureRowSizeInBytes
 			);
 		}
 	}
 
-	cursorFrame.uploadBuffer->Unmap(0, nullptr);
+	curCursorFrame.uploadBuffer->Unmap(0, nullptr);
 
-	cursorFrame.resTextureData.Clear();
+	curCursorFrame.resTextureData.Clear();
 
 	graphicsContext.CopyTextureRegion(
-		CD3DX12_TEXTURE_COPY_LOCATION(cursorFrame.resTexture.get()),
+		CD3DX12_TEXTURE_COPY_LOCATION(curCursorFrame.resTexture.get()),
 		0,
 		0,
-		CD3DX12_TEXTURE_COPY_LOCATION(cursorFrame.uploadBuffer.get(), textureLayout)
+		CD3DX12_TEXTURE_COPY_LOCATION(curCursorFrame.uploadBuffer.get(), textureLayout)
 	);
 
 	graphicsContext.InsertTransitionBarrier(
-		cursorFrame.resTexture.get(),
+		curCursorFrame.resTexture.get(),
 		D3D12_RESOURCE_STATE_COPY_DEST,
 		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
 	);
@@ -1087,9 +1083,9 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 	// * 不需要缩放时执行最近邻采样
 	// * 需要缩小时始终使用 CatmullRom
 	// * 需要放大时是否使用 CatmullRom 取决于 cursorInterpolationMode
-	if (cursorInfo.type == _CursorType::Color && 
-		(cursorInfo.size.width < cursorInfo.resSize.width ||
-		(cursorInfo.size.width > cursorInfo.resSize.width &&
+	if (curCursorFrame.type == _CursorType::Color &&
+		(cursorInfo.size.width < curCursorFrame.resSize.width ||
+		(cursorInfo.size.width > curCursorFrame.resSize.width &&
 			ScalingWindow::Get().Options().cursorInterpolationMode == CursorInterpolationMode::Bicubic))
 	) {
 		// SDR 色域下由于预乘 alpha 无法在线性空间插值
@@ -1103,7 +1099,7 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 			&texDesc,
 			D3D12_RESOURCE_STATE_RENDER_TARGET,
 			nullptr,
-			IID_PPV_ARGS(&cursorFrame.texture)
+			IID_PPV_ARGS(&curCursorFrame.texture)
 		);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("CreateCommittedResource 失败", hr);
@@ -1113,20 +1109,20 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 		// 以 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 创建的资源作为渲染目标需先
 		// Discard/Clear/Copy。
 		if (heapFlags & D3D12_HEAP_FLAG_CREATE_NOT_ZEROED) {
-			graphicsContext.DiscardResource(cursorFrame.texture.get());
+			graphicsContext.DiscardResource(curCursorFrame.texture.get());
 		}
 		
 		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 
-		if (cursorFrame.resTextureSrvOffset == std::numeric_limits<uint32_t>::max()) {
-			hr = descriptorHeap.Alloc(1, cursorFrame.resTextureSrvOffset);
+		if (curCursorFrame.resTextureSrvOffset == std::numeric_limits<uint32_t>::max()) {
+			hr = descriptorHeap.Alloc(1, curCursorFrame.resTextureSrvOffset);
 			if (FAILED(hr)) {
 				Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 				return hr;
 			}
 		}
 
-		hr = rtvDescriptorHeap.Alloc(1, cursorFrame.textureRtvOffset);
+		hr = rtvDescriptorHeap.Alloc(1, curCursorFrame.textureRtvOffset);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 			return hr;
@@ -1136,9 +1132,9 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 			CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
 				CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
 			device->CreateShaderResourceView(
-				cursorFrame.resTexture.get(),
+				curCursorFrame.resTexture.get(),
 				&srvDesc,
-				descriptorHeap.GetCpuHandle(cursorFrame.resTextureSrvOffset)
+				descriptorHeap.GetCpuHandle(curCursorFrame.resTextureSrvOffset)
 			);
 		}
 		
@@ -1148,9 +1144,9 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 				.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
 			};
 			device->CreateRenderTargetView(
-				cursorFrame.texture.get(),
+				curCursorFrame.texture.get(),
 				&rtvDesc,
-				rtvDescriptorHeap.GetCpuHandle(cursorFrame.textureRtvOffset)
+				rtvDescriptorHeap.GetCpuHandle(curCursorFrame.textureRtvOffset)
 			);
 		}
 
@@ -1167,21 +1163,21 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 		{
 			DirectXHelper::Constant32 constants[] = {
-				{.uintVal = cursorInfo.resSize.width},
-				{.uintVal = cursorInfo.resSize.height},
-				{.floatVal = 1.0f / cursorInfo.resSize.width},
-				{.floatVal = 1.0f / cursorInfo.resSize.height}
+				{.uintVal = curCursorFrame.resSize.width},
+				{.uintVal = curCursorFrame.resSize.height},
+				{.floatVal = 1.0f / curCursorFrame.resSize.width},
+				{.floatVal = 1.0f / curCursorFrame.resSize.height}
 			};
 			graphicsContext.SetRoot32BitConstants(0, (UINT)std::size(constants), constants);
 		}
 
-		graphicsContext.SetRootDescriptorTable(1, cursorFrame.resTextureSrvOffset);
+		graphicsContext.SetRootDescriptorTable(1, curCursorFrame.resTextureSrvOffset);
 
 		graphicsContext.RSSetViewportAndScissorRect(CD3DX12_RECT(
 			0, 0, (LONG)cursorInfo.size.width, (LONG)cursorInfo.size.height));
 
 		uint32_t oldRtvOffset = graphicsContext.OMGetRenderTarget();
-		graphicsContext.OMSetRenderTarget(cursorFrame.textureRtvOffset);
+		graphicsContext.OMSetRenderTarget(curCursorFrame.textureRtvOffset);
 		
 		graphicsContext.Draw(3);
 
@@ -1189,15 +1185,15 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 		graphicsContext.OMSetRenderTarget(oldRtvOffset);
 
 		graphicsContext.InsertTransitionBarrier(
-			cursorFrame.texture.get(),
+			curCursorFrame.texture.get(),
 			D3D12_RESOURCE_STATE_RENDER_TARGET,
 			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
 		);
 	} else {
-		cursorFrame.texture = std::move(cursorFrame.resTexture);
+		curCursorFrame.texture = std::move(curCursorFrame.resTexture);
 	}
 
-	hr = descriptorHeap.Alloc(1, cursorFrame.textureSrvOffset);
+	hr = descriptorHeap.Alloc(1, curCursorFrame.textureSrvOffset);
 	if (FAILED(hr)) {
 		Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 		return hr;
@@ -1205,8 +1201,8 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 	CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
 		CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
-	device->CreateShaderResourceView(cursorFrame.texture.get(), &srvDesc,
-		descriptorHeap.GetCpuHandle(cursorFrame.textureSrvOffset));
+	device->CreateShaderResourceView(curCursorFrame.texture.get(), &srvDesc,
+		descriptorHeap.GetCpuHandle(curCursorFrame.textureSrvOffset));
 
 	return S_OK;
 }
@@ -1535,7 +1531,7 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 		auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
 		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 
-		// 有用的 fence 值是最后一帧的 tempResourcesFenceValue，它们按升序排列
+		// 有用的 fence 值是所有帧中最高的 tempResourcesFenceValue，它们按升序排列
 		auto it = _cursorInfosWithTempResources.begin();
 		for (; it != _cursorInfosWithTempResources.end(); ++it) {
 			auto it1 = _cursorInfos.find(*it);
@@ -1543,22 +1539,31 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 				// 不会出现这种情况，万一出现可以安全删除
 				assert(false);
 			} else {
-				_CursorFrame& lastCursorFrame = it1->second.frames.back();
+				SmallVectorImpl<_CursorFrame>& frames = it1->second.frames;
 
-				if (lastCursorFrame.tempResourcesFenceValue > completedFenceValue) {
+				// 所有帧都已初始化才会进入 _cursorInfosWithTempResources
+				assert(std::all_of(frames.begin(), frames.end(), [](const _CursorFrame& frame) {
+					return frame.texture != nullptr;
+				}));
+
+				if (std::any_of(frames.begin(), frames.end(), [&](const _CursorFrame& frame) {
+					return frame.tempResourcesFenceValue > completedFenceValue;
+				})) {
 					break;
 				}
 
-				lastCursorFrame.uploadBuffer = nullptr;
-				lastCursorFrame.resTexture = nullptr;
+				for (_CursorFrame& frame : frames) {
+					frame.uploadBuffer = nullptr;
+					frame.resTexture = nullptr;
 
-				if (lastCursorFrame.textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
-					rtvDescriptorHeap.Free(lastCursorFrame.textureRtvOffset, 1);
-					lastCursorFrame.textureRtvOffset = std::numeric_limits<uint32_t>::max();
-				}
-				if (lastCursorFrame.resTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
-					csuDescriptorHeap.Free(lastCursorFrame.resTextureSrvOffset, 1);
-					lastCursorFrame.resTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+					if (frame.textureRtvOffset != std::numeric_limits<uint32_t>::max()) {
+						rtvDescriptorHeap.Free(frame.textureRtvOffset, 1);
+						frame.textureRtvOffset = std::numeric_limits<uint32_t>::max();
+					}
+					if (frame.resTextureSrvOffset != std::numeric_limits<uint32_t>::max()) {
+						csuDescriptorHeap.Free(frame.resTextureSrvOffset, 1);
+						frame.resTextureSrvOffset = std::numeric_limits<uint32_t>::max();
+					}
 				}
 			}
 		}

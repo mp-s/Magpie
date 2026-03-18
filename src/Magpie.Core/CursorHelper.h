@@ -1,4 +1,5 @@
 #pragma once
+#include "SmallVector.h"
 
 namespace Magpie {
 
@@ -10,9 +11,12 @@ struct CursorHelper {
 		uint32_t preferredWidth
 	) noexcept;
 
-	static wil::unique_hcursor ExtractCursorFromCurFile(
+	// 支持 .ico 和 .ani
+	static bool ExtractCursorFramesFromFile(
 		const wchar_t* fileName,
-		uint32_t preferredWidth
+		uint32_t preferredWidth,
+		SmallVectorImpl<std::pair<wil::unique_hcursor, std::chrono::steady_clock::duration>>& result,
+		SmallVectorImpl<uint32_t>& frameSequence
 	) noexcept;
 };
 
