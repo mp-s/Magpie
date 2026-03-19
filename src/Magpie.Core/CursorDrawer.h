@@ -124,6 +124,14 @@ private:
 		// 序列表 (帧索引值数组)，使多帧可以复用同一个 _CursorFrame。为空表示顺序播放
 		SmallVector<std::pair<uint32_t, std::chrono::nanoseconds>, 0> frameSequence;
 		uint64_t lastUseFenceValue = 0;
+
+		bool IsAnimated() const noexcept {
+			return !frameSequence.empty();
+		}
+
+		uint32_t GetFrameIdx(uint32_t seqIdx) const noexcept {
+			return IsAnimated() ? frameSequence[seqIdx].first : 0;
+		}
 		
 		void FreeDescriptors(
 			DescriptorHeap& csuDescriptorHeap,
@@ -133,8 +141,7 @@ private:
 
 	std::pair<const _CursorInfoKey, _CursorInfo>* _ResolveCursor(
 		HCURSOR hCursor,
-		POINT cursorPos,
-		bool& needRedraw
+		POINT cursorPos
 	) noexcept;
 
 	Size _CalcCursorSize(
@@ -207,9 +214,11 @@ private:
 	HCURSOR _lastRawCursorHandle = NULL;
 	std::chrono::steady_clock::time_point _lastCursorActiveTime;
 	// 上次绘制的光标形状和位置
-	HCURSOR _hCurCursor = NULL;
-	POINT _curCursorPos{ std::numeric_limits<LONG>::max(), std::numeric_limits<LONG>::max() };
 	std::pair<const _CursorInfoKey, _CursorInfo>* _curCursorInfoKeyValue = nullptr;
+	POINT _curCursorPos{ std::numeric_limits<LONG>::max(), std::numeric_limits<LONG>::max() };
+	// 这两个成员用于保存动态光标状态
+	uint32_t _curFrameSeqIdx = 0;
+	std::chrono::steady_clock::time_point _curFrameSeqEndTime;
 
 	// 用于从渲染目标复制光标下区域
 	winrt::com_ptr<ID3D12Resource> _tempOriginTexture;

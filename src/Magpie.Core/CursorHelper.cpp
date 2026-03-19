@@ -315,11 +315,7 @@ static bool LoadAniFromFileMap(
 	ANIHEADER aniHeader{};
 	uint32_t curFrameIdx = 0;
 
-	while (true) {
-		if (fileData + sizeof(RTAG) > fileEnd) {
-			break;
-		}
-
+	while (fileData + sizeof(RTAG) < fileEnd) {
 		RTAG tag = *(RTAG*)fileData;
 		fileData += sizeof(RTAG);
 
@@ -388,15 +384,11 @@ static bool LoadAniFromFileMap(
 				return false;
 			}
 
-			if (curFrameIdx >= aniHeader.cFrames) {
+			if (curFrameIdx == aniHeader.cFrames) {
 				break;
 			}
 
-			while (true) {
-				if (fileData + sizeof(RTAG) > chunkEnd) {
-					break;
-				}
-
+			while (fileData + sizeof(RTAG) < chunkEnd) {
 				tag = *(RTAG*)fileData;
 				fileData += sizeof(RTAG);
 
@@ -414,7 +406,7 @@ static bool LoadAniFromFileMap(
 						return false;
 					}
 
-					if (curFrameIdx >= aniHeader.cFrames) {
+					if (curFrameIdx == aniHeader.cFrames) {
 						break;
 					}
 				}
@@ -472,22 +464,54 @@ static bool LoadAniFromFileMap(
 		fileData = chunkEnd;
 	}
 
-	if (frames.empty() || curFrameIdx != frames.size()) {
+	// 确保所有帧都已提取
+	if (frames.empty() || curFrameIdx != aniHeader.cFrames) {
 		return false;
 	}
 
-	if (!frameSequence.empty()) {
+	// 只有一帧时 frameSequence 为空
+	if (frameSequence.empty()) {
+		return true;
+	}
+
+	for (const auto& pair : frameSequence) {
 		// 确保持续时间不为 0
+		if (pair.second.count() == 0) {
+			return false;
+		}
+	}
+
+	if (aniHeader.fl & AF_SEQUENCE) {
+		std::vector<bool> frameInUse(aniHeader.cFrames);
+
 		for (const auto& pair : frameSequence) {
-			if (pair.second.count() == 0) {
+			// 检查序列是否合法
+			if (pair.first >= aniHeader.cFrames) {
 				return false;
+			}
+
+			frameInUse[pair.first] = true;
+		}
+
+		// 删除未被使用的帧
+		for (int i = aniHeader.cFrames - 1; i >= 0; --i) {
+			if (frameInUse[i]) {
+				continue;
+			}
+
+			frames.erase(frames.begin() + i);
+
+			// 删除一帧后调整索引
+			for (auto& pair : frameSequence) {
+				if (pair.first > (uint32_t)i) {
+					--pair.first;
+				}
 			}
 		}
 
-		// 存在 AF_SEQUENCE 标志时确保存在 seq 块
-		if ((aniHeader.fl & AF_SEQUENCE) &&
-			frameSequence[0].first == std::numeric_limits<uint32_t>::max()) {
-			return false;
+		// 只剩一帧则不是动态光标
+		if (frames.size() == 1) {
+			frameSequence.clear();
 		}
 	}
 

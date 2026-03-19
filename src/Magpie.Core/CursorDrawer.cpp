@@ -178,63 +178,88 @@ void CursorDrawer::PrepareForDraw(HCURSOR hCursor, POINT cursorPos, bool& needRe
 		}
 	}
 
-	if (hCursor) {
-		if (_isCursorVisible) {
-			static const HCURSOR hArrowCursor = STANDARD_CURSORS[0].handle;
+	// 不要保存指针，_ResolveCursor 后可能失效
+	const _CursorInfoKey oldCursorKey = _curCursorInfoKeyValue ?
+		_curCursorInfoKeyValue->first : _CursorInfoKey{};
+	const uint32_t oldFrameSeqIdx = _curFrameSeqIdx;
+	_curCursorInfoKeyValue = nullptr;
+	_curFrameSeqIdx = 0;
 
-			// 无法解析的光标换为指针光标
-			if (!_unresolvableCursors.empty() && _unresolvableCursors.contains(hCursor)) {
-				if (hCursor != hArrowCursor && !_unresolvableCursors.contains(hArrowCursor)) {
-					hCursor = hArrowCursor;
-				} else {
-					hCursor = NULL;
-				}
+	if (hCursor && _isCursorVisible) {
+		static const HCURSOR hArrowCursor = STANDARD_CURSORS[0].handle;
+
+		// 无法解析的光标换为指针光标
+		if (!_unresolvableCursors.empty() && _unresolvableCursors.contains(hCursor)) {
+			if (hCursor != hArrowCursor && !_unresolvableCursors.contains(hArrowCursor)) {
+				hCursor = hArrowCursor;
+			} else {
+				hCursor = NULL;
 			}
+		}
 
-			if (hCursor) {
-				while (true) {
-					_curCursorInfoKeyValue = _ResolveCursor(hCursor, cursorPos, needRedraw);
-					if (_curCursorInfoKeyValue) {
-						const uint32_t cursorFrameIdx = 0;
-						const _CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
-						const _CursorFrame& curCursorFrame = _curCursorInfoKeyValue->second.frames[cursorFrameIdx];
-						// 检查光标是否在视口内。hCursor 不为 NULL 说明光标已在缩放窗口内，因此这个检查很少失败
-						const RECT cursorRect = {
-							cursorPos.x - (LONG)curCursorFrame.hotspot.x,
-							cursorPos.y - (LONG)curCursorFrame.hotspot.y,
-							cursorRect.left + (LONG)cursorInfo.size.width,
-							cursorRect.top + (LONG)cursorInfo.size.height
-						};
-						if (!Win32Helper::IsRectOverlap(cursorRect, _destRect)) {
-							hCursor = NULL;
+		while (hCursor) {
+			_curCursorInfoKeyValue = _ResolveCursor(hCursor, cursorPos);
+
+			if (_curCursorInfoKeyValue) {
+				const _CursorInfo& curCursorInfo = _curCursorInfoKeyValue->second;
+
+				if (curCursorInfo.IsAnimated()) {
+					auto now = std::chrono::steady_clock::now();
+
+					if (oldCursorKey == _curCursorInfoKeyValue->first) {
+						_curFrameSeqIdx = oldFrameSeqIdx;
+
+						// 计算新帧序号
+						while (now >= _curFrameSeqEndTime) {
+							_curFrameSeqIdx = (_curFrameSeqIdx + 1) %
+								(uint32_t)curCursorInfo.frameSequence.size();
+							_curFrameSeqEndTime += curCursorInfo.frameSequence[_curFrameSeqIdx].second;
 						}
-
-						break;
 					} else {
-						_unresolvableCursors.insert(hCursor);
-
-						if (hCursor == hArrowCursor) {
-							// 无法解析指针光标
-							hCursor = NULL;
-							break;
-						} else {
-							// 换为指针光标
-							hCursor = hArrowCursor;
-						}
+						_curFrameSeqEndTime = now + curCursorInfo.frameSequence[0].second;
 					}
 				}
+
+				const _CursorFrame& curCursorFrame =
+					curCursorInfo.frames[curCursorInfo.GetFrameIdx(_curFrameSeqIdx)];
+				// 检查光标是否在视口内。hCursor 不为 NULL 说明光标已在缩放窗口内，因此这个检查很少失败
+				const RECT cursorRect = {
+					cursorPos.x - (LONG)curCursorFrame.hotspot.x,
+					cursorPos.y - (LONG)curCursorFrame.hotspot.y,
+					cursorRect.left + (LONG)curCursorInfo.size.width,
+					cursorRect.top + (LONG)curCursorInfo.size.height
+				};
+				if (!Win32Helper::IsRectOverlap(cursorRect, _destRect)) {
+					_curCursorInfoKeyValue = nullptr;
+				}
+
+				break;
+			} else {
+				_unresolvableCursors.insert(hCursor);
+
+				if (hCursor == hArrowCursor) {
+					// 无法解析指针光标
+					break;
+				} else {
+					// 换为指针光标
+					hCursor = hArrowCursor;
+				}
 			}
-		} else {
-			// 截屏时暂时不渲染光标
-			hCursor = NULL;
 		}
 	}
 
 	// 光标形状或位置变化时总是需要重新绘制；有时即使不变也需要重新绘制，比如色域
 	// 或 _cursorBaseSize 变化后。
-	needRedraw |= hCursor != _hCurCursor || (hCursor && cursorPos != _curCursorPos);
+	_CursorInfoKey newCursorKey = _curCursorInfoKeyValue ?
+		_curCursorInfoKeyValue->first : _CursorInfoKey{};
+	needRedraw = newCursorKey != oldCursorKey;
+
+	if (_curCursorInfoKeyValue) {
+		needRedraw |= _curFrameSeqIdx != oldFrameSeqIdx;
+		needRedraw |= cursorPos != _curCursorPos;
+	}
+
 	if (needRedraw) {
-		_hCurCursor = hCursor;
 		_curCursorPos = cursorPos;
 	}
 }
@@ -246,13 +271,12 @@ HRESULT CursorDrawer::Draw(
 	uint32_t curFrameSrvOffset,
 	ID3D12Resource* backBuffer
 ) noexcept {
-	if (!_hCurCursor || !_curCursorInfoKeyValue) {
+	if (!_curCursorInfoKeyValue) {
 		return S_OK;
 	}
 
-	const uint32_t cursorFrameIdx = 0;
-
 	_CursorInfo& cursorInfo = _curCursorInfoKeyValue->second;
+	const uint32_t cursorFrameIdx = cursorInfo.GetFrameIdx(_curFrameSeqIdx);
 	_CursorFrame& cursorFrame = cursorInfo.frames[cursorFrameIdx];
 
 	cursorInfo.lastUseFenceValue = nextFenceValue;
@@ -550,8 +574,7 @@ static bool GetCursorSizeUnderDpi96(HCURSOR hCursor, Size& cursorSize) noexcept 
 
 std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* CursorDrawer::_ResolveCursor(
 	HCURSOR hCursor,
-	POINT cursorPos,
-	bool& needRedraw
+	POINT cursorPos
 ) noexcept {
 	assert(hCursor);
 
@@ -672,8 +695,6 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 			}
 		}
 	}
-
-	needRedraw = true;
 
 	return &*_cursorInfos.emplace(_CursorInfoKey{ hCursor, isCursorDpiAware ? monitorDpi : 0 },
 		std::move(cursorInfo)).first;
@@ -1023,7 +1044,15 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 	heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 
-	if (!curCursorFrame.resTexture) {
+	if (curCursorFrame.resTexture) {
+		// 如果可以复用 resTexture 说明执行了缩放，resTexture 目前处于
+		// PIXEL_SHADER_RESOURCE 状态。
+		graphicsContext.InsertTransitionBarrier(
+			curCursorFrame.resTexture.get(),
+			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+			D3D12_RESOURCE_STATE_COPY_DEST
+		);
+	} else {
 		HRESULT hr = device->CreateCommittedResource(
 			&heapProps,
 			heapFlags,
@@ -1208,7 +1237,6 @@ HRESULT CursorDrawer::_InitializeCursorTexture(
 
 void CursorDrawer::_ClearCursorInfos() noexcept {
 	_lastRawCursorHandle = NULL;
-	_hCurCursor = NULL;
 	_curCursorInfoKeyValue = nullptr;
 
 	auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
