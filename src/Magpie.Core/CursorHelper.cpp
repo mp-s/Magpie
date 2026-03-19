@@ -129,14 +129,18 @@ wil::unique_hcursor CursorHelper::ExtractCursorFromModule(
 	return wil::unique_hcursor(hIcon);
 }
 
-// 解析 cur 文件，参考自
-// https://learn.microsoft.com/en-us/previous-versions/ms997538(v=msdn.10)
-// https://en.wikipedia.org/wiki/ICO_(file_format)#File_structure
-static bool LoadIcoFromFileMap(
+// CUR 文件结构如下，参考自 https://en.wikipedia.org/wiki/ICO_(file_format)#File_structure
+// [ICONDIR]
+//   [ICONDIRENTRY 1]
+//   [ICONDIRENTRY 2]
+//   ...
+// [位图 1]
+// [位图 2]
+// ...
+static wil::unique_hcursor LoadIcoFromFileMap(
 	const uint8_t* fileData,
 	const uint8_t* fileEnd,
-	uint32_t preferredWidth,
-	SmallVectorImpl<std::pair<wil::unique_hcursor, std::chrono::steady_clock::duration>>& result
+	uint32_t preferredWidth
 ) noexcept {
 #pragma pack(push, 2)
 	struct ICONDIR {
@@ -164,7 +168,7 @@ static bool LoadIcoFromFileMap(
 
 	if (fileData + sizeof(ICONDIR) > fileEnd) {
 		Logger::Get().Error("文件无效");
-		return false;
+		return nullptr;
 	}
 
 	uint32_t entryCount;
@@ -173,27 +177,27 @@ static bool LoadIcoFromFileMap(
 
 		if (header.idReserved != 0 || header.idType != 2) {
 			Logger::Get().Error("不是光标资源");
-			return false;
+			return nullptr;
 		}
 
 		if (header.idCount == 0 || header.idCount > 256) {
 			Logger::Get().Error("无可用光标资源");
-			return false;
+			return nullptr;
 		}
 
 		entryCount = header.idCount;
 	}
 
-	const ICONDIRENTRY* pEntries = (const ICONDIRENTRY*)(fileData + sizeof(ICONDIR));
-
-	if ((uint8_t*)pEntries + sizeof(ICONDIRENTRY) * entryCount > fileEnd) {
-		Logger::Get().Error("文件无效");
-		return false;
-	}
-
-	// 寻找完美匹配或更大的资源
 	const ICONDIRENTRY* targetEntry;
 	{
+		const ICONDIRENTRY* pEntries = (const ICONDIRENTRY*)(fileData + sizeof(ICONDIR));
+
+		if ((uint8_t*)pEntries + sizeof(ICONDIRENTRY) * entryCount > fileEnd) {
+			Logger::Get().Error("文件无效");
+			return nullptr;
+		}
+
+		// 寻找完美匹配或更大的资源
 		std::vector<const ICONDIRENTRY*> entries(entryCount);
 
 		for (uint32_t i = 0; i < entryCount; ++i) {
@@ -224,7 +228,7 @@ static bool LoadIcoFromFileMap(
 
 	if (pCursroData + targetEntry->dwBytesInRes > fileEnd) {
 		Logger::Get().Error("文件无效");
-		return false;
+		return nullptr;
 	}
 
 	// RT_CURSOR 结构为 LOCALHEADER 后跟位图数据
@@ -239,30 +243,262 @@ static bool LoadIcoFromFileMap(
 		sizeof(LOCALHEADER) + targetEntry->dwBytesInRes, FALSE, 0x30000, 0, 0, LR_DEFAULTCOLOR));
 	if (!hCursor) {
 		Logger::Get().Win32Error("CreateIconFromResourceEx 失败");
-		return false;
+		return nullptr;
 	}
 
-	result.emplace_back(std::move(hCursor), std::chrono::steady_clock::duration::max());
-	return true;
+	return hCursor;
 }
 
+static std::chrono::nanoseconds JifRateToDuration(uint32_t jifRate) noexcept {
+	using namespace std::chrono;
+	return nanoseconds(seconds(jifRate)) / 60;
+}
+
+// RIFF 格式参见 https://en.wikipedia.org/wiki/Resource_Interchange_File_Format
+// ANI 文件结构如下，来自 https://en.wikipedia.org/wiki/ANI_(file_format)
+// RIFF('ACON'
+//   [LIST('INFO'
+//     [INAM(<ZSTR>)]          // 标题 (可选)
+//     [IART(<ZSTR>)]          // 作者 (可选)
+//   )]
+//   'anih'(<ANIHEADER>)       // ANI 文件头
+//   ['rate'(<DWORD...>)]      // 速率表 (jiffies 数组)。如果设置了 AF_SEQUENCE 标志，则数
+//                             // 量为 ANIHEADER.cSteps，否则为 ANIHEADER.cFrames。
+//   ['seq '(<DWORD...>)]      // 序列表 (帧索引值数组)。当设置 AF_SEQUENCE 标志时应存在，
+//                             // 数量为 ANIHEADER.cSteps。
+//   LIST('fram'               // 帧数据列表，数量为 ANIHEADER.cFrames
+//     'icon'(<icon_data_1>)   // 第 1 帧
+//     'icon'(<icon_data_2>)   // 第 2 帧
+//     ...
+//   )
+// )
 static bool LoadAniFromFileMap(
 	const uint8_t* fileData,
 	const uint8_t* fileEnd,
 	uint32_t preferredWidth,
-	SmallVectorImpl<std::pair<wil::unique_hcursor, std::chrono::steady_clock::duration>>& frames,
-	SmallVectorImpl<uint32_t>& frameSequence
+	SmallVectorImpl<wil::unique_hcursor>& frames,
+	SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
 ) {
+#pragma pack(push, 2)
+	struct ANIHEADER {
+		DWORD cbSizeof;
+		DWORD cFrames;              // 帧数据列表元素数量
+		DWORD cSteps;               // 序列表元素数量
+		DWORD cx, cy;               // 不使用
+		DWORD cBitCount, cPlanes;   // 不使用
+		DWORD jifRate;              // 默认显示速率, 单位为 jiffy (1/60s)
+		DWORD fl;                   // 必须设置 AF_ICON，可选 AF_SEQUENCE
+	};
+#pragma pack(pop)
 
-#define FOURCC_ACON mmioFOURCC('A', 'C', 'O', 'N')
+	constexpr DWORD FOURCC_ACON = mmioFOURCC('A', 'C', 'O', 'N');
+	constexpr DWORD FOURCC_anih = mmioFOURCC('a', 'n', 'i', 'h');
+	constexpr DWORD FOURCC_rate = mmioFOURCC('r', 'a', 't', 'e');
+	constexpr DWORD FOURCC_seq = mmioFOURCC('s', 'e', 'q', ' ');
+	constexpr DWORD FOURCC_fram = mmioFOURCC('f', 'r', 'a', 'm');
+	constexpr DWORD FOURCC_icon = mmioFOURCC('i', 'c', 'o', 'n');
+
+	constexpr DWORD AF_ICON = 0x1;
+	constexpr DWORD AF_SEQUENCE = 0x2;
+
+	// 已经检查 RIFF 头
+	fileData += sizeof(RTAG);
+
+	if (fileData + sizeof(uint32_t) > fileEnd) {
+		return false;
+	}
+	if (*(uint32_t*)fileData != FOURCC_ACON) {
+		return false;
+	}
+	fileData += sizeof(uint32_t);
+
+	ANIHEADER aniHeader{};
+	uint32_t curFrameIdx = 0;
+
+	while (true) {
+		if (fileData + sizeof(RTAG) > fileEnd) {
+			break;
+		}
+
+		RTAG tag = *(RTAG*)fileData;
+		fileData += sizeof(RTAG);
+
+		const uint8_t* chunkEnd = fileData + ((tag.ckSize + 1) & ~1);
+		if (chunkEnd > fileEnd) {
+			return false;
+		}
+
+		// 不确定是不是强制的，在 Windows 的实现中，如果 anih 块不是最先出现的，解析
+		// 将失败。我们也保持一致，这可以简化代码。
+		switch (tag.ckID) {
+		case FOURCC_anih:
+		{
+			if (fileData + sizeof(ANIHEADER) > chunkEnd) {
+				return false;
+			}
+
+			aniHeader = *(ANIHEADER*)fileData;
+
+			if (aniHeader.cbSizeof != sizeof(ANIHEADER) ||
+				aniHeader.cFrames == 0 ||
+				((aniHeader.fl & AF_SEQUENCE) && aniHeader.cSteps == 0) ||
+				!(aniHeader.fl & AF_ICON))
+			{
+				return false;
+			}
+
+			frames.resize(aniHeader.cFrames);
+
+			// 如果只有一帧则不是动态光标
+			if (aniHeader.cFrames > 1) {
+				if (aniHeader.fl & AF_SEQUENCE) {
+					frameSequence.resize(aniHeader.cSteps);
+					// 用于检查 seq 块是否存在
+					frameSequence[0].first = std::numeric_limits<uint32_t>::max();
+				} else {
+					frameSequence.resize(aniHeader.cFrames);
+					// 逐帧播放
+					for (uint32_t i = 0; i < frameSequence.size(); ++i) {
+						frameSequence[i].first = i;
+					}
+				}
+
+				for (auto& pair : frameSequence) {
+					pair.second = JifRateToDuration(aniHeader.jifRate);
+				}
+			}
+
+			break;
+		}
+		case FOURCC_LIST:
+		{
+			if (fileData + sizeof(uint32_t) > chunkEnd) {
+				return false;
+			}
+
+			// 如果不是 fram 块则跳过此 LIST 块
+			if (*(uint32_t*)fileData != FOURCC_fram) {
+				break;
+			}
+
+			fileData += sizeof(uint32_t);
+
+			// 确保已解析 anih 块
+			if (aniHeader.cbSizeof == 0) {
+				return false;
+			}
+
+			if (curFrameIdx >= aniHeader.cFrames) {
+				break;
+			}
+
+			while (true) {
+				if (fileData + sizeof(RTAG) > chunkEnd) {
+					break;
+				}
+
+				tag = *(RTAG*)fileData;
+				fileData += sizeof(RTAG);
+
+				const uint8_t* subChunkEnd = fileData + ((tag.ckSize + 1) & ~1);
+				if (subChunkEnd > chunkEnd) {
+					return false;
+				}
+
+				if (tag.ckID == FOURCC_icon) {
+					wil::unique_hcursor hCursor = LoadIcoFromFileMap(fileData, subChunkEnd, preferredWidth);
+					if (hCursor) {
+						frames[curFrameIdx++] = std::move(hCursor);
+					} else {
+						Logger::Get().Error("LoadIcoFromFileMap 失败");
+						return false;
+					}
+
+					if (curFrameIdx >= aniHeader.cFrames) {
+						break;
+					}
+				}
+
+				fileData = subChunkEnd;
+			}
+
+			break;
+		}
+		case FOURCC_rate:
+		{
+			// 确保已解析 anih 块
+			if (aniHeader.cbSizeof == 0) {
+				return false;
+			}
+
+			// 只有一帧则忽略 rate 块
+			if (frameSequence.empty()) {
+				break;
+			}
+
+			if (fileData + sizeof(uint32_t) * frameSequence.size() > chunkEnd) {
+				return false;
+			}
+
+			for (auto& pair : frameSequence) {
+				pair.second = JifRateToDuration(*(uint32_t*)fileData);
+				fileData += sizeof(uint32_t);
+			}
+
+			break;
+		}
+		case FOURCC_seq:
+		{
+			// 确保已解析 anih 块
+			if (aniHeader.cbSizeof == 0) {
+				return false;
+			}
+
+			// 无 AF_SEQUENCE 标志或只有一帧时忽略 seq 块
+			if (!(aniHeader.fl & AF_SEQUENCE) || frameSequence.empty()) {
+				break;
+			}
+
+			if (fileData + sizeof(uint32_t) * aniHeader.cSteps > chunkEnd) {
+				return false;
+			}
+
+			assert(frameSequence.size() == aniHeader.cSteps);
+			std::memcpy(frameSequence.data(), fileData, sizeof(uint32_t) * aniHeader.cSteps);
+			break;
+		}
+		}
+
+		fileData = chunkEnd;
+	}
+
+	if (frames.empty() || curFrameIdx != frames.size()) {
+		return false;
+	}
+
+	if (!frameSequence.empty()) {
+		// 确保持续时间不为 0
+		for (const auto& pair : frameSequence) {
+			if (pair.second.count() == 0) {
+				return false;
+			}
+		}
+
+		// 存在 AF_SEQUENCE 标志时确保存在 seq 块
+		if ((aniHeader.fl & AF_SEQUENCE) &&
+			frameSequence[0].first == std::numeric_limits<uint32_t>::max()) {
+			return false;
+		}
+	}
+
 	return true;
 }
 
 bool CursorHelper::ExtractCursorFramesFromFile(
 	const wchar_t* fileName,
 	uint32_t preferredWidth,
-	SmallVectorImpl<std::pair<wil::unique_hcursor, std::chrono::steady_clock::duration>>& frames,
-	SmallVectorImpl<uint32_t>& frameSequence
+	SmallVectorImpl<wil::unique_hcursor>& frames,
+	SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
 ) noexcept {
 	assert(frames.empty() && frameSequence.empty());
 
@@ -308,7 +544,10 @@ bool CursorHelper::ExtractCursorFramesFromFile(
 			return false;
 		}
 	} else {
-		if (!LoadIcoFromFileMap(fileData.get(), fileEnd, preferredWidth, frames)) {
+		wil::unique_hcursor hCursor = LoadIcoFromFileMap(fileData.get(), fileEnd, preferredWidth);
+		if (hCursor) {
+			frames.push_back(std::move(hCursor));
+		} else {
 			Logger::Get().Error("LoadIcoFromFileMap 失败");
 			return false;
 		}

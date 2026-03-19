@@ -15,8 +15,8 @@ struct CursorHelper {
 	static bool ExtractCursorFramesFromFile(
 		const wchar_t* fileName,
 		uint32_t preferredWidth,
-		SmallVectorImpl<std::pair<wil::unique_hcursor, std::chrono::steady_clock::duration>>& result,
-		SmallVectorImpl<uint32_t>& frameSequence
+		SmallVectorImpl<wil::unique_hcursor>& frames,
+		SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
 	) noexcept;
 };
 

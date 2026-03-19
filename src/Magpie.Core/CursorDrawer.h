@@ -68,8 +68,6 @@ public:
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
-	using _steady_duration = std::chrono::steady_clock::duration;
-
 	// SDR 色域下使用 sRGB 空间，否则使用线性 RGB 空间。截至 Win11 25H2，Windows 在 WCG
 	// 和 HDR 下光标的色域和透明度经常变化，没有统一标准。
 	enum class _CursorType {
@@ -106,7 +104,6 @@ private:
 	struct _CursorFrame {
 		_CursorType type;
 		Point hotspot;
-		_steady_duration duration = _steady_duration::max();
 
 		winrt::com_ptr<ID3D12Resource> texture;
 		Size resSize;
@@ -124,8 +121,8 @@ private:
 	struct _CursorInfo {
 		Size size;
 		SmallVector<_CursorFrame, 1> frames;
-		// 存储每帧的索引，使得多帧可以复用同一个 _CursorFrame。为空表示顺序播放
-		SmallVector<uint32_t, 0> frameSequence;
+		// 序列表 (帧索引值数组)，使多帧可以复用同一个 _CursorFrame。为空表示顺序播放
+		SmallVector<std::pair<uint32_t, std::chrono::nanoseconds>, 0> frameSequence;
 		uint64_t lastUseFenceValue = 0;
 		
 		void FreeDescriptors(
@@ -151,8 +148,8 @@ private:
 		HCURSOR hCursor,
 		const ICONINFOEX& iconInfoEx,
 		uint32_t preferedWidth,
-		SmallVectorImpl<std::pair<wil::unique_hcursor, _steady_duration>>& frames,
-		SmallVectorImpl<uint32_t>& frameSequence
+		SmallVectorImpl<wil::unique_hcursor>& frames,
+		SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
 	) const noexcept;
 
 	bool _ResolveCursorFramePixels(

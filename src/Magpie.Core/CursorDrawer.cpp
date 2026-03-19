@@ -608,7 +608,7 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		cursorInfo.size = _CalcCursorSize(cursorSizeDpi96, 96, monitorDpi, isCursorDpiAware);
 	}
 
-	SmallVector<std::pair<wil::unique_hcursor, _steady_duration>, 1> cursorFrames;
+	SmallVector<wil::unique_hcursor, 1> cursorFrames;
 	Point resHotspot = { cursorIconInfoEx.xHotspot, cursorIconInfoEx.yHotspot };
 
 	// 尝试从光标原始来源加载指定尺寸的资源，如果失败旧只能使用 GetIconInfo 得到的位图，
@@ -645,10 +645,9 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 
 		for (uint32_t i = 0; i < cursorFrames.size(); ++i) {
 			_CursorFrame& curCursorFrame = cursorInfo.frames[i];
-			curCursorFrame.duration = cursorFrames[i].second;
 
 			ICONINFO iconInfo{};
-			if (!GetIconInfo(cursorFrames[i].first.get(), &iconInfo)) {
+			if (!GetIconInfo(cursorFrames[i].get(), &iconInfo)) {
 				Logger::Get().Win32Error("GetIconInfo 失败");
 				return nullptr;
 			}
@@ -707,8 +706,8 @@ void CursorDrawer::_TryResolveCursorFramesFromSource(
 	HCURSOR hCursor,
 	const ICONINFOEX& iconInfoEx,
 	uint32_t preferedWidth,
-	SmallVectorImpl<std::pair<wil::unique_hcursor, _steady_duration>>& frames,
-	SmallVectorImpl<uint32_t>& frameSequence
+	SmallVectorImpl<wil::unique_hcursor>& frames,
+	SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
 ) const noexcept {
 	assert(frames.empty());
 
@@ -730,7 +729,7 @@ void CursorDrawer::_TryResolveCursorFramesFromSource(
 				wil::unique_hcursor hResCursor =
 					CursorHelper::ExtractCursorFromModule(hModule.get(), resName, preferedWidth);
 				if (hResCursor) {
-					frames.emplace_back(std::move(hResCursor), _steady_duration::max());
+					frames.push_back(std::move(hResCursor));
 				}
 			} else {
 				Logger::Get().Win32Error("LoadLibraryEx 失败");
@@ -743,7 +742,7 @@ void CursorDrawer::_TryResolveCursorFramesFromSource(
 			wil::unique_hcursor hResCursor = CursorHelper::ExtractCursorFromModule(
 				hUser32, MAKEINTRESOURCE(it->resId), preferedWidth);
 			if (hResCursor) {
-				frames.emplace_back(std::move(hResCursor), _steady_duration::max());
+				frames.push_back(std::move(hResCursor));
 			} else {
 				Logger::Get().Error("CursorHelper::ExtractCursorFromModule 失败");
 			}
