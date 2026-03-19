@@ -34,16 +34,6 @@ namespace Magpie {
 
 using namespace DirectX::PackedVector;
 
-using FnGetCursorFrameInfo = HCURSOR WINAPI(
-	HCURSOR hcur,
-	LPWSTR  lpName,
-	int     iFrame,
-	LPDWORD pjifRate,
-	LPINT   pccur
-);
-
-static FnGetCursorFrameInfo* GetCursorFrameInfo = nullptr;
-
 // 系统 DPI 在程序的生命周期内不会改变，而且使用 GetIconInfo 获得的位图尺寸
 // 和此值有关。
 static UINT SYSTEM_DPI;
@@ -111,9 +101,6 @@ bool CursorDrawer::Initialize(
 	_colorInfo = colorInfo;
 
 	[[maybe_unused]] static Ignore _ = [] {
-		GetCursorFrameInfo = Win32Helper::LoadFunction<FnGetCursorFrameInfo>(
-			L"user32.dll", "GetCursorFrameInfo");
-
 		SYSTEM_DPI = GetDpiForSystem();
 
 		// 不包含已废弃的光标, 见 https://learn.microsoft.com/en-us/windows/win32/menurc/about-cursors
@@ -294,13 +281,12 @@ HRESULT CursorDrawer::Draw(
 
 		cursorFrame.tempResourcesFenceValue = nextFenceValue;
 
-		// 所有帧都初始化后再清理临时资源，因为初始化新帧时可能会复用旧帧的临时资源
+		// 所有帧都初始化后再清理临时资源，因为初始化新帧时可能会复用旧帧的临时资源。注意
+		// 不一定按顺序逐个初始化，理论上可能会出现两次渲染间隔过长导致某个中间帧被跳过。
 		if (std::all_of(
 			cursorInfo.frames.begin(),
 			cursorInfo.frames.end(),
-			[](const _CursorFrame& frame) {
-				return frame.texture != nullptr;
-			}
+			[](const _CursorFrame& frame) { return frame.texture != nullptr; }
 		)) {
 			_cursorInfosWithTempResources.push_back(_curCursorInfoKeyValue->first);
 		}
@@ -582,7 +568,10 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 	const HMONITOR hCurMon = MonitorFromPoint(
 		{ cursorPos.x + _destRect.left, cursorPos.y + _destRect.top }, MONITOR_DEFAULTTOPRIMARY);
 	UINT monitorDpi = USER_DEFAULT_SCREEN_DPI;
-	GetDpiForMonitor(hCurMon, MDT_EFFECTIVE_DPI, &monitorDpi, &monitorDpi);
+	HRESULT hr = GetDpiForMonitor(hCurMon, MDT_EFFECTIVE_DPI, &monitorDpi, &monitorDpi);
+	if (FAILED(hr)) {
+		Logger::Get().ComError("GetDpiForMonitor 失败", hr);
+	}
 	
 	auto it = _cursorInfos.find(_CursorInfoKey{ hCursor, monitorDpi });
 	if (it != _cursorInfos.end()) {
@@ -640,16 +629,17 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		cursorInfo.size.width, cursorFrames, cursorInfo.frameSequence);
 
 	// 尝试使用未记录的 API 提取动画光标的每一帧
-	if (cursorFrames.empty() && GetCursorFrameInfo) {
-		/*DWORD jifRate;
-		int stepCount;
-		HCURSOR hTmpCursor = GetCursorFrameInfo(hCursor, nullptr, 0, &jifRate, &stepCount);
-		if (hTmpCursor && hTmpCursor != hCursor) {
-			
-		}*/
+	SmallVector<HCURSOR, 1> rawCursorFrames;
+	if (cursorFrames.empty()) {
+		CursorHelper::TryResolveAnimatedCursor(hCursor, rawCursorFrames, cursorInfo.frameSequence);
+	} else {
+		rawCursorFrames.reserve(cursorFrames.size());
+		for (const wil::unique_hcursor& c : cursorFrames) {
+			rawCursorFrames.push_back(c.get());
+		}
 	}
 
-	if (cursorFrames.empty()) {
+	if (rawCursorFrames.empty()) {
 		cursorInfo.frames.resize(1);
 
 		_CursorFrame& cursorFrame = cursorInfo.frames[0];
@@ -664,13 +654,13 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 			return nullptr;
 		}
 	} else {
-		cursorInfo.frames.resize(cursorFrames.size());
+		cursorInfo.frames.resize(rawCursorFrames.size());
 
-		for (uint32_t i = 0; i < cursorFrames.size(); ++i) {
+		for (uint32_t i = 0; i < rawCursorFrames.size(); ++i) {
 			_CursorFrame& curCursorFrame = cursorInfo.frames[i];
 
 			ICONINFO iconInfo{};
-			if (!GetIconInfo(cursorFrames[i].get(), &iconInfo)) {
+			if (!GetIconInfo(rawCursorFrames[i], &iconInfo)) {
 				Logger::Get().Win32Error("GetIconInfo 失败");
 				return nullptr;
 			}

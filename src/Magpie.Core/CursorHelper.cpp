@@ -1,8 +1,9 @@
 #include "pch.h"
 #include "CursorHelper.h"
-#include "Logger.h"
 #include "ByteBuffer.h"
+#include "Logger.h"
 #include "SmallVector.h"
+#include "Win32Helper.h"
 #include <mmsystem.h> // FOURCC
 
 namespace Magpie {
@@ -305,9 +306,11 @@ static bool LoadAniFromFileMap(
 	fileData += sizeof(RTAG);
 
 	if (fileData + sizeof(uint32_t) > fileEnd) {
+		Logger::Get().Error("文件无效");
 		return false;
 	}
 	if (*(uint32_t*)fileData != FOURCC_ACON) {
+		Logger::Get().Error("文件无效");
 		return false;
 	}
 	fileData += sizeof(uint32_t);
@@ -321,15 +324,17 @@ static bool LoadAniFromFileMap(
 
 		const uint8_t* chunkEnd = fileData + ((tag.ckSize + 1) & ~1);
 		if (chunkEnd > fileEnd) {
+			Logger::Get().Error("文件无效");
 			return false;
 		}
 
-		// 不确定是不是强制的，在 Windows 的实现中，如果 anih 块不是最先出现的，解析
-		// 将失败。我们也保持一致，这可以简化代码。
+		// 不确定是不是强制的，在 Windows 的实现中，anih 块必须比 fram、rate 和 seq 块先
+		// 出现。我们和系统保持一致，这可以简化代码。
 		switch (tag.ckID) {
 		case FOURCC_anih:
 		{
 			if (fileData + sizeof(ANIHEADER) > chunkEnd) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -340,6 +345,7 @@ static bool LoadAniFromFileMap(
 				((aniHeader.fl & AF_SEQUENCE) && aniHeader.cSteps == 0) ||
 				!(aniHeader.fl & AF_ICON))
 			{
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -369,6 +375,7 @@ static bool LoadAniFromFileMap(
 		case FOURCC_LIST:
 		{
 			if (fileData + sizeof(uint32_t) > chunkEnd) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -381,6 +388,7 @@ static bool LoadAniFromFileMap(
 
 			// 确保已解析 anih 块
 			if (aniHeader.cbSizeof == 0) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -394,6 +402,7 @@ static bool LoadAniFromFileMap(
 
 				const uint8_t* subChunkEnd = fileData + ((tag.ckSize + 1) & ~1);
 				if (subChunkEnd > chunkEnd) {
+					Logger::Get().Error("文件无效");
 					return false;
 				}
 
@@ -420,6 +429,7 @@ static bool LoadAniFromFileMap(
 		{
 			// 确保已解析 anih 块
 			if (aniHeader.cbSizeof == 0) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -429,6 +439,7 @@ static bool LoadAniFromFileMap(
 			}
 
 			if (fileData + sizeof(uint32_t) * frameSequence.size() > chunkEnd) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -443,6 +454,7 @@ static bool LoadAniFromFileMap(
 		{
 			// 确保已解析 anih 块
 			if (aniHeader.cbSizeof == 0) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -452,11 +464,15 @@ static bool LoadAniFromFileMap(
 			}
 
 			if (fileData + sizeof(uint32_t) * aniHeader.cSteps > chunkEnd) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
-			assert(frameSequence.size() == aniHeader.cSteps);
-			std::memcpy(frameSequence.data(), fileData, sizeof(uint32_t) * aniHeader.cSteps);
+			for (auto& pair : frameSequence) {
+				pair.first = *(uint32_t*)fileData;
+				fileData += sizeof(uint32_t);
+			}
+			
 			break;
 		}
 		}
@@ -466,6 +482,7 @@ static bool LoadAniFromFileMap(
 
 	// 确保所有帧都已提取
 	if (frames.empty() || curFrameIdx != aniHeader.cFrames) {
+		Logger::Get().Error("文件无效");
 		return false;
 	}
 
@@ -477,6 +494,7 @@ static bool LoadAniFromFileMap(
 	for (const auto& pair : frameSequence) {
 		// 确保持续时间不为 0
 		if (pair.second.count() == 0) {
+			Logger::Get().Error("文件无效");
 			return false;
 		}
 	}
@@ -487,6 +505,7 @@ static bool LoadAniFromFileMap(
 		for (const auto& pair : frameSequence) {
 			// 检查序列是否合法
 			if (pair.first >= aniHeader.cFrames) {
+				Logger::Get().Error("文件无效");
 				return false;
 			}
 
@@ -578,6 +597,68 @@ bool CursorHelper::ExtractCursorFramesFromFile(
 	}
 
 	return true;
+}
+
+void CursorHelper::TryResolveAnimatedCursor(
+	HCURSOR hCursor,
+	SmallVectorImpl<HCURSOR>& frames,
+	SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
+) noexcept {
+	assert(hCursor && frames.empty() && frameSequence.empty());
+
+	using FnGetCursorFrameInfo = HCURSOR WINAPI(
+		HCURSOR hcur,
+		LPWSTR  lpName,
+		int     iFrame,
+		LPDWORD pjifRate,
+		LPINT   pccur
+	);
+
+	static FnGetCursorFrameInfo* getCursorFrameInfo = [] {
+		return Win32Helper::LoadFunction<FnGetCursorFrameInfo>(L"user32.dll", "GetCursorFrameInfo");
+	}();
+
+	if (!getCursorFrameInfo) {
+		return;
+	}
+
+	DWORD jifRate;
+	int stepCount;
+	HCURSOR hCursorFrame = getCursorFrameInfo(hCursor, nullptr, 0, &jifRate, &stepCount);
+	if (!hCursorFrame || stepCount <= 1) {
+		// 失败或不是动态光标
+		return;
+	}
+
+	frames.reserve(stepCount);
+	frameSequence.resize(stepCount);
+
+	frames.push_back(hCursorFrame);
+	frameSequence[0] = { 0, JifRateToDuration(jifRate) };
+
+	for (int i = 1; i < stepCount; ++i) {
+		hCursorFrame = getCursorFrameInfo(hCursor, nullptr, i, &jifRate, &stepCount);
+		if (!hCursorFrame) {
+			frames.clear();
+			frameSequence.clear();
+			return;
+		}
+
+		// 排除重复的帧，用序列表实现
+		uint32_t j = 0;
+		uint32_t frameCount = (uint32_t)frames.size();
+		for (; j < frameCount; ++j) {
+			if (frames[j] == hCursorFrame) {
+				break;
+			}
+		}
+
+		if (j == frameCount) {
+			frames.push_back(hCursorFrame);
+		}
+
+		frameSequence[i] = { j, JifRateToDuration(jifRate) };
+	}
 }
 
 }

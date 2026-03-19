@@ -18,6 +18,13 @@ struct CursorHelper {
 		SmallVectorImpl<wil::unique_hcursor>& frames,
 		SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
 	) noexcept;
+
+	// frames 中的句柄无需销毁
+	static void TryResolveAnimatedCursor(
+		HCURSOR hCursor,
+		SmallVectorImpl<HCURSOR>& frames,
+		SmallVectorImpl<std::pair<uint32_t, std::chrono::nanoseconds>>& frameSequence
+	) noexcept;
 };
 
 }
