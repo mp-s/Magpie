@@ -494,7 +494,7 @@ void CursorDrawer::OnResized(const RECT& rendererRect, const RECT& destRect) noe
 	_rendererRect = rendererRect;
 	_destRect = destRect;
 
-	// 光标缩放和源窗口相同则清空已解析的光标
+	// 光标缩放和源窗口相同则清空已解析的光标，此时已和 GPU 同步
 	if (ScalingWindow::Get().Options().cursorScale < FLOAT_EPSILON<float>) {
 		_ClearCursorInfos();
 	}
@@ -620,66 +620,76 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		cursorInfo.size = _CalcCursorSize(cursorSizeDpi96, 96, monitorDpi, isCursorDpiAware);
 	}
 
-	SmallVector<wil::unique_hcursor, 1> cursorFrames;
+	SmallVector<wil::unique_hcursor, 1> cursorFrameRes;
 	Point resHotspot = { cursorIconInfoEx.xHotspot, cursorIconInfoEx.yHotspot };
 
 	// 尝试从光标原始来源加载指定尺寸的资源，如果失败旧只能使用 GetIconInfo 得到的位图，
 	// DPI 虚拟化机制可能导致图像质量严重下降。
 	_TryResolveCursorFramesFromSource(hCursor, cursorIconInfoEx,
-		cursorInfo.size.width, cursorFrames, cursorInfo.frameSequence);
+		cursorInfo.size.width, cursorFrameRes, cursorInfo.frameSequence);
 
-	// 尝试使用未记录的 API 提取动画光标的每一帧
-	SmallVector<HCURSOR, 1> rawCursorFrames;
-	if (cursorFrames.empty()) {
-		CursorHelper::TryResolveAnimatedCursor(hCursor, rawCursorFrames, cursorInfo.frameSequence);
-	} else {
-		rawCursorFrames.reserve(cursorFrames.size());
-		for (const wil::unique_hcursor& c : cursorFrames) {
-			rawCursorFrames.push_back(c.get());
+	const auto initCursorFrameFromRes = [&](_CursorFrame& curCursorFrame, HCURSOR hResCursor) {
+		ICONINFO iconInfo{};
+		if (!GetIconInfo(hResCursor, &iconInfo)) {
+			Logger::Get().Win32Error("GetIconInfo 失败");
+			return false;
 		}
-	}
 
-	if (rawCursorFrames.empty()) {
-		cursorInfo.frames.resize(1);
+		wil::unique_hbitmap hResColorBmp(iconInfo.hbmColor);
+		wil::unique_hbitmap hResMaskBmp(iconInfo.hbmMask);
 
-		_CursorFrame& cursorFrame = cursorInfo.frames[0];
-		cursorFrame.resSize = cursorBmpSize;
-		cursorFrame.hotspot.x = (uint32_t)lround(
-			resHotspot.x * cursorInfo.size.width / (double)cursorFrame.resSize.width);
-		cursorFrame.hotspot.y = (uint32_t)lround(
-			resHotspot.y * cursorInfo.size.height / (double)cursorFrame.resSize.height);
+		if (!GetCursorSizeFromBmps(hResColorBmp.get(), hResMaskBmp.get(), curCursorFrame.resSize)) {
+			Logger::Get().Error("GetCursorSizeFromBmps 失败");
+			return false;
+		}
 
-		if (!_ResolveCursorFramePixels(cursorFrame, hResColorBmp.get(), hResMaskBmp.get())) {
+		curCursorFrame.hotspot.x = (uint32_t)lround(
+			iconInfo.xHotspot * cursorInfo.size.width / (double)curCursorFrame.resSize.width);
+		curCursorFrame.hotspot.y = (uint32_t)lround(
+			iconInfo.yHotspot * cursorInfo.size.height / (double)curCursorFrame.resSize.height);
+
+		if (!_ResolveCursorFramePixels(
+			curCursorFrame, hResColorBmp.get(), hResMaskBmp.get())) {
 			Logger::Get().Error("_ResolveCursorFramePixels 失败");
-			return nullptr;
+			return false;
+		}
+
+		return true;
+	};
+	
+	if (!cursorFrameRes.empty()) {
+		cursorInfo.frames.resize(cursorFrameRes.size());
+		for (uint32_t i = 0; i < cursorFrameRes.size(); ++i) {
+			if (!initCursorFrameFromRes(cursorInfo.frames[i], cursorFrameRes[i].get())) {
+				Logger::Get().Error("initCursorFrameFromRes 失败");
+				return nullptr;
+			}
 		}
 	} else {
-		cursorInfo.frames.resize(rawCursorFrames.size());
+		// 尝试使用未记录的 API 提取动画光标的每一帧
+		SmallVector<HCURSOR, 1> rawCursorFrameRes;
+		CursorHelper::TryResolveAnimatedCursor(hCursor, rawCursorFrameRes, cursorInfo.frameSequence);
 
-		for (uint32_t i = 0; i < rawCursorFrames.size(); ++i) {
-			_CursorFrame& curCursorFrame = cursorInfo.frames[i];
-
-			ICONINFO iconInfo{};
-			if (!GetIconInfo(rawCursorFrames[i], &iconInfo)) {
-				Logger::Get().Win32Error("GetIconInfo 失败");
-				return nullptr;
+		if (!rawCursorFrameRes.empty()) {
+			cursorInfo.frames.resize(rawCursorFrameRes.size());
+			for (uint32_t i = 0; i < rawCursorFrameRes.size(); ++i) {
+				if (!initCursorFrameFromRes(cursorInfo.frames[i], rawCursorFrameRes[i])) {
+					Logger::Get().Error("initCursorFrameFromRes 失败");
+					return nullptr;
+				}
 			}
+		} else {
+			// 如果前面的解析都失败就直接从 hCursor 提取位图
+			cursorInfo.frames.resize(1);
 
-			hResColorBmp.reset(iconInfo.hbmColor);
-			hResMaskBmp.reset(iconInfo.hbmMask);
+			_CursorFrame& cursorFrame = cursorInfo.frames[0];
+			cursorFrame.resSize = cursorBmpSize;
+			cursorFrame.hotspot.x = (uint32_t)lround(
+				resHotspot.x * cursorInfo.size.width / (double)cursorFrame.resSize.width);
+			cursorFrame.hotspot.y = (uint32_t)lround(
+				resHotspot.y * cursorInfo.size.height / (double)cursorFrame.resSize.height);
 
-			if (!GetCursorSizeFromBmps(hResColorBmp.get(), hResMaskBmp.get(), curCursorFrame.resSize)) {
-				Logger::Get().Error("GetCursorSizeFromBmps 失败");
-				return nullptr;
-			}
-
-			curCursorFrame.hotspot.x = (uint32_t)lround(
-				iconInfo.xHotspot * cursorInfo.size.width / (double)curCursorFrame.resSize.width);
-			curCursorFrame.hotspot.y = (uint32_t)lround(
-				iconInfo.yHotspot * cursorInfo.size.height / (double)curCursorFrame.resSize.height);
-
-			if (!_ResolveCursorFramePixels(
-				cursorInfo.frames[i], hResColorBmp.get(), hResMaskBmp.get())) {
+			if (!_ResolveCursorFramePixels(cursorFrame, hResColorBmp.get(), hResMaskBmp.get())) {
 				Logger::Get().Error("_ResolveCursorFramePixels 失败");
 				return nullptr;
 			}
@@ -1586,7 +1596,10 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 		}
 
 		if (it != _cursorInfosWithTempResources.begin()) {
+			size_t removeCount = it - _cursorInfosWithTempResources.begin();
 			_cursorInfosWithTempResources.erase(_cursorInfosWithTempResources.begin(), it);
+			Logger::Get().Info(fmt::format("已清理 {} 个 _cursorInfosWithTempResources 成员，剩余 {}",
+				removeCount, _cursorInfosWithTempResources.size()).c_str());
 		}
 	}
 
@@ -1606,16 +1619,20 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 		auto& csuDescriptorHeap = _d3d12Context->GetDescriptorHeap();
 		auto& rtvDescriptorHeap = _d3d12Context->GetDescriptorHeap(true);
 		// 最多删除一半成员
+		uint32_t removeCount = 0;
 		for (uint32_t i = 0; i < (MAX_CURSOR_INFO_COUNT + 1) / 2; ++i) {
 			const _CursorInfo& curCursorInfo = cursorInfos[i]->second;
 
 			if (curCursorInfo.lastUseFenceValue <= completedFenceValue) {
 				curCursorInfo.FreeDescriptors(csuDescriptorHeap, rtvDescriptorHeap);
 				_cursorInfos.erase(cursorInfos[i]->first);
+				++removeCount;
 			} else {
 				break;
 			}
 		}
+		Logger::Get().Info(fmt::format("已清理 {} 个 _cursorInfos 成员，剩余 {}",
+			removeCount, _cursorInfos.size()).c_str());
 	}
 
 	if (!_retiredCursorInfos.empty()) {
@@ -1631,7 +1648,10 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 		}
 
 		if (it != _retiredCursorInfos.begin()) {
+			size_t removeCount = it - _retiredCursorInfos.begin();
 			_retiredCursorInfos.erase(_retiredCursorInfos.begin(), it);
+			Logger::Get().Info(fmt::format("已清理 {} 个 _retiredCursorInfos 成员，剩余 {}",
+				removeCount, _retiredCursorInfos.size()).c_str());
 		}
 	}
 
@@ -1651,7 +1671,10 @@ void CursorDrawer::_ClearRetiredResources(uint64_t completedFenceValue) noexcept
 		}
 
 		if (it != _retiredTempOriginTextures.begin()) {
+			size_t removeCount = it - _retiredTempOriginTextures.begin();
 			_retiredTempOriginTextures.erase(_retiredTempOriginTextures.begin(), it);
+			Logger::Get().Info(fmt::format("已清理 {} 个 _retiredTempOriginTextures 成员，剩余 {}",
+				removeCount, _retiredTempOriginTextures.size()).c_str());
 		}
 	}
 }

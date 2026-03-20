@@ -622,6 +622,7 @@ void CursorHelper::TryResolveAnimatedCursor(
 		return;
 	}
 
+	// GetCursorFrameInfo 直接返回内部句柄，无需销毁
 	DWORD jifRate;
 	int stepCount;
 	HCURSOR hCursorFrame = getCursorFrameInfo(hCursor, nullptr, 0, &jifRate, &stepCount);
@@ -639,14 +640,15 @@ void CursorHelper::TryResolveAnimatedCursor(
 	for (int i = 1; i < stepCount; ++i) {
 		hCursorFrame = getCursorFrameInfo(hCursor, nullptr, i, &jifRate, &stepCount);
 		if (!hCursorFrame) {
+			// 失败时确保结果为空
 			frames.clear();
 			frameSequence.clear();
 			return;
 		}
 
 		// 排除重复的帧，用序列表实现
+		const uint32_t frameCount = (uint32_t)frames.size();
 		uint32_t j = 0;
-		uint32_t frameCount = (uint32_t)frames.size();
 		for (; j < frameCount; ++j) {
 			if (frames[j] == hCursorFrame) {
 				break;
