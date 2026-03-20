@@ -118,7 +118,7 @@ private:
 
 	bool _CreateAdapterFromDevice() noexcept;
 
-	bool _QueryHighestShaderModel() noexcept;
+	void _QueryHighestShaderModel() noexcept;
 
 	void _LogDeviceInfo() noexcept;
 

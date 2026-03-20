@@ -244,7 +244,7 @@ bool DeviceResources::_TryCreateD3DDevice(const winrt::com_ptr<IDXGIAdapter1>& a
 		_isFP16Supported = value.AllOtherShaderStagesMinPrecision & D3D11_SHADER_MIN_PRECISION_16_BIT;
 		Logger::Get().Info(StrHelper::Concat("FP16 支持: ", _isFP16Supported ? "是" : "否"));
 	} else {
-		Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+		Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 	}
 
 	return true;

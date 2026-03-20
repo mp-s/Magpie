@@ -41,21 +41,16 @@ bool D3D12Context::Initialize(
 	}
 #endif
 
-	if (!_QueryHighestShaderModel()) {
-		Logger::Get().Error("_QueryHighestShaderModel 失败");
-		return false;
-	}
+	_QueryHighestShaderModel();
 
 	// 检查根签名版本
 	{
 		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
 		hr = _device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData));
-
 		if (SUCCEEDED(hr)) {
 			_rootSignatureVersion = featureData.HighestVersion;
 		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
+			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 		}
 	}
 
@@ -63,12 +58,10 @@ bool D3D12Context::Initialize(
 	{
 		D3D12_FEATURE_DATA_ARCHITECTURE1 data{};
 		hr = _device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &data, sizeof(data));
-
 		if (SUCCEEDED(hr)) {
 			_isUMA = data.UMA;
 		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
+			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 		}
 	}
 
@@ -81,12 +74,10 @@ bool D3D12Context::Initialize(
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS16 data{};
 		hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &data, sizeof(data));
-
 		if (SUCCEEDED(hr)) {
 			_isGPUUploadHeapSupported = data.GPUUploadHeapSupported;
 		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
+			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 		}
 	}
 
@@ -94,12 +85,10 @@ bool D3D12Context::Initialize(
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS data{};
 		hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &data, sizeof(data));
-
 		if (SUCCEEDED(hr)) {
 			_isFP16Supported = data.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;
 		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
+			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 		}
 	}
 
@@ -486,7 +475,7 @@ bool D3D12Context::_CreateAdapterFromDevice() noexcept {
 	return false;
 }
 
-bool D3D12Context::_QueryHighestShaderModel() noexcept {
+void D3D12Context::_QueryHighestShaderModel() noexcept {
 	// 如果运行时不知道 HighestShaderModel，CheckFeatureSupport 将返回 E_INVALIDARG
 	// （这只会发生在不支持 Agility SDK 的旧版本 Win10 上）。官方推荐从新到旧依次检查每
 	// 个版本。
@@ -517,15 +506,12 @@ bool D3D12Context::_QueryHighestShaderModel() noexcept {
 
 		if (SUCCEEDED(hr)) {
 			_shaderModel = data.HighestShaderModel;
-			return true;
 		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
+			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 		}
+
+		return;
 	}
-	
-	Logger::Get().Error("不支持 SM 5.1");
-	return false;
 }
 
 void D3D12Context::_LogDeviceInfo() noexcept {
@@ -565,9 +551,8 @@ void D3D12Context::_LogDeviceInfo() noexcept {
 				featureLevel = "未知";
 				break;
 			}
-			
 		} else {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
+			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 			featureLevel = "未知";
 		}
 	}

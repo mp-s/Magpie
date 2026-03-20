@@ -44,8 +44,7 @@ bool SwapChainPresenter::Initialize(
 		HRESULT hr = dxgiFactory->CheckFeatureSupport(
 			DXGI_FEATURE_PRESENT_ALLOW_TEARING, &supportTearing, sizeof(supportTearing));
 		if (FAILED(hr)) {
-			Logger::Get().ComError("IDXGIFactory5::CheckFeatureSupport 失败", hr);
-			return false;
+			Logger::Get().ComWarn("IDXGIFactory5::CheckFeatureSupport 失败", hr);
 		}
 
 		_isTearingSupported = supportTearing;

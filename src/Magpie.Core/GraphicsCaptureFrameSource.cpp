@@ -807,8 +807,7 @@ bool GraphicsCaptureFrameSource::_CreateBridgeDeviceResources(IDXGIAdapter1* dxg
 		D3D12_FEATURE_DATA_ARCHITECTURE1 value{};
 		hr = _bridgeDevice->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &value, sizeof(value));
 		if (FAILED(hr)) {
-			Logger::Get().ComError("CheckFeatureSupport 失败", hr);
-			return false;
+			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
 		}
 
 		if (value.UMA) {
