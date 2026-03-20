@@ -27,7 +27,7 @@ GraphicsCaptureFrameSource::~GraphicsCaptureFrameSource() noexcept {
 		_StopCapture();
 	}
 
-	const HWND hwndSrc = ScalingWindow::Get().SrcTracker().Handle();
+	const HWND hwndSrc =  ScalingWindow::Get().SrcHandle();
 
 	// 还原源窗口圆角
 	if (_isRoundCornerDisabled) {

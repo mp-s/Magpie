@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "CursorManager.h"
 #include "Logger.h"
-#include "Renderer.h"
 #include "ScalingOptions.h"
 #include "ScalingWindow.h"
 #include "Win32Helper.h"

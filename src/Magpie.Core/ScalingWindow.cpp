@@ -6,7 +6,6 @@
 #include "ExclModeHelper.h"
 #include "Logger.h"
 #include "Renderer.h"
-#include "Renderer2.h"
 #include "Win32Helper.h"
 #include "WindowHelper.h"
 #include <dwmapi.h>
@@ -314,7 +313,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		}
 	}
 
-	_renderer = std::make_unique<Renderer2>();
+	_renderer = std::make_unique<Renderer>();
 	RECT destRect;
 	ScalingError error = _renderer->Initialize(
 		_hwndRenderer,
@@ -415,7 +414,7 @@ void ScalingWindow::Render(bool onDeviceLost) noexcept {
 		// 设备再次丢失则不再尝试恢复
 		if (state == ComponentState::DeviceLost && !onDeviceLost) {
 			_renderer.reset();
-			_renderer = std::make_unique<Renderer2>();
+			_renderer = std::make_unique<Renderer>();
 
 			RECT destRect;
 			ScalingError error = _renderer->Initialize(
@@ -908,7 +907,7 @@ LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) n
 		_UpdateWindowProps();
 
 		// 拖拽缩放窗口时不广播
-		if (!IsResizingOrMoving() && !_srcTracker.IsMoving()) {
+		if (!_isResizing && !_isMoving && !_srcTracker.IsMoving()) {
 			// 广播缩放窗口位置或大小改变
 			PostMessage(HWND_BROADCAST, WM_MAGPIE_SCALINGCHANGED, 2, (LPARAM)Handle());
 		}
@@ -1383,7 +1382,7 @@ bool ScalingWindow::_UpdateSrcState(bool& isSrcRepositioning) noexcept {
 	bool srcSizeChanged = false;
 	bool srcMovingChanged = false;
 	bool srcMonitorChanged = false;
-	if (!_srcTracker.UpdateState(hwndFore, _options.IsWindowedMode(), IsResizingOrMoving(),
+	if (!_srcTracker.UpdateState(hwndFore, _options.IsWindowedMode(), _isResizing || _isMoving,
 		isSrcInvisibleOrMinimized, srcFocusedChanged, srcRectChanged, srcSizeChanged, srcMovingChanged, srcMonitorChanged)) {
 		return false;
 	}
@@ -2139,7 +2138,7 @@ void ScalingWindow::_UpdateRendererRect() noexcept {
 		const RECT& srcRect = _srcTracker.WindowRect();
 		const int offsetX = (_windowRect.left + _windowRect.right - srcRect.left - srcRect.right) / 2;
 		const int offsetY = (_windowRect.top + _windowRect.bottom - srcRect.top - srcRect.bottom) / 2;
-		if (!_srcTracker.Move(offsetX, offsetY, IsResizingOrMoving())) {
+		if (!_srcTracker.Move(offsetX, offsetY, _isResizing || _isMoving)) {
 			Logger::Get().Error("SrcTracker::Move 失败");
 			_DelayedStop();
 			return;

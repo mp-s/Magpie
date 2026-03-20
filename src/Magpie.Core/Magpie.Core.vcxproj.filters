@@ -28,30 +28,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
-    <ClInclude Include="EffectCacheManager.h" />
     <ClInclude Include="EffectHelper.h">
-      <Filter>Helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="OverlayHelper.h">
-      <Filter>Helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="YasHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
     <ClInclude Include="ScalingWindow.h" />
     <ClInclude Include="CursorManager.h" />
-    <ClInclude Include="GDIFrameSource.h">
-      <Filter>Capture</Filter>
-    </ClInclude>
-    <ClInclude Include="FrameSourceBase.h">
-      <Filter>Capture</Filter>
-    </ClInclude>
-    <ClInclude Include="DwmSharedSurfaceFrameSource.h">
-      <Filter>Capture</Filter>
-    </ClInclude>
-    <ClInclude Include="DesktopDuplicationFrameSource.h">
-      <Filter>Capture</Filter>
-    </ClInclude>
     <ClInclude Include="include\EffectCompiler.h">
       <Filter>Include</Filter>
     </ClInclude>
@@ -85,14 +66,8 @@
     <ClInclude Include="CursorDrawer.h">
       <Filter>Render</Filter>
     </ClInclude>
-    <ClInclude Include="DeviceResources.h">
-      <Filter>Render</Filter>
-    </ClInclude>
     <ClInclude Include="ExclModeHelper.h">
       <Filter>Helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="Renderer.h">
-      <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="StepTimer.h">
       <Filter>Render</Filter>
@@ -100,37 +75,7 @@
     <ClInclude Include="EffectsProfiler.h">
       <Filter>Render</Filter>
     </ClInclude>
-    <ClInclude Include="OverlayDrawer.h">
-      <Filter>Render</Filter>
-    </ClInclude>
-    <ClInclude Include="ImGuiBackend.h">
-      <Filter>Render</Filter>
-    </ClInclude>
-    <ClInclude Include="ImGuiFontsCacheManager.h">
-      <Filter>Render</Filter>
-    </ClInclude>
-    <ClInclude Include="ImGuiImpl.h">
-      <Filter>Render</Filter>
-    </ClInclude>
-    <ClInclude Include="AdaptivePresenter.h">
-      <Filter>Presenter</Filter>
-    </ClInclude>
-    <ClInclude Include="CompSwapchainPresenter.h">
-      <Filter>Presenter</Filter>
-    </ClInclude>
-    <ClInclude Include="PresenterBase.h">
-      <Filter>Presenter</Filter>
-    </ClInclude>
-    <ClInclude Include="ScreenshotHelper.h">
-      <Filter>Helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="TextureHelper.h">
-      <Filter>Helpers</Filter>
-    </ClInclude>
     <ClInclude Include="DDS.h">
-      <Filter>Helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="DDSHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
     <ClInclude Include="SrcTracker.h" />
@@ -150,9 +95,6 @@
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="FrameRingBuffer.h">
-      <Filter>Render</Filter>
-    </ClInclude>
-    <ClInclude Include="EffectDrawer.h">
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="EffectDrawerBase.h">
@@ -202,7 +144,6 @@
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
     <ClCompile Include="pch.cpp" />
-    <ClCompile Include="EffectCacheManager.cpp" />
     <ClCompile Include="EffectCompiler.cpp" />
     <ClCompile Include="DirectXHelper.cpp">
       <Filter>Helpers</Filter>
@@ -210,23 +151,8 @@
     <ClCompile Include="WindowHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
-    <ClCompile Include="OverlayHelper.cpp">
-      <Filter>Helpers</Filter>
-    </ClCompile>
     <ClCompile Include="ScalingWindow.cpp" />
     <ClCompile Include="CursorManager.cpp" />
-    <ClCompile Include="GDIFrameSource.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
-    <ClCompile Include="FrameSourceBase.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
-    <ClCompile Include="DwmSharedSurfaceFrameSource.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
-    <ClCompile Include="DesktopDuplicationFrameSource.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
     <ClCompile Include="ScalingOptions.cpp" />
     <ClCompile Include="Win32Helper.cpp">
       <Filter>Helpers</Filter>
@@ -237,15 +163,6 @@
     <ClCompile Include="CursorDrawer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
-    <ClCompile Include="DeviceResources.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
-    <ClCompile Include="EffectDrawer.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
-    <ClCompile Include="Renderer.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
     <ClCompile Include="ExclModeHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
@@ -254,36 +171,6 @@
     </ClCompile>
     <ClCompile Include="EffectsProfiler.cpp">
       <Filter>Render</Filter>
-    </ClCompile>
-    <ClCompile Include="OverlayDrawer.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
-    <ClCompile Include="ImGuiBackend.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
-    <ClCompile Include="ImGuiFontsCacheManager.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
-    <ClCompile Include="ImGuiImpl.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
-    <ClCompile Include="AdaptivePresenter.cpp">
-      <Filter>Presenter</Filter>
-    </ClCompile>
-    <ClCompile Include="CompSwapchainPresenter.cpp">
-      <Filter>Presenter</Filter>
-    </ClCompile>
-    <ClCompile Include="PresenterBase.cpp">
-      <Filter>Presenter</Filter>
-    </ClCompile>
-    <ClCompile Include="ScreenshotHelper.cpp">
-      <Filter>Helpers</Filter>
-    </ClCompile>
-    <ClCompile Include="TextureHelper.cpp">
-      <Filter>Helpers</Filter>
-    </ClCompile>
-    <ClCompile Include="DDSHelper.cpp">
-      <Filter>Helpers</Filter>
     </ClCompile>
     <ClCompile Include="SrcTracker.cpp" />
     <ClCompile Include="Renderer2.cpp">

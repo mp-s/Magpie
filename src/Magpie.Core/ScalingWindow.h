@@ -52,48 +52,6 @@ public:
 		return _srcTracker.Handle();
 	}
 
-#pragma region 弃用
-	const RECT& RendererRect() const noexcept {
-		return _rendererRect;
-	}
-
-	class SrcTracker& SrcTracker() noexcept {
-		return _srcTracker;
-	}
-
-	const class SrcTracker& SrcTracker() const noexcept {
-		return _srcTracker;
-	}
-
-	class Renderer& Renderer() noexcept {
-		return *_oldRenderer;
-	}
-
-	const class Renderer& Renderer() const noexcept {
-		return *_oldRenderer;
-	}
-
-	class CursorManager& CursorManager() noexcept {
-		return *_cursorManager;
-	}
-
-	const class CursorManager& CursorManager() const noexcept {
-		return *_cursorManager;
-	}
-
-	bool IsResizing() const noexcept {
-		return _isResizing;
-	}
-
-	bool IsMoving() const noexcept {
-		return _isMoving;
-	}
-
-	bool IsResizingOrMoving() const noexcept {
-		return _isResizing || _isMoving;
-	}
-#pragma endregion
-
 	void OnCursorVisibilityChanged(bool isVisible, bool onDestory) noexcept;
 
 	void OnCursorVirtualizationStarted() noexcept;
@@ -199,8 +157,7 @@ private:
 	uint32_t _nonTopBorderThicknessInClient = 0;
 
 	ScalingOptions _options;
-	std::unique_ptr<class Renderer> _oldRenderer;
-	std::unique_ptr<class Renderer2> _renderer;
+	std::unique_ptr<class Renderer> _renderer;
 	std::unique_ptr<class CursorManager> _cursorManager;
 
 	class SrcTracker _srcTracker;

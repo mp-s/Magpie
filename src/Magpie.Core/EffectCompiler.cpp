@@ -2,7 +2,6 @@
 #include "EffectCompiler.h"
 #include "CommonSharedConstants.h"
 #include "DirectXHelper.h"
-#include "EffectCacheManager.h"
 #include "EffectDesc.h"
 #include "EffectHelper.h"
 #include "Logger.h"
@@ -1573,11 +1572,11 @@ static uint32_t CompilePasses(
 			}
 		}
 
-		if (!DirectXHelper::CompileComputeShader(source, "__M", desc.passes[id].cso.put(),
+		/*if (!DirectXHelper::CompileComputeShader(source, "__M", desc.passes[id].cso.put(),
 			fmt::format("{}_Pass{}.hlsl", desc.name, id + 1).c_str(), &passInclude, macros, flags & EffectCompilerFlags::WarningsAreErrors)
 		) {
 			Logger::Get().Error(fmt::format("编译 Pass{} 失败", id + 1));
-		}
+		}*/
 	}, (uint32_t)passBlocks.size());
 
 	// 检查编译结果
@@ -1608,7 +1607,7 @@ uint32_t EffectCompiler::Compile(
 	const phmap::flat_hash_map<std::string, float>* inlineParams
 ) noexcept {
 	bool noCompile = flags & EffectCompilerFlags::NoCompile;
-	bool noCache = noCompile || (flags & EffectCompilerFlags::NoCache);
+	// bool noCache = noCompile || (flags & EffectCompilerFlags::NoCache);
 
 	if (flags & EffectCompilerFlags::InlineParams) {
 		desc.flags |= EffectFlags::InlineParams;
@@ -1628,7 +1627,7 @@ uint32_t EffectCompiler::Compile(
 		return 1;
 	}
 
-	std::string cacheKey;
+	/*std::string cacheKey;
 	uint64_t cacheHash = 0;
 	if (!noCache) {
 		// 以下因素决定编译输出：
@@ -1651,7 +1650,7 @@ uint32_t EffectCompiler::Compile(
 			// 已从缓存中读取
 			return 0;
 		}
-	}
+	}*/
 
 	std::string_view sourceView(source);
 
@@ -1845,9 +1844,9 @@ uint32_t EffectCompiler::Compile(
 			return 1;
 		}
 
-		if (!noCache) {
+		/*if (!noCache) {
 			EffectCacheManager::Get().Save(effectName, flags & 0xFFFF, cacheHash, std::move(cacheKey), desc);
-		}
+		}*/
 	}
 
 	return 0;
