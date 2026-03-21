@@ -50,7 +50,6 @@
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="BackendDescriptorStore.h" />
     <ClInclude Include="CatmullRomDrawer.h" />
     <ClInclude Include="ColorHelper.h" />
     <ClInclude Include="CommandContext.h" />
@@ -63,7 +62,6 @@
     <ClInclude Include="EffectDrawerBase.h" />
     <ClInclude Include="EffectHelper.h" />
     <ClInclude Include="EffectsDrawer.h" />
-    <ClInclude Include="EffectsProfiler.h" />
     <ClInclude Include="ExclModeHelper.h" />
     <ClInclude Include="FrameProducer.h" />
     <ClInclude Include="CursorHelper.h" />
@@ -93,7 +91,6 @@
     <ClInclude Include="SwapChainPresenter.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="BackendDescriptorStore.cpp" />
     <ClCompile Include="CatmullRomDrawer.cpp" />
     <ClCompile Include="CommandContext.cpp" />
     <ClCompile Include="CursorDrawer.cpp" />
@@ -104,7 +101,6 @@
     <ClCompile Include="DescriptorHeap.cpp" />
     <ClCompile Include="EffectCompiler.cpp" />
     <ClCompile Include="EffectsDrawer.cpp" />
-    <ClCompile Include="EffectsProfiler.cpp" />
     <ClCompile Include="ExclModeHelper.cpp" />
     <ClCompile Include="FrameProducer.cpp" />
     <ClCompile Include="CursorHelper.cpp" />

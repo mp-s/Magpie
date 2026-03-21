@@ -1,6 +1,5 @@
 #pragma once
 #include "Event.h"
-#include <dxgi1_6.h>
 
 namespace Magpie {
 

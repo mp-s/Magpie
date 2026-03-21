@@ -9,7 +9,6 @@
 #undef GetCurrentTime
 
 // DirectX 头文件
-#include <d3d11_4.h>
 #include <dxgi1_6.h>
 #include <d3d12.h>
 #include <d3dx12.h>

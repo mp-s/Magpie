@@ -60,9 +60,6 @@
     <ClInclude Include="include\DirectXHelper.h">
       <Filter>Include</Filter>
     </ClInclude>
-    <ClInclude Include="BackendDescriptorStore.h">
-      <Filter>Render</Filter>
-    </ClInclude>
     <ClInclude Include="CursorDrawer.h">
       <Filter>Render</Filter>
     </ClInclude>
@@ -72,16 +69,10 @@
     <ClInclude Include="StepTimer.h">
       <Filter>Render</Filter>
     </ClInclude>
-    <ClInclude Include="EffectsProfiler.h">
-      <Filter>Render</Filter>
-    </ClInclude>
     <ClInclude Include="DDS.h">
       <Filter>Helpers</Filter>
     </ClInclude>
     <ClInclude Include="SrcTracker.h" />
-    <ClInclude Include="Renderer2.h">
-      <Filter>Render</Filter>
-    </ClInclude>
     <ClInclude Include="SwapChainPresenter.h">
       <Filter>Presenter</Filter>
     </ClInclude>
@@ -140,6 +131,7 @@
     <ClInclude Include="CommandContext.h">
       <Filter>Render</Filter>
     </ClInclude>
+    <ClInclude Include="Renderer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -157,9 +149,6 @@
     <ClCompile Include="Win32Helper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
-    <ClCompile Include="BackendDescriptorStore.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
     <ClCompile Include="CursorDrawer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
@@ -169,13 +158,7 @@
     <ClCompile Include="StepTimer.cpp">
       <Filter>Render</Filter>
     </ClCompile>
-    <ClCompile Include="EffectsProfiler.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
     <ClCompile Include="SrcTracker.cpp" />
-    <ClCompile Include="Renderer2.cpp">
-      <Filter>Render</Filter>
-    </ClCompile>
     <ClCompile Include="SwapChainPresenter.cpp">
       <Filter>Presenter</Filter>
     </ClCompile>
@@ -219,6 +202,7 @@
     <ClCompile Include="CommandContext.cpp">
       <Filter>Render</Filter>
     </ClCompile>
+    <ClCompile Include="Renderer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shaders\MaskedCursorPS.hlsl">
