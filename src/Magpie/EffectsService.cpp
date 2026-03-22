@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "CommonSharedConstants.h"
 #include "EffectCompiler.h"
+#include "ShaderEffectParser.h"
 #include "EffectDesc.h"
+#include "EffectInfo.h"
 #include "EffectsService.h"
 #include "Logger.h"
 #include "StrHelper.h"
@@ -64,6 +66,16 @@ fire_and_forget EffectsService::Initialize() {
 	Win32Helper::RunParallel([&](uint32_t id) {
 		EffectDesc effectDesc;
 
+		{
+			std::wstring fileName = StrHelper::Concat(
+				CommonSharedConstants::EFFECTS_DIR, L"\\", effectNames[id], L".hlsl");
+			std::string source;
+			Win32Helper::ReadTextFile(fileName.c_str(), source);
+			EffectInfo2 effectInfo;
+			ShaderEffectParser::ParseForInfo(
+				StrHelper::UTF16ToUTF8(effectNames[id]), std::move(source), effectInfo);
+		}
+		
 		effectDesc.name = StrHelper::UTF16ToUTF8(effectNames[id]);
 		if (EffectCompiler::Compile(effectDesc, EffectCompilerFlags::NoCompile)) {
 			return;

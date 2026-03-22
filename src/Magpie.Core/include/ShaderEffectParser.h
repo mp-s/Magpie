@@ -38,7 +38,7 @@ struct ShaderEffectParser {
 
 	static bool ParseForDesc(
 		std::string&& name,
-		std::string_view source,
+		std::string&& source,
 		std::string&& workingFolder,
 		const ShaderEffectParserOptions& options,
 		struct ShaderEffectDesc& effectDesc,
