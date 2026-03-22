@@ -619,7 +619,7 @@ bool ShaderEffectParser::ParseForDesc(
 	if (!source.ends_with('\n')) {
 		source.push_back('\n');
 	}
-	std::string_view sourceView(source);
+	// std::string_view sourceView(source);
 
 	return false;
 }

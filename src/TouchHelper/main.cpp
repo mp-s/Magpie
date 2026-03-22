@@ -18,6 +18,8 @@
 #include "CommonSharedConstants.h"
 #include "Logger.h"
 
+using namespace Magpie;
+
 static void InitializeLogger() noexcept {
 	// 日志文件创建在 Temp 目录中
 	std::wstring logPath(MAX_PATH + 1, L'\0');

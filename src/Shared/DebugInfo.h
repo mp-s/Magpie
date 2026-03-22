@@ -1,7 +1,8 @@
 #pragma once
 
-#ifdef MP_DEBUG_INFO
+namespace Magpie {
 
+#ifdef MP_DEBUG_INFO
 // 不要定义成匿名类，和 inline 冲突
 struct DebugInfo {
 	// 模拟低速 GPU
@@ -60,5 +61,6 @@ struct DebugInfo {
 };
 
 inline DebugInfo DEBUG_INFO;
-
 #endif
+
+}

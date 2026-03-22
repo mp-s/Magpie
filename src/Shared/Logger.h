@@ -9,6 +9,8 @@
 #endif
 #include <fmt/printf.h>
 
+namespace Magpie {
+
 // std::source_location 中的函数名包含整个签名过于冗长，我们只需记录函数名，
 // 因此创建自己的 SourceLocation
 struct SourceLocation {
@@ -144,3 +146,5 @@ private:
 
 	std::shared_ptr<spdlog::logger> _logger;
 };
+
+}

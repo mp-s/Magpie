@@ -15,6 +15,8 @@
 #include <stdexcept>
 #include <string>
 
+namespace Magpie {
+
 // Check that no bytes are wasted and everything is well-aligned.
 namespace {
 struct Struct16B {
@@ -148,3 +150,5 @@ template class SmallVectorBase<uint64_t>;
 // Assertions to ensure this #if stays in sync with SmallVectorSizeType.
 static_assert(sizeof(SmallVectorSizeType<char>) == sizeof(uint64_t),
 	"Expected SmallVectorBase<uint64_t> variant to be in use.");
+
+}

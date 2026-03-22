@@ -1,5 +1,7 @@
 #pragma once
 
+namespace Magpie {
+
 class App {
 public:
 	static App& Get() noexcept {
@@ -36,3 +38,5 @@ private:
 	bool _isInputTransformEnabled = false;
 	bool _isTimerOn = false;
 };
+
+}

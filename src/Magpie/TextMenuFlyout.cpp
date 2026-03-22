@@ -5,6 +5,7 @@
 #endif
 #include "CommonSharedConstants.h"
 
+using namespace Magpie;
 using namespace winrt::Windows::UI::Xaml::Input;
 
 namespace winrt::Magpie::implementation {

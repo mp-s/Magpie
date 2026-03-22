@@ -5,6 +5,8 @@
 #include <wtypes.h>	// BSTR
 #include "SmallVector.h"
 
+namespace Magpie {
+
 struct StrHelper {
 	static std::wstring UTF8ToUTF16(std::string_view str) noexcept;
 
@@ -265,3 +267,5 @@ private:
 		return result;
 	}
 };
+
+}
