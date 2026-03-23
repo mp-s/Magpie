@@ -129,7 +129,7 @@ static bool RemoveLeadingBlanks(std::string_view& source, ParserState& state) no
 	return true;
 }
 
-template <bool SkipBlanks>
+template <bool SkipBlanks, bool AllowEmpty>
 static bool GetNextToken(std::string_view& source, ParserState& state, std::string_view& result) noexcept {
 	if (SkipBlanks) {
 		if (!RemoveLeadingBlanks(source, state)) {
@@ -140,8 +140,12 @@ static bool GetNextToken(std::string_view& source, ParserState& state, std::stri
 	}
 	
 	if (source.empty()) {
-		result = source;
-		return true;
+		if constexpr (AllowEmpty) {
+			result = source;
+			return true;
+		} else {
+			return false;
+		}
 	}
 
 	char c = source[0];
@@ -174,7 +178,7 @@ static bool GetNextToken(std::string_view& source, ParserState& state, std::stri
 template <bool SkipBlanks>
 static bool CheckNextToken(std::string_view& source, ParserState& state, std::string_view expectedToken) noexcept {
 	std::string_view token;
-	if (!GetNextToken<SkipBlanks>(source, state, token)) {
+	if (!GetNextToken<SkipBlanks, true>(source, state, token)) {
 		return false;
 	}
 
@@ -290,10 +294,75 @@ static bool GetNextNumber(std::string_view& source, ParserState& state, T& value
 	return true;
 }
 
+struct CommandInfo {
+	const char* name;
+	bool (*resolver)(std::string_view&, ParserState&, void*) noexcept;
+	bool isRequired;
+};
+
+static bool ResolveBlockCommon(
+	std::span<const CommandInfo> commandInfos,
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	SmallVector<bool, 24> processed(commandInfos.size());
+
+	std::string_view token;
+
+	while (true) {
+		bool isMetaIndicator = false;
+		if (!CheckMetaIndicator(source, state, isMetaIndicator)) {
+			return false;
+		}
+
+		if (!isMetaIndicator) {
+			break;
+		}
+
+		if (!GetNextToken<false, false>(source, state, token)) {
+			return false;
+		}
+		std::string command = StrHelper::ToUpperCase(token);
+
+		auto it = std::find_if(commandInfos.begin(), commandInfos.end(), [&](const auto& commandInfo) {
+			return commandInfo.name == command;
+		});
+		if (it != commandInfos.end()) {
+			size_t idx = it - commandInfos.begin();
+
+			if (processed[idx]) {
+				return false;
+			}
+			processed[idx] = true;
+
+			if (!it->resolver(source, state, data)) {
+				return false;
+			}
+		} else {
+			Logger::Get().Warn(StrHelper::Concat("未知指令: ", token));
+
+			std::string_view unused;
+			if (!GetNextStringUntilLineEnd<true>(source, state, unused)) {
+				return false;
+			}
+		}
+	}
+
+	// 检查必需项
+	for (uint32_t i = 0; i < commandInfos.size(); ++i) {
+		if (commandInfos[i].isRequired && !processed[i]) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 static bool ResolveHeaderVersion(
 	std::string_view& source,
 	ParserState& state,
-	EffectInfo2&
+	void*
 ) noexcept {
 	uint32_t version;
 	if (!GetNextNumber(source, state, version)) {
@@ -314,21 +383,21 @@ static bool ResolveHeaderVersion(
 static bool ResolveHeaderSortName(
 	std::string_view& source,
 	ParserState& state,
-	EffectInfo2& effectInfo
+	void* data
 ) noexcept {
 	std::string_view sortName;
 	if (!GetNextStringUntilLineEnd<false>(source, state, sortName)) {
 		return false;
 	}
 
-	effectInfo.sortName = sortName;
+	((EffectInfo2*)data)->sortName = sortName;
 	return true;
 }
 
 static bool ResolveHeaderUse(
 	std::string_view& source,
 	ParserState& state,
-	EffectInfo2&
+	void*
 ) noexcept {
 	std::string_view flags;
 	return GetNextStringUntilLineEnd<false>(source, state, flags);
@@ -337,7 +406,7 @@ static bool ResolveHeaderUse(
 static bool ResolveHeaderCapability(
 	std::string_view& source,
 	ParserState& state,
-	EffectInfo2& effectInfo
+	void* data
 ) noexcept {
 	std::string_view flags;
 	if (!GetNextStringUntilLineEnd<false>(source, state, flags)) {
@@ -368,7 +437,7 @@ static bool ResolveHeaderCapability(
 			}
 			processed[idx] = true;
 
-			effectInfo.flags |= it->second;
+			((EffectInfo2*)data)->flags |= it->second;
 		} else {
 			Logger::Get().Warn(StrHelper::Concat("使用了未知 CAPABILITY 标志: ", token));
 		}
@@ -383,12 +452,10 @@ static bool ResolveHeader(
 	EffectInfo2& effectInfo
 ) noexcept {
 	static constexpr std::array COMMAND_INFOS = {
-		// 以下为必需
-		std::make_pair("VERSION", ResolveHeaderVersion),
-		// 以下为可选
-		std::make_pair("SORT_NAME", ResolveHeaderSortName),
-		std::make_pair("USE", ResolveHeaderUse),
-		std::make_pair("CAPABILITY", ResolveHeaderCapability)
+		CommandInfo{ "VERSION", ResolveHeaderVersion, true },
+		CommandInfo{ "SORT_NAME", ResolveHeaderSortName, false },
+		CommandInfo{ "USE", ResolveHeaderUse, false },
+		CommandInfo{ "CAPABILITY", ResolveHeaderCapability, false }
 	};
 
 	ParserState state = {
@@ -396,47 +463,8 @@ static bool ResolveHeader(
 		.isNewLine = false
 	};
 
-	std::bitset<COMMAND_INFOS.size()> processed;
-
-	std::string_view token;
-
-	while (true) {
-		bool isMetaIndicator = false;
-		if (!CheckMetaIndicator(source, state, isMetaIndicator)) {
-			return false;
-		}
-
-		if (!isMetaIndicator) {
-			break;
-		}
-
-		if (!GetNextToken<false>(source, state, token)) {
-			return false;
-		}
-		std::string command = StrHelper::ToUpperCase(token);
-
-		auto it = std::find_if(COMMAND_INFOS.begin(), COMMAND_INFOS.end(), [&](const auto& commandInfo) {
-			return commandInfo.first == command;
-		});
-		if (it != COMMAND_INFOS.end()) {
-			size_t idx = it - COMMAND_INFOS.begin();
-
-			if (processed[idx]) {
-				return false;
-			}
-			processed[idx] = true;
-
-			if (!it->second(source, state, effectInfo)) {
-				return false;
-			}
-		} else {
-			Logger::Get().Warn(StrHelper::Concat("解析头时遇到未知指令: ", token));
-
-			std::string_view unused;
-			if (!GetNextStringUntilLineEnd<true>(source, state, unused)) {
-				return false;
-			}
-		}
+	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &effectInfo)) {
+		return false;
 	}
 
 	if (!RemoveLeadingBlanks(source, state)) {
@@ -457,6 +485,142 @@ static bool ResolveHeader(
 	if (!GetNextStringUntilLineEnd<false>(source, state, unused)) {
 		return false;
 	}
+
+	// 之后不允许有内容
+	if (!RemoveLeadingBlanks(source, state)) {
+		return false;
+	}
+
+	return source.empty();
+}
+
+static bool ResolveParameterDefault(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->defaultValue)) {
+		return false;
+	}
+
+	if (!RequireLineEnd(source, state)) {
+		return false;
+	}
+
+	return true;
+}
+
+static bool ResolveParameterMin(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->minValue)) {
+		return false;
+	}
+
+	if (!RequireLineEnd(source, state)) {
+		return false;
+	}
+
+	return true;
+}
+
+static bool ResolveParameterMax(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->maxValue)) {
+		return false;
+	}
+
+	if (!RequireLineEnd(source, state)) {
+		return false;
+	}
+
+	return true;
+}
+
+static bool ResolveParameterStep(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->step)) {
+		return false;
+	}
+
+	if (!RequireLineEnd(source, state)) {
+		return false;
+	}
+
+	return true;
+}
+
+static bool ResolveParameterLabel(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view label;
+	if (!GetNextStringUntilLineEnd<false>(source, state, label)) {
+		return false;
+	}
+
+	((EffectInfoParameter*)data)->label = label;
+	return true;
+}
+
+static bool ResolveParameter(
+	std::string_view source,
+	uint32_t startLineNumer,
+	EffectInfoParameter& effectInfoParameter
+) noexcept {
+	static constexpr std::array COMMAND_INFOS = {
+		CommandInfo{ "DEFAULT", ResolveParameterDefault, true },
+		CommandInfo{ "MIN", ResolveParameterMin, true },
+		CommandInfo{ "MAX", ResolveParameterMax, true },
+		CommandInfo{ "STEP", ResolveParameterStep, true },
+		CommandInfo{ "LABEL", ResolveParameterLabel, false }
+	};
+
+	ParserState state = {
+		.lineNumber = startLineNumer,
+		.isNewLine = false
+	};
+
+	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &effectInfoParameter)) {
+		return false;
+	}
+
+	if (effectInfoParameter.minValue > effectInfoParameter.defaultValue ||
+		effectInfoParameter.maxValue < effectInfoParameter.defaultValue) {
+		return false;
+	}
+
+	// 代码部分
+	std::string_view token;
+	if (!GetNextToken<true, false>(source, state, token)) {
+		return false;
+	}
+
+	if (token != "float" && token != "int") {
+		return false;
+	}
+
+	if (!GetNextToken<true, false>(source, state, token)) {
+		return false;
+	}
+
+	effectInfoParameter.name = token;
+
+	if (!RemoveLeadingBlanks(source, state) || !source.starts_with(';')) {
+		return false;
+	}
+
+	source.remove_prefix(1);
+	state.isNewLine = false;
 
 	// 之后不允许有内容
 	if (!RemoveLeadingBlanks(source, state)) {
@@ -560,7 +724,7 @@ std::string ShaderEffectParser::ParseForInfo(
 			if (isMetaIdicator) {
 				std::string_view tempSource = sourceView.substr(i + 3);
 				std::string_view token;
-				if (!GetNextToken<false>(tempSource, state, token)) {
+				if (!GetNextToken<false, false>(tempSource, state, token)) {
 					return std::move(state.errorMsg);
 				}
 
@@ -591,7 +755,16 @@ std::string ShaderEffectParser::ParseForInfo(
 	completeCurrentBlock(BlockType::Header, sourceView.size(), std::numeric_limits<size_t>::max());
 
 	if (!ResolveHeader(headerBlock.source, headerBlock.startLineNumer, effectInfo)) {
+		Logger::Get().Error(StrHelper::Concat("解析 Header 块失败: ", state.errorMsg));
 		return std::move(state.errorMsg);
+	}
+
+	effectInfo.params.resize(paramBlocks.size());
+	for (size_t i = 0; i < paramBlocks.size(); ++i) {
+		if (!ResolveParameter(paramBlocks[i].source, paramBlocks[i].startLineNumer, effectInfo.params[i])) {
+			Logger::Get().Error(fmt::format("解析 Parameter#{} 块失败", i + 1));
+			return std::move(state.errorMsg);
+		}
 	}
 
 	return std::move(state.errorMsg);
