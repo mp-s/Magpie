@@ -555,7 +555,7 @@ bool AppSettings::_Save(const _AppSettingsData& data) noexcept {
 	if (_language < 0) {
 		writer.String("");
 	} else {
-		const wchar_t* language = LocalizationService::SupportedLanguages()[_language];
+		const wchar_t* language = LocalizationService::GetSupportedLanguages()[_language];
 		writer.String(StrHelper::UTF16ToUTF8(language).c_str());
 	}
 
@@ -688,7 +688,7 @@ void AppSettings::_LoadSettings(const rapidjson::GenericObject<true, rapidjson::
 			_language = -1;
 		} else {
 			StrHelper::ToLowerCase(language);
-			std::span<const wchar_t*> languages = LocalizationService::SupportedLanguages();
+			std::span<const wchar_t*> languages = LocalizationService::GetSupportedLanguages();
 			auto it = std::find(languages.begin(), languages.end(), language);
 			if (it == languages.end()) {
 				// 未知的语言设置，重置为使用系统设置

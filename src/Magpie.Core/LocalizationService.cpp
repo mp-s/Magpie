@@ -1,15 +1,13 @@
 #include "pch.h"
-#include "AppSettings.h"
 #include "LocalizationService.h"
+#include "CommonSharedConstants.h"
 #include <bcp47mrm.h>
 #include <winrt/Windows.System.UserProfile.h>
-
-using namespace winrt;
 
 namespace Magpie {
 
 // 标签必须为小写
-static std::array SUPPORTED_LANGUAGES{
+static std::array SUPPORTED_LANGUAGES = {
 	L"de",
 	L"en-us",
 	L"es",
@@ -32,7 +30,7 @@ static std::array SUPPORTED_LANGUAGES{
 void LocalizationService::EarlyInitialize() {
 	// 非打包应用默认使用“Windows 显示语言”，这里自行切换至“首选语言”
 	std::wstring userLanguages;
-	for (const hstring& language : UserProfile::GlobalizationPreferences::Languages()) {
+	for (const winrt::hstring& language : winrt::UserProfile::GlobalizationPreferences::Languages()) {
 		userLanguages += language;
 		userLanguages += L'\0';
 	}
@@ -62,22 +60,26 @@ void LocalizationService::EarlyInitialize() {
 	_Language(bestLanguage);
 }
 
-void LocalizationService::Initialize() {
-	AppSettings& settings = AppSettings::Get();
-
-	int language = settings.Language();
+void LocalizationService::Initialize(int language) {
 	if (language >= 0) {
 		_Language(SUPPORTED_LANGUAGES[language]);
 	}
+
+	_resourceLoader = winrt::ResourceLoader::GetForViewIndependentUse(
+		CommonSharedConstants::APP_RESOURCE_MAP_ID);
 }
 
-std::span<const wchar_t*> LocalizationService::SupportedLanguages() noexcept {
+std::span<const wchar_t*> LocalizationService::GetSupportedLanguages() noexcept {
 	return SUPPORTED_LANGUAGES;
+}
+
+winrt::hstring LocalizationService::GetLocalizedString(std::wstring_view resName) const noexcept {
+	return _resourceLoader.GetString(resName);
 }
 
 void LocalizationService::_Language(const wchar_t* tag) {
 	_language = tag;
-	ResourceContext::SetGlobalQualifierValue(L"Language", tag);
+	winrt::ResourceContext::SetGlobalQualifierValue(L"Language", tag);
 }
 
 }

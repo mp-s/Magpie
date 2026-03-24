@@ -33,7 +33,7 @@ struct ShaderEffectParser {
 	static std::string ParseForInfo(
 		std::string&& name,
 		std::string&& source,
-		struct EffectInfo2& effectInfo
+		struct EffectInfo& effectInfo
 	) noexcept;
 
 	static bool ParseForDesc(

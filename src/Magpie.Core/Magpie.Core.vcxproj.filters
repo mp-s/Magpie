@@ -94,7 +94,6 @@
     <ClInclude Include="DuplicateFrameChecker.h">
       <Filter>Capture</Filter>
     </ClInclude>
-    <ClInclude Include="RectHelper.h" />
     <ClInclude Include="DirtyRectsOptimizer.h">
       <Filter>Capture</Filter>
     </ClInclude>
@@ -129,6 +128,15 @@
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="Renderer.h" />
+    <ClInclude Include="RectHelper.h">
+      <Filter>Helpers</Filter>
+    </ClInclude>
+    <ClInclude Include="include\EffectsService.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\LocalizationService.h">
+      <Filter>Include</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -199,6 +207,12 @@
       <Filter>Render</Filter>
     </ClCompile>
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="LocalizationService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="EffectsService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shaders\MaskedCursorPS.hlsl">
@@ -240,8 +254,10 @@
     <FxCompile Include="shaders\CursorResizerPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="shaders\TextureBlitPS.hlsl" />
     <FxCompile Include="shaders\FullscreenVS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\TextureBlitPS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

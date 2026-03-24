@@ -29,8 +29,7 @@ struct _AppSettingsData {
 	std::filesystem::path _configDir;
 	std::filesystem::path _configPath;
 
-	// LocalizationService::SupportedLanguages 索引
-	// -1 表示使用系统设置
+	// LocalizationService::SupportedLanguages 索引，-1 表示使用系统设置
 	int _language = -1;
 
 	// 保存窗口中心点和 DPI 无关的窗口尺寸

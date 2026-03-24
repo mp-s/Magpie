@@ -393,7 +393,7 @@ static bool ResolveHeaderSortName(
 		return false;
 	}
 
-	((EffectInfo2*)data)->sortName = sortName;
+	((EffectInfo*)data)->sortName = sortName;
 	return true;
 }
 
@@ -418,9 +418,9 @@ static bool ResolveHeaderCapability(
 
 	static constexpr std::array FLAG_INFOS = {
 		// 以下为必需
-		std::make_pair("FP16", EffectInfoFlags2::SupportFP16),
+		std::make_pair("FP16", EffectInfoFlags::SupportFP16),
 		// 以下为可选
-		std::make_pair("ADVANCEDCOLOR", EffectInfoFlags2::SupportAdvancedColor)
+		std::make_pair("ADVANCEDCOLOR", EffectInfoFlags::SupportAdvancedColor)
 	};
 
 	std::bitset<FLAG_INFOS.size()> processed;
@@ -440,7 +440,7 @@ static bool ResolveHeaderCapability(
 			}
 			processed[idx] = true;
 
-			((EffectInfo2*)data)->flags |= it->second;
+			((EffectInfo*)data)->flags |= it->second;
 		} else {
 			Logger::Get().Warn(StrHelper::Concat("使用了未知 CAPABILITY 标志: ", token));
 		}
@@ -454,7 +454,7 @@ static bool ResolveHeaderScaleFactor(
 	ParserState& state,
 	void* data
 ) noexcept {
-	if (!GetNextNumber(source, state, ((EffectInfo2*)data)->scaleFactor)) {
+	if (!GetNextNumber(source, state, ((EffectInfo*)data)->scaleFactor)) {
 		return false;
 	}
 
@@ -468,7 +468,7 @@ static bool ResolveHeaderScaleFactor(
 static bool ResolveHeader(
 	std::string_view source,
 	uint32_t startLineNumer,
-	EffectInfo2& effectInfo
+	EffectInfo& effectInfo
 ) noexcept {
 	static constexpr std::array COMMAND_INFOS = {
 		CommandInfo{ "VERSION", ResolveHeaderVersion, true },
@@ -653,7 +653,7 @@ static bool ResolveParameter(
 std::string ShaderEffectParser::ParseForInfo(
 	std::string&& name,
 	std::string&& source,
-	EffectInfo2& effectInfo
+	EffectInfo& effectInfo
 ) noexcept {
 	assert(!name.empty() && !source.empty());
 
@@ -671,7 +671,7 @@ std::string ShaderEffectParser::ParseForInfo(
 	std::string_view sourceView(source);
 
 	if (!CheckMagic(sourceView, state)) {
-		Logger::Get().Error("检查 MagpieFX 头失败");
+		Logger::Get().Error(StrHelper::Concat("CheckMagic 失败\n\t错误消息: ", state.errorMsg));
 		return std::move(state.errorMsg);
 	}
 
@@ -775,14 +775,14 @@ std::string ShaderEffectParser::ParseForInfo(
 	completeCurrentBlock(BlockType::Header, sourceView.size(), std::numeric_limits<size_t>::max());
 
 	if (!ResolveHeader(headerBlock.source, headerBlock.startLineNumer, effectInfo)) {
-		Logger::Get().Error(StrHelper::Concat("解析 Header 块失败: ", state.errorMsg));
+		Logger::Get().Error(StrHelper::Concat("ResolveHeader 失败\n\t错误消息: ", state.errorMsg));
 		return std::move(state.errorMsg);
 	}
 
 	effectInfo.params.resize(paramBlocks.size());
 	for (size_t i = 0; i < paramBlocks.size(); ++i) {
 		if (!ResolveParameter(paramBlocks[i].source, paramBlocks[i].startLineNumer, effectInfo.params[i])) {
-			Logger::Get().Error(fmt::format("解析 Parameter#{} 块失败", i + 1));
+			Logger::Get().Error(fmt::format("ResolveParameter#{} 失败\n\t错误消息: ", state.errorMsg));
 			return std::move(state.errorMsg);
 		}
 	}

@@ -95,7 +95,7 @@ private:
 	uint32_t _scalingModeIdx = 0;
 	uint32_t _effectIdx = 0;
 	hstring _name;
-	const ::Magpie::EffectInfo2* _effectInfo = nullptr;
+	const ::Magpie::EffectInfo* _effectInfo = nullptr;
 
 	com_ptr<EffectParametersViewModel> _parametersViewModel;
 };

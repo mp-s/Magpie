@@ -307,7 +307,7 @@ fire_and_forget HomeViewModel::IsTouchSupportEnabled(bool value) {
 }
 
 Uri HomeViewModel::TouchSupportLearnMoreUrl() const noexcept {
-	if (LocalizationService::Get().Language() == L"zh-hans"sv) {
+	if (LocalizationService::Get().GetLanguage() == L"zh-hans"sv) {
 		return Uri(L"https://github.com/Blinue/Magpie/blob/dev/docs/%E5%85%B3%E4%BA%8E%E8%A7%A6%E6%8E%A7%E6%94%AF%E6%8C%81.md");
 	} else {
 		return Uri(L"https://github.com/Blinue/Magpie/blob/dev/docs/About%20touch%20support.md");

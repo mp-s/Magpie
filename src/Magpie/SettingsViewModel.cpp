@@ -15,7 +15,7 @@ using namespace Magpie;
 namespace winrt::Magpie::implementation {
 
 IVector<IInspectable> SettingsViewModel::Languages() const {
-	std::span<const wchar_t*> tags = LocalizationService::Get().SupportedLanguages();
+	std::span<const wchar_t*> tags = LocalizationService::Get().GetSupportedLanguages();
 
 	std::vector<IInspectable> languages;
 	languages.reserve(tags.size() + 1);

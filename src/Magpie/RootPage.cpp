@@ -36,7 +36,7 @@ static constexpr uint32_t FIRST_PROFILE_ITEM_IDX = 4;
 RootPage::RootPage() {
 	// 设置 Language 属性帮助 XAML 选择合适的字体，比如繁体中文使用 Microsoft JhengHei UI，
 	// 日语使用 Yu Gothic UI
-	Language(LocalizationService::Get().Language());
+	Language(LocalizationService::Get().GetLanguage());
 }
 
 RootPage::~RootPage() {

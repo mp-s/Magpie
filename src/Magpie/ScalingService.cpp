@@ -13,6 +13,7 @@
 #include "TouchHelper.h"
 #include "Win32Helper.h"
 #include "WindowHelper.h"
+#include "LocalizationService.h"
 
 using namespace winrt::Magpie::implementation;
 using namespace winrt;
@@ -195,10 +196,9 @@ static void ShowError(HWND hWnd, ScalingError error) noexcept {
 		return;
 	}
 
-	ResourceLoader resourceLoader =
-		ResourceLoader::GetForViewIndependentUse(CommonSharedConstants::APP_RESOURCE_MAP_ID);
-	hstring title = isFail ? resourceLoader.GetString(L"Message_ScalingFailed") : hstring{};
-	ToastService::Get().ShowMessageOnWindow(title, resourceLoader.GetString(key), hWnd);
+	LocalizationService& ls = LocalizationService::Get();
+	hstring title = isFail ? ls.GetLocalizedString(L"Message_ScalingFailed") : hstring{};
+	ToastService::Get().ShowMessageOnWindow(title, ls.GetLocalizedString(key), hWnd);
 	Logger::Get().Error(fmt::format("缩放失败\n\t错误码: {}", (int)error));
 }
 

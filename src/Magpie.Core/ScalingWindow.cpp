@@ -19,21 +19,11 @@ static UINT WM_MAGPIE_SCALINGCHANGED;
 // 窗口模式缩放时缩放窗口应遮挡源窗口和它的阴影，在四周留出 50 x DPI 缩放的空间
 static constexpr int WINDOWED_MODE_MIN_SPACE_AROUND = 2 * 50;
 
-static void InitMessage() noexcept {
-	[[maybe_unused]] static Ignore _ = []() {
-		WM_MAGPIE_SCALINGCHANGED =
-			RegisterWindowMessage(CommonSharedConstants::WM_MAGPIE_SCALINGCHANGED);
-
-		return Ignore();
-	}();
-}
-
 static bool IsTopmostWindow(HWND hWnd) noexcept {
 	return GetWindowExStyle(hWnd) & WS_EX_TOPMOST;
 }
 
-ScalingWindow::ScalingWindow() noexcept :
-	_resourceLoader(winrt::ResourceLoader::GetForViewIndependentUse(CommonSharedConstants::APP_RESOURCE_MAP_ID)) {}
+ScalingWindow::ScalingWindow() noexcept {}
 
 ScalingWindow::~ScalingWindow() noexcept {}
 
@@ -93,8 +83,6 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	InitMessage();
-
 	bool isSrcInvisibleOrMinimized = false;
 	if (ScalingError error = _srcTracker.Set(hwndSrc, _options, isSrcInvisibleOrMinimized);
 		error != ScalingError::NoError
@@ -120,7 +108,10 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 	}
 
 	[[maybe_unused]] static Ignore _ = []() {
-		WNDCLASSEXW wcex{
+		WM_MAGPIE_SCALINGCHANGED =
+			RegisterWindowMessage(CommonSharedConstants::WM_MAGPIE_SCALINGCHANGED);
+
+		WNDCLASSEXW wcex = {
 			.cbSize = sizeof(wcex),
 			.lpfnWndProc = _WndProc,
 			.hInstance = wil::GetModuleInstanceHandle(),
@@ -460,10 +451,6 @@ void ScalingWindow::CleanAfterSrcRepositioned() noexcept {
 	}
 	_lastWindowedRendererWidth = 0;
 	_isSrcRepositioning = false;
-}
-
-winrt::hstring ScalingWindow::GetLocalizedString(std::wstring_view resName) const {
-	return _resourceLoader.GetString(resName);
 }
 
 LRESULT ScalingWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noexcept {

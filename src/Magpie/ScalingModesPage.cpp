@@ -75,7 +75,7 @@ void ScalingModesPage::_BuildEffectMenu() noexcept {
 
 	phmap::flat_hash_map<std::wstring, MenuFlyoutSubItem> folders;
 	folders.reserve(8);
-	for (const EffectInfo2& effectInfo : EffectsService::Get().GetEffects()) {
+	for (const EffectInfo& effectInfo : EffectsService::Get().GetEffects()) {
 		std::wstring effectName(StrHelper::UTF8ToUTF16(effectInfo.name));
 
 		MenuFlyoutItem item;
@@ -135,13 +135,13 @@ void ScalingModesPage::_BuildEffectMenu() noexcept {
 			hstring name1 = unbox_value<hstring>(l.try_as<MenuFlyoutItem>().Tag());
 			hstring name2 = unbox_value<hstring>(r.try_as<MenuFlyoutItem>().Tag());
 
-			const EffectInfo2* effectInfo1 = EffectsService::Get().GetEffect(name1);
-			const EffectInfo2* effectInfo2 = EffectsService::Get().GetEffect(name2);
+			const EffectInfo* effectInfo1 = EffectsService::Get().GetEffect(name1);
+			const EffectInfo* EffectInfo = EffectsService::Get().GetEffect(name2);
 
 			const std::string& sortName1 =
 				effectInfo1->sortName.empty() ? effectInfo1->name : effectInfo1->sortName;
 			const std::string& sortName2 =
-				effectInfo2->sortName.empty() ? effectInfo2->name : effectInfo2->sortName;
+				EffectInfo->sortName.empty() ? EffectInfo->name : EffectInfo->sortName;
 
 			return sortName1 < sortName2;
 		});

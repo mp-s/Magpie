@@ -149,7 +149,6 @@
       <DependentUpon>EffectParametersViewModel.idl</DependentUpon>
       <SubType>Code</SubType>
     </ClInclude>
-    <ClInclude Include="EffectsService.h" />
     <ClInclude Include="FileDialogHelper.h" />
     <ClInclude Include="HomeViewModel.h">
       <DependentUpon>HomeViewModel.idl</DependentUpon>
@@ -186,7 +185,6 @@
     <ClInclude Include="Shortcut.h" />
     <ClInclude Include="IconHelper.h" />
     <ClInclude Include="JsonHelper.h" />
-    <ClInclude Include="LocalizationService.h" />
     <ClInclude Include="ScalingService.h" />
     <ClInclude Include="NewProfileViewModel.h">
       <DependentUpon>NewProfileViewModel.idl</DependentUpon>
@@ -341,7 +339,6 @@
       <DependentUpon>EffectParametersViewModel.idl</DependentUpon>
       <SubType>Code</SubType>
     </ClCompile>
-    <ClCompile Include="EffectsService.cpp" />
     <ClCompile Include="FileDialogHelper.cpp" />
     <ClCompile Include="HomeViewModel.cpp">
       <DependentUpon>HomeViewModel.idl</DependentUpon>
@@ -379,7 +376,6 @@
     <ClCompile Include="Shortcut.cpp" />
     <ClCompile Include="IconHelper.cpp" />
     <ClCompile Include="JsonHelper.cpp" />
-    <ClCompile Include="LocalizationService.cpp" />
     <ClCompile Include="ScalingService.cpp" />
     <ClCompile Include="NewProfileViewModel.cpp">
       <DependentUpon>NewProfileViewModel.idl</DependentUpon>

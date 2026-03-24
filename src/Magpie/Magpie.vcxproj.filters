@@ -34,9 +34,6 @@
     <ClCompile Include="AutoStartHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
-    <ClCompile Include="EffectsService.cpp">
-      <Filter>Services</Filter>
-    </ClCompile>
     <ClCompile Include="ScalingModesService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
@@ -48,9 +45,6 @@
     </ClCompile>
     <ClCompile Include="ContentDialogHelper.cpp">
       <Filter>Helpers</Filter>
-    </ClCompile>
-    <ClCompile Include="LocalizationService.cpp">
-      <Filter>Services</Filter>
     </ClCompile>
     <ClCompile Include="FileDialogHelper.cpp">
       <Filter>Helpers</Filter>
@@ -119,9 +113,6 @@
     <ClInclude Include="ScalingMode.h">
       <Filter>Models</Filter>
     </ClInclude>
-    <ClInclude Include="EffectsService.h">
-      <Filter>Services</Filter>
-    </ClInclude>
     <ClInclude Include="ScalingModesService.h">
       <Filter>Services</Filter>
     </ClInclude>
@@ -136,9 +127,6 @@
     </ClInclude>
     <ClInclude Include="ContentDialogHelper.h">
       <Filter>Helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="LocalizationService.h">
-      <Filter>Services</Filter>
     </ClInclude>
     <ClInclude Include="FileDialogHelper.h">
       <Filter>Helpers</Filter>

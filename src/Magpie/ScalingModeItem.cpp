@@ -215,7 +215,7 @@ void ScalingModeItem::AddEffect(const hstring& fullName) {
 	EffectItem& effect = _Data().effects.emplace_back();
 	effect.name = fullName;
 
-	const EffectInfo2* effectInfo = EffectsService::Get().GetEffect(fullName);
+	const EffectInfo* effectInfo = EffectsService::Get().GetEffect(fullName);
 	assert(effectInfo);
 	if (effectInfo->scaleFactor == 0) {
 		// 支持缩放的效果默认等比缩放到充满屏幕

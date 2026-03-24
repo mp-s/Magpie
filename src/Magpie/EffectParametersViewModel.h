@@ -5,7 +5,7 @@
 #include <parallel_hashmap/phmap.h>
 
 namespace Magpie {
-struct EffectInfo2;
+struct EffectInfo;
 }
 
 namespace winrt::Magpie::implementation {
@@ -134,7 +134,7 @@ private:
 
 	uint32_t _scalingModeIdx;
 	uint32_t _effectIdx;
-	const ::Magpie::EffectInfo2* _effectInfo = nullptr;
+	const ::Magpie::EffectInfo* _effectInfo = nullptr;
 };
 
 }

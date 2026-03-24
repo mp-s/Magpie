@@ -59,7 +59,7 @@ winrt::fire_and_forget EffectsService::Initialize() {
 			CommonSharedConstants::EFFECTS_DIR, L"\\", effectNames[id], L".hlsl");
 		std::string source;
 		Win32Helper::ReadTextFile(fileName.c_str(), source);
-		EffectInfo2 effectInfo;
+		EffectInfo effectInfo;
 		std::string errorMsg = ShaderEffectParser::ParseForInfo(
 			StrHelper::UTF16ToUTF8(effectNames[id]), std::move(source), effectInfo);
 		if (!errorMsg.empty()) {
@@ -80,12 +80,12 @@ void EffectsService::Uninitialize() {
 	_WaitForInitialize();
 }
 
-const std::vector<EffectInfo2>& EffectsService::GetEffects() noexcept {
+const std::vector<EffectInfo>& EffectsService::GetEffects() noexcept {
 	_WaitForInitialize();
 	return _effects;
 }
 
-const EffectInfo2* EffectsService::GetEffect(std::wstring_view name) noexcept {
+const EffectInfo* EffectsService::GetEffect(std::wstring_view name) noexcept {
 	_WaitForInitialize();
 
 	auto it = _effectsMap.find(name);
