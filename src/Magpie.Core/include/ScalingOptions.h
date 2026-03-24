@@ -56,11 +56,9 @@ enum class OutputAlignment {
 };
 
 enum class EffectType {
-	BuiltInShader,
-	// 下面的类型都未实现
-	UserShader,
-	BuiltInONNX,
-	UserONNX,
+	Shader,
+	// 下面的类型未实现
+	ONNX,
 	Extension
 };
 

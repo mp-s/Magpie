@@ -87,11 +87,11 @@ int APIENTRY wWinMain(
 		std::filesystem::path workingDir = Win32Helper::GetExePath().parent_path();
 		// 将当前目录设为程序所在目录
 		FAIL_FAST_IF_WIN32_BOOL_FALSE(SetCurrentDirectory(workingDir.c_str()));
-
-		// 依赖的 dll 都位于 app 文件夹
-		SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+		
+		// dll 搜索路径中添加 app 文件夹以及排除当前目录
+		FAIL_FAST_IF_WIN32_BOOL_FALSE(SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS));
 		workingDir += L"\\app";
-		AddDllDirectory(workingDir.c_str());
+		FAIL_FAST_IF_NULL(AddDllDirectory(workingDir.c_str()));
 	}
 	
 	enum {

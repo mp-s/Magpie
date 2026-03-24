@@ -177,8 +177,10 @@ static bool GetNextToken(std::string_view& source, ParserState& state, std::stri
 
 template <bool SkipBlanks>
 static bool CheckNextToken(std::string_view& source, ParserState& state, std::string_view expectedToken) noexcept {
+	assert(!expectedToken.empty());
+
 	std::string_view token;
-	if (!GetNextToken<SkipBlanks, true>(source, state, token)) {
+	if (!GetNextToken<SkipBlanks, false>(source, state, token)) {
 		return false;
 	}
 
@@ -369,7 +371,8 @@ static bool ResolveHeaderVersion(
 		return false;
 	}
 
-	if (version != MAGPIE_FX_VERSION) {
+	// 向后兼容到 4
+	if (version < 4 || version > MAGPIE_FX_VERSION) {
 		return false;
 	}
 
