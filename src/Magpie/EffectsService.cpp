@@ -1,21 +1,12 @@
 #include "pch.h"
 #include "CommonSharedConstants.h"
-#include "EffectCompiler.h"
 #include "ShaderEffectParser.h"
-#include "EffectDesc.h"
-#include "EffectInfo.h"
 #include "EffectsService.h"
 #include "Logger.h"
 #include "StrHelper.h"
 #include "Win32Helper.h"
 
-using namespace winrt;
-
 namespace Magpie {
-
-EffectInfo::EffectInfo() {}
-
-EffectInfo::~EffectInfo() {}
 
 static void ListEffects(std::vector<std::wstring>& result, std::wstring_view prefix = {}) {
 	result.reserve(80);
@@ -49,8 +40,8 @@ static void ListEffects(std::vector<std::wstring>& result, std::wstring_view pre
 	} while (FindNextFile(hFind.get(), &findData));
 }
 
-fire_and_forget EffectsService::Initialize() {
-	co_await resume_background();
+winrt::fire_and_forget EffectsService::Initialize() {
+	co_await winrt::resume_background();
 
 	std::vector<std::wstring> effectNames;
 	ListEffects(effectNames);
@@ -64,48 +55,20 @@ fire_and_forget EffectsService::Initialize() {
 
 	// 并行解析效果
 	Win32Helper::RunParallel([&](uint32_t id) {
-		EffectDesc effectDesc;
-
-		{
-			std::wstring fileName = StrHelper::Concat(
-				CommonSharedConstants::EFFECTS_DIR, L"\\", effectNames[id], L".hlsl");
-			std::string source;
-			Win32Helper::ReadTextFile(fileName.c_str(), source);
-			EffectInfo2 effectInfo;
-			ShaderEffectParser::ParseForInfo(
-				StrHelper::UTF16ToUTF8(effectNames[id]), std::move(source), effectInfo);
-		}
-		
-		effectDesc.name = StrHelper::UTF16ToUTF8(effectNames[id]);
-		if (EffectCompiler::Compile(effectDesc, EffectCompilerFlags::NoCompile)) {
+		std::wstring fileName = StrHelper::Concat(
+			CommonSharedConstants::EFFECTS_DIR, L"\\", effectNames[id], L".hlsl");
+		std::string source;
+		Win32Helper::ReadTextFile(fileName.c_str(), source);
+		EffectInfo2 effectInfo;
+		std::string errorMsg = ShaderEffectParser::ParseForInfo(
+			StrHelper::UTF16ToUTF8(effectNames[id]), std::move(source), effectInfo);
+		if (!errorMsg.empty()) {
 			return;
 		}
-
-		EffectInfo effect;
-		effect.name = std::move(effectNames[id]);
-
-		if (effectDesc.sortName.empty()) {
-			effect.sortName = effect.name;
-		} else {
-			size_t pos = effect.name.find_last_of(L'\\');
-			if (pos == std::wstring::npos) {
-				effect.sortName = StrHelper::UTF8ToUTF16(effectDesc.sortName);
-			} else {
-				effect.sortName = StrHelper::Concat(
-					std::wstring_view(effect.name.c_str(), pos + 1),
-					StrHelper::UTF8ToUTF16(effectDesc.sortName)
-				);
-			}
-		}
-
-		effect.params = std::move(effectDesc.params);
-		if (effectDesc.GetOutputSizeExpr().first.empty()) {
-			effect.flags |= EffectInfoFlags::CanScale;
-		}
-
+		
 		auto lock = srwLock.lock_exclusive();
-		_effectsMap.emplace(effect.name, (uint32_t)_effects.size());
-		_effects.emplace_back(std::move(effect));
+		_effectsMap.emplace(effectNames[id], (uint32_t)_effects.size());
+		_effects.emplace_back(std::move(effectInfo));
 	}, nEffect);
 
 	_initialized.store(true, std::memory_order_release);
@@ -117,12 +80,12 @@ void EffectsService::Uninitialize() {
 	_WaitForInitialize();
 }
 
-const std::vector<EffectInfo>& EffectsService::Effects() noexcept {
+const std::vector<EffectInfo2>& EffectsService::GetEffects() noexcept {
 	_WaitForInitialize();
 	return _effects;
 }
 
-const EffectInfo* EffectsService::GetEffect(std::wstring_view name) noexcept {
+const EffectInfo2* EffectsService::GetEffect(std::wstring_view name) noexcept {
 	_WaitForInitialize();
 
 	auto it = _effectsMap.find(name);

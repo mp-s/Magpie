@@ -33,9 +33,6 @@
     </ClInclude>
     <ClInclude Include="ScalingWindow.h" />
     <ClInclude Include="CursorManager.h" />
-    <ClInclude Include="include\EffectCompiler.h">
-      <Filter>Include</Filter>
-    </ClInclude>
     <ClInclude Include="include\EffectDesc.h">
       <Filter>Include</Filter>
     </ClInclude>
@@ -136,7 +133,6 @@
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
     <ClCompile Include="pch.cpp" />
-    <ClCompile Include="EffectCompiler.cpp" />
     <ClCompile Include="DirectXHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>

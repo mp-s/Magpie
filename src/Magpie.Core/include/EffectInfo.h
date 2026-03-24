@@ -23,8 +23,8 @@ struct EffectInfo2 {
 	std::string name;
 	std::string sortName;
 	std::vector<EffectInfoParameter> params;
-	// 可使用 INPUT_WIDTH，空字符串表示支持自由缩放
-	std::pair<std::string, std::string> outputSizeExprs;
+	// 0 表示可以自由缩放
+	uint32_t scaleFactor = 0;
 	EffectInfoFlags2 flags = EffectInfoFlags2::None;
 };
 

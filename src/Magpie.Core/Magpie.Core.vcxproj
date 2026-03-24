@@ -73,7 +73,6 @@
     <ClInclude Include="GraphicsCaptureFrameSource.h" />
     <ClInclude Include="D3D12Context.h" />
     <ClInclude Include="include\DirectXHelper.h" />
-    <ClInclude Include="include\EffectCompiler.h" />
     <ClInclude Include="include\EffectDesc.h" />
     <ClInclude Include="include\ScalingOptions.h" />
     <ClInclude Include="include\ScalingRuntime.h" />
@@ -99,7 +98,6 @@
     <ClCompile Include="DirtyRectsOptimizer.cpp" />
     <ClCompile Include="DuplicateFrameChecker.cpp" />
     <ClCompile Include="DescriptorHeap.cpp" />
-    <ClCompile Include="EffectCompiler.cpp" />
     <ClCompile Include="EffectsDrawer.cpp" />
     <ClCompile Include="ExclModeHelper.cpp" />
     <ClCompile Include="FrameProducer.cpp" />

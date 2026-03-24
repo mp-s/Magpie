@@ -1,27 +1,8 @@
 #pragma once
 #include <parallel_hashmap/phmap.h>
+#include "EffectInfo.h"
 
 namespace Magpie {
-
-struct EffectParameterDesc;
-
-struct EffectInfoFlags {
-	static constexpr uint32_t CanScale = 1;
-};
-
-struct EffectInfo {
-	EffectInfo();
-	~EffectInfo();
-
-	std::wstring name;
-	std::wstring sortName;
-	std::vector<EffectParameterDesc> params;
-	uint32_t flags = 0;	// EffectInfoFlags
-
-	bool CanScale() const noexcept {
-		return flags & EffectInfoFlags::CanScale;
-	}
-};
 
 class EffectsService {
 public:
@@ -37,16 +18,17 @@ public:
 
 	void Uninitialize();
 
-	const std::vector<EffectInfo>& Effects() noexcept;
+	const std::vector<EffectInfo2>& GetEffects() noexcept;
 
-	const EffectInfo* GetEffect(std::wstring_view name) noexcept;
+	// 由于 WinUI 使用 UTF-16，这里也以 UTF-16 作为参数以减少编码转换
+	const EffectInfo2* GetEffect(std::wstring_view name) noexcept;
 
 private:
 	EffectsService() = default;
 
 	void _WaitForInitialize() noexcept;
 
-	std::vector<EffectInfo> _effects;
+	std::vector<EffectInfo2> _effects;
 	phmap::flat_hash_map<std::wstring, uint32_t> _effectsMap;
 	std::atomic<bool> _initialized = false;
 	bool _initializedCache = false;

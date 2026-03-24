@@ -371,8 +371,8 @@ static bool ResolveHeaderVersion(
 		return false;
 	}
 
-	// 向后兼容到 4
-	if (version < 4 || version > MAGPIE_FX_VERSION) {
+	// 向后兼容到 5
+	if (version < 5 || version > MAGPIE_FX_VERSION) {
 		return false;
 	}
 
@@ -449,6 +449,22 @@ static bool ResolveHeaderCapability(
 	return true;
 }
 
+static bool ResolveHeaderScaleFactor(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	if (!GetNextNumber(source, state, ((EffectInfo2*)data)->scaleFactor)) {
+		return false;
+	}
+
+	if (!RequireLineEnd(source, state)) {
+		return false;
+	}
+
+	return true;
+}
+
 static bool ResolveHeader(
 	std::string_view source,
 	uint32_t startLineNumer,
@@ -458,7 +474,8 @@ static bool ResolveHeader(
 		CommandInfo{ "VERSION", ResolveHeaderVersion, true },
 		CommandInfo{ "SORT_NAME", ResolveHeaderSortName, false },
 		CommandInfo{ "USE", ResolveHeaderUse, false },
-		CommandInfo{ "CAPABILITY", ResolveHeaderCapability, false }
+		CommandInfo{ "CAPABILITY", ResolveHeaderCapability, false },
+		CommandInfo{ "SCALE_FACTOR", ResolveHeaderScaleFactor, false },
 	};
 
 	ParserState state = {

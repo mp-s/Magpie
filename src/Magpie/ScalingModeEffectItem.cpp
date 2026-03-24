@@ -72,7 +72,7 @@ bool ScalingModeEffectItem::CanScale() const noexcept {
 		return false;
 	}
 
-	return _effectInfo && _effectInfo->CanScale();
+	return _effectInfo && _effectInfo->scaleFactor == 0;
 }
 
 bool ScalingModeEffectItem::HasParameters() const noexcept {
