@@ -14,6 +14,7 @@
 #include "ScalingModeEffectItem.h"
 #include "Win32Helper.h"
 #include "RootPage.h"
+#include "LocalizationService.h"
 
 using namespace ::Magpie;
 
@@ -30,9 +31,8 @@ ScalingModeItem::ScalingModeItem(uint32_t index, bool isInitialExpanded)
 		std::vector<IInspectable> linkedProfiles;
 		const Profile& defaultProfile = AppSettings::Get().DefaultProfile();
 		if (defaultProfile.scalingMode == (int)index) {
-			hstring defaults = ResourceLoader::GetForCurrentView(CommonSharedConstants::APP_RESOURCE_MAP_ID)
-				.GetString(L"Root_Defaults/Content");
-			linkedProfiles.push_back(box_value(defaults));
+			linkedProfiles.push_back(box_value(LocalizationService::Get()
+				.GetLocalizedString(L"Root_Defaults/Content")));
 		}
 		for (const Profile& profile : AppSettings::Get().Profiles()) {
 			if (profile.scalingMode == (int)index) {
@@ -267,10 +267,9 @@ hstring ScalingModeItem::Description() const noexcept {
 		if (EffectsService::Get().GetEffect(effect.name) != nullptr) {
 			result += EffectHelper::GetDisplayName(effect.name);
 		} else {
-			ResourceLoader resourceLoader =
-				ResourceLoader::GetForCurrentView(CommonSharedConstants::APP_RESOURCE_MAP_ID);
 			result += L'(';
-			result += resourceLoader.GetString(L"ScalingModes_Description_UnknownEffect");
+			result += LocalizationService::Get()
+				.GetLocalizedString(L"ScalingModes_Description_UnknownEffect");
 			result += L')';
 		}
 	}

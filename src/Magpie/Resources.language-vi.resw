@@ -835,7 +835,7 @@
   <data name="Home_Advanced_DeveloperOptions_DisableTopmost.Content" xml:space="preserve">
     <value>Tắt chế độ luôn ở trên cùng</value>
   </data>
-  <data name="Dialog_SetlectScreenshotSaveDirectory_Title" xml:space="preserve">
+  <data name="Dialog_SelectScreenshotSaveDirectory_Title" xml:space="preserve">
     <value>Chọn thư mục để lưu ảnh chụp màn hình</value>
   </data>
   <data name="Message_ScreenshotSaved" xml:space="preserve">

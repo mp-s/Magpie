@@ -4,12 +4,15 @@
 #include "StrHelper.h"
 #include "Logger.h"
 #include "ShaderEffectDesc.h"
+#include "LocalizationService.h"
 #include <bitset>
 
 namespace Magpie {
 
 // 当前 MagpieFX 版本
 static constexpr uint32_t MAGPIE_FX_VERSION = 5;
+// 向后兼容的最低版本
+static constexpr uint32_t MAGPIE_FX_MIN_SUPPORTED_VERSION = 4;
 
 // 必须出现在一行的开头才视为指令
 static const char* META_INDICATOR = "//!";
@@ -19,6 +22,37 @@ struct ParserState {
 	uint32_t lineNumber;
 	bool isNewLine;
 };
+
+static std::string DebugFormat(std::string_view str) noexcept {
+	return fmt::format("{:?s}", std::span<const char>(str.begin(), str.end()));
+}
+
+static void SetGeneralParseError(
+	ParserState& state,
+	std::string_view source,
+	std::string_view expected = {}
+) noexcept {
+	// 限制打印的源代码字符数量
+	std::string sourceStart;
+	constexpr uint32_t SOURCE_PRINT_COUNT = 12;
+	if (source.size() <= SOURCE_PRINT_COUNT) {
+		sourceStart = DebugFormat(source);
+	} else {
+		sourceStart = StrHelper::Concat(source.substr(0, SOURCE_PRINT_COUNT), "...");
+		sourceStart = DebugFormat(sourceStart);
+	}
+
+	if (expected.empty()) {
+		std::string msgFmt = StrHelper::UTF16ToUTF8(LocalizationService::Get()
+				.GetLocalizedString(L"ShaderEffectParser_GeneralError"));
+		state.errorMsg = fmt::format(fmt::runtime(msgFmt), state.lineNumber, sourceStart);
+	} else {
+		std::string msgFmt = StrHelper::UTF16ToUTF8(LocalizationService::Get()
+				.GetLocalizedString(L"ShaderEffectParser_GeneralErrorWithExpected"));
+		state.errorMsg = fmt::format(fmt::runtime(msgFmt),
+			state.lineNumber, sourceStart, DebugFormat(expected));
+	}
+}
 
 static bool RemoveLeadingComment(
 	std::string_view& source,
@@ -72,7 +106,8 @@ static bool RemoveLeadingComment(
 
 				// 提取换行符的后一个字符需检查文件结尾
 				if (i + 1 == source.size()) {
-					state.errorMsg = "块注释未闭合";
+					state.errorMsg = StrHelper::UTF16ToUTF8(LocalizationService::Get()
+						.GetLocalizedString(L"ShaderEffectParser_UnclosedBlockComment"));
 					return false;
 				}
 			}
@@ -144,6 +179,7 @@ static bool GetNextToken(std::string_view& source, ParserState& state, std::stri
 			result = source;
 			return true;
 		} else {
+			SetGeneralParseError(state, source);
 			return false;
 		}
 	}
@@ -152,7 +188,7 @@ static bool GetNextToken(std::string_view& source, ParserState& state, std::stri
 
 	// 必须以字母或下划线开头
 	if (!StrHelper::isalpha(c) && c != '_') {
-		state.errorMsg = fmt::format("Unexpected character \"{}\" in line {}.", c, state.lineNumber);
+		SetGeneralParseError(state, source);
 		return false;
 	}
 
@@ -187,7 +223,7 @@ static bool CheckNextToken(std::string_view& source, ParserState& state, std::st
 	if (token == expectedToken) {
 		return true;
 	} else {
-		state.errorMsg = fmt::format("Unexpected token \"{}\" in line {}.", token, state.lineNumber);
+		SetGeneralParseError(state, source, expectedToken);
 		return false;
 	}
 }
@@ -206,32 +242,25 @@ static bool CheckMetaIndicator(std::string_view& source, ParserState& state, boo
 	return true;
 }
 
-static bool RequireMetaIndicator(std::string_view& source, ParserState& state) noexcept {
-	bool result = false;
-	if (!CheckMetaIndicator(source, state, result)) {
-		return false;
-	}
-
-	if (!result) {
-		state.errorMsg = fmt::format("Unexpected character \"{}\" in line {}.", source[0], state.lineNumber);
-	}
-
-	return result;
-}
-
 static bool RequireLineEnd(std::string_view& source, ParserState& state) noexcept {
 	RemoveLeadingSpaces(source, state);
 
 	if (source.empty() || source[0] == '\n') {
 		return true;
 	} else {
-		state.errorMsg = fmt::format("Unexpected character \"{}\" in line {}.", source[0], state.lineNumber);
+		SetGeneralParseError(state, source, "\n");
 		return false;
 	}
 }
 
 static bool CheckMagic(std::string_view& source, ParserState& state) noexcept {
-	if (!RequireMetaIndicator(source, state)) {
+	bool isMetaIndicator = false;
+	if (!CheckMetaIndicator(source, state, isMetaIndicator)) {
+		return false;
+	}
+
+	if (!isMetaIndicator) {
+		SetGeneralParseError(state, source, META_INDICATOR);
 		return false;
 	}
 
@@ -268,6 +297,7 @@ static bool GetNextStringUntilLineEnd(
 
 	if constexpr (!AllowEmpty) {
 		if (value.empty()) {
+			SetGeneralParseError(state, source);
 			return false;
 		}
 	}
@@ -288,6 +318,7 @@ static bool GetNextNumber(std::string_view& source, ParserState& state, T& value
 
 	const auto& result = std::from_chars(source.data(), source.data() + source.size(), value);
 	if ((int)result.ec) {
+		SetGeneralParseError(state, source);
 		return false;
 	}
 
@@ -371,8 +402,9 @@ static bool ResolveHeaderVersion(
 		return false;
 	}
 
-	// 向后兼容到 5
-	if (version < 5 || version > MAGPIE_FX_VERSION) {
+	if (version < MAGPIE_FX_MIN_SUPPORTED_VERSION || version > MAGPIE_FX_VERSION) {
+		state.errorMsg = StrHelper::UTF16ToUTF8(LocalizationService::Get()
+			.GetLocalizedString(L"ShaderEffectParser_UnsupportedFXVersion"));
 		return false;
 	}
 
@@ -467,7 +499,7 @@ static bool ResolveHeaderScaleFactor(
 
 static bool ResolveHeader(
 	std::string_view source,
-	uint32_t startLineNumer,
+	ParserState& state,
 	EffectInfo& effectInfo
 ) noexcept {
 	static constexpr std::array COMMAND_INFOS = {
@@ -476,11 +508,6 @@ static bool ResolveHeader(
 		CommandInfo{ "USE", ResolveHeaderUse, false },
 		CommandInfo{ "CAPABILITY", ResolveHeaderCapability, false },
 		CommandInfo{ "SCALE_FACTOR", ResolveHeaderScaleFactor, false },
-	};
-
-	ParserState state = {
-		.lineNumber = startLineNumer,
-		.isNewLine = false
 	};
 
 	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &effectInfo)) {
@@ -497,6 +524,7 @@ static bool ResolveHeader(
 
 	// HEADER 只能有 #include
 	if (!source.starts_with("#include")) {
+		SetGeneralParseError(state, source, "\n");
 		return false;
 	}
 
@@ -511,7 +539,12 @@ static bool ResolveHeader(
 		return false;
 	}
 
-	return source.empty();
+	if (!source.empty()) {
+		SetGeneralParseError(state, source, "\n");
+		return false;
+	}
+
+	return true;
 }
 
 static bool ResolveParameterDefault(
@@ -594,7 +627,7 @@ static bool ResolveParameterLabel(
 
 static bool ResolveParameter(
 	std::string_view source,
-	uint32_t startLineNumer,
+	ParserState& state,
 	EffectInfoParameter& effectInfoParameter
 ) noexcept {
 	static constexpr std::array COMMAND_INFOS = {
@@ -603,11 +636,6 @@ static bool ResolveParameter(
 		CommandInfo{ "MAX", ResolveParameterMax, true },
 		CommandInfo{ "STEP", ResolveParameterStep, true },
 		CommandInfo{ "LABEL", ResolveParameterLabel, false }
-	};
-
-	ParserState state = {
-		.lineNumber = startLineNumer,
-		.isNewLine = false
 	};
 
 	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &effectInfoParameter)) {
@@ -626,6 +654,7 @@ static bool ResolveParameter(
 	}
 
 	if (token != "float" && token != "int") {
+		SetGeneralParseError(state, source, "float|int");
 		return false;
 	}
 
@@ -635,7 +664,12 @@ static bool ResolveParameter(
 
 	effectInfoParameter.name = token;
 
-	if (!RemoveLeadingBlanks(source, state) || !source.starts_with(';')) {
+	if (!RemoveLeadingBlanks(source, state)) {
+		return false;
+	}
+
+	if (!source.starts_with(';')) {
+		SetGeneralParseError(state, source, ";");
 		return false;
 	}
 
@@ -774,14 +808,20 @@ std::string ShaderEffectParser::ParseForInfo(
 	// 结束最后一个区块。source 以换行符结尾，因此最后一个区块也以换行符结尾。
 	completeCurrentBlock(BlockType::Header, sourceView.size(), std::numeric_limits<size_t>::max());
 
-	if (!ResolveHeader(headerBlock.source, headerBlock.startLineNumer, effectInfo)) {
+	state.lineNumber = headerBlock.startLineNumer;
+	state.isNewLine = false;
+
+	if (!ResolveHeader(headerBlock.source, state, effectInfo)) {
 		Logger::Get().Error(StrHelper::Concat("ResolveHeader 失败\n\t错误消息: ", state.errorMsg));
 		return std::move(state.errorMsg);
 	}
 
 	effectInfo.params.resize(paramBlocks.size());
 	for (size_t i = 0; i < paramBlocks.size(); ++i) {
-		if (!ResolveParameter(paramBlocks[i].source, paramBlocks[i].startLineNumer, effectInfo.params[i])) {
+		state.lineNumber = paramBlocks[i].startLineNumer;
+		state.isNewLine = false;
+
+		if (!ResolveParameter(paramBlocks[i].source, state, effectInfo.params[i])) {
 			Logger::Get().Error(fmt::format("ResolveParameter#{} 失败\n\t错误消息: ", state.errorMsg));
 			return std::move(state.errorMsg);
 		}

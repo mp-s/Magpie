@@ -30,10 +30,9 @@ public:
 private:
 	LocalizationService() = default;
 
-	void _Language(const wchar_t* tag);
+	void _SetLanguage(const wchar_t* tag);
 
 	const wchar_t* _language = nullptr;
-	winrt::ResourceLoader _resourceLoader{ nullptr };
 };
 
 }

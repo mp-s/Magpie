@@ -178,10 +178,9 @@ static HRESULT CALLBACK TaskDialogCallback(
 }
 
 static void ShowErrorMessage(const wchar_t* mainInstruction, const wchar_t* content) noexcept {
-	ResourceLoader resourceLoader =
-		ResourceLoader::GetForCurrentView(CommonSharedConstants::APP_RESOURCE_MAP_ID);
-	const hstring errorStr = resourceLoader.GetString(L"AppSettings_Dialog_Error");
-	const hstring exitStr = resourceLoader.GetString(L"AppSettings_Dialog_Exit");
+	LocalizationService& ls = LocalizationService::Get();
+	const hstring errorStr = ls.GetLocalizedString(L"AppSettings_Dialog_Error");
+	const hstring exitStr = ls.GetLocalizedString(L"AppSettings_Dialog_Exit");
 
 	TASKDIALOG_BUTTON button{ IDCANCEL, exitStr.c_str() };
 	TASKDIALOGCONFIG tdc{
@@ -223,17 +222,18 @@ bool AppSettings::Initialize() noexcept {
 		return true;
 	}
 
-	// 此时 ResourceLoader 使用“首选语言”
+	// 此时 LocalizationService 使用“首选语言”
 	
 	std::string configText;
 	if (!Win32Helper::ReadTextFile(existingConfigPath.c_str(), configText)) {
 		logger.Error("读取配置文件失败");
-		ResourceLoader resourceLoader =
-			ResourceLoader::GetForCurrentView(CommonSharedConstants::APP_RESOURCE_MAP_ID);
-		hstring title = resourceLoader.GetString(L"AppSettings_ErrorDialog_ReadFailed");
-		hstring content = resourceLoader.GetString(L"AppSettings_ErrorDialog_ConfigLocation");
+
+		LocalizationService& ls = LocalizationService::Get();
+		hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ReadFailed");
+		hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
 			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
+
 		return false;
 	}
 
@@ -249,23 +249,25 @@ bool AppSettings::Initialize() noexcept {
 	doc.ParseInsitu(configText.data());
 	if (doc.HasParseError()) {
 		Logger::Get().Error(fmt::format("解析配置失败\n\t错误码: {}", (int)doc.GetParseError()));
-		ResourceLoader resourceLoader =
-			ResourceLoader::GetForCurrentView(CommonSharedConstants::APP_RESOURCE_MAP_ID);
-		hstring title = resourceLoader.GetString(L"AppSettings_ErrorDialog_NotValidJson");
-		hstring content = resourceLoader.GetString(L"AppSettings_ErrorDialog_ConfigLocation");
+
+		LocalizationService& ls = LocalizationService::Get();
+		hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_NotValidJson");
+		hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
 			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
+
 		return false;
 	}
 
 	if (!doc.IsObject()) {
 		Logger::Get().Error("配置文件根元素不是 Object");
-		ResourceLoader resourceLoader =
-			ResourceLoader::GetForCurrentView(CommonSharedConstants::APP_RESOURCE_MAP_ID);
-		hstring title = resourceLoader.GetString(L"AppSettings_ErrorDialog_ParseFailed");
-		hstring content = resourceLoader.GetString(L"AppSettings_ErrorDialog_ConfigLocation");
+
+		LocalizationService& ls = LocalizationService::Get();
+		hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ParseFailed");
+		hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
 			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
+
 		return false;
 	}
 

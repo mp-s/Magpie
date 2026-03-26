@@ -283,15 +283,13 @@ void RootPage::NewProfileNameContextFlyout_Opening(IInspectable const&, IInspect
 		return;
 	}
 
-	// 惰性初始化
-	ResourceLoader resourceLoader =
-		ResourceLoader::GetForCurrentView(CommonSharedConstants::APP_RESOURCE_MAP_ID);
+	LocalizationService& ls = LocalizationService::Get();
 
 	// 填入进程名
 	MenuFlyoutItem item1;
 	FontIcon icon1;
 	icon1.Glyph(L"\xE9F5");
-	item1.Text(resourceLoader.GetString(L"Root_NewProfileFlyout_NameContextFlyout_ProcessName"));
+	item1.Text(ls.GetLocalizedString(L"Root_NewProfileFlyout_NameContextFlyout_ProcessName"));
 	item1.Icon(icon1);
 	RoutedEventHandler clickHandler([this](IInspectable const&, IInspectable const&) {
 		_UpdateNewProfileNameTextBox(false);
@@ -304,7 +302,7 @@ void RootPage::NewProfileNameContextFlyout_Opening(IInspectable const&, IInspect
 	MenuFlyoutItem item2;
 	FontIcon icon2;
 	icon2.Glyph(L"\xECAA");
-	item2.Text(resourceLoader.GetString(L"Root_NewProfileFlyout_NameContextFlyout_AppName"));
+	item2.Text(ls.GetLocalizedString(L"Root_NewProfileFlyout_NameContextFlyout_AppName"));
 	item2.Icon(icon2);
 	item2.Click(clickHandler);
 	item2.Tag(box_value(2));
@@ -321,7 +319,7 @@ void RootPage::NewProfileNameContextFlyout_Opening(IInspectable const&, IInspect
 	FontIcon icon3;
 	icon3.Glyph(L"\xE737");
 	item3.Icon(icon3);
-	item3.Text(resourceLoader.GetString(L"Root_NewProfileFlyout_NameContextFlyout_WindowTitle"));
+	item3.Text(ls.GetLocalizedString(L"Root_NewProfileFlyout_NameContextFlyout_WindowTitle"));
 	item3.Click([this](IInspectable const&, IInspectable const&) {
 		_UpdateNewProfileNameTextBox(true);
 	});

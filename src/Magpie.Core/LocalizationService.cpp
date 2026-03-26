@@ -57,16 +57,13 @@ void LocalizationService::EarlyInitialize() {
 		}
 	}
 
-	_Language(bestLanguage);
+	_SetLanguage(bestLanguage);
 }
 
 void LocalizationService::Initialize(int language) {
 	if (language >= 0) {
-		_Language(SUPPORTED_LANGUAGES[language]);
+		_SetLanguage(SUPPORTED_LANGUAGES[language]);
 	}
-
-	_resourceLoader = winrt::ResourceLoader::GetForViewIndependentUse(
-		CommonSharedConstants::APP_RESOURCE_MAP_ID);
 }
 
 std::span<const wchar_t*> LocalizationService::GetSupportedLanguages() noexcept {
@@ -74,10 +71,14 @@ std::span<const wchar_t*> LocalizationService::GetSupportedLanguages() noexcept 
 }
 
 winrt::hstring LocalizationService::GetLocalizedString(std::wstring_view resName) const noexcept {
-	return _resourceLoader.GetString(resName);
+	assert(_language);
+	// 不确定 ResourceLoader 是否线程安全，为每个线程创建独立的实例
+	thread_local static winrt::ResourceLoader resourceLoader =
+		winrt::ResourceLoader::GetForViewIndependentUse(CommonSharedConstants::APP_RESOURCE_MAP_ID);
+	return resourceLoader.GetString(resName);
 }
 
-void LocalizationService::_Language(const wchar_t* tag) {
+void LocalizationService::_SetLanguage(const wchar_t* tag) {
 	_language = tag;
 	winrt::ResourceContext::SetGlobalQualifierValue(L"Language", tag);
 }
