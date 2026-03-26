@@ -3,23 +3,23 @@
 namespace Magpie {
 
 struct RectHelper {
-	static bool IsOverlap(const Rect& r1, const Rect& r2) noexcept {
+	static bool IsOverlap(const RectU& r1, const RectU& r2) noexcept {
 		return r1.right > r2.left && r1.bottom > r2.top && r1.left < r2.right && r1.top < r2.bottom;
 	}
 
-	static bool Contains(const Rect& r1, const Rect& r2) noexcept {
+	static bool Contains(const RectU& r1, const RectU& r2) noexcept {
 		return r1.left <= r2.left && r1.top <= r2.top && r1.right >= r2.right && r1.bottom >= r2.bottom;
 	}
 
-	static bool Contains(const Rect& rect, Point p) noexcept {
+	static bool Contains(const RectU& rect, PointU p) noexcept {
 		return p.x >= rect.left && p.x < rect.right && p.y >= rect.top && p.y < rect.bottom;
 	}
 
-	static bool IsEmpty(const Rect& rect) noexcept {
+	static bool IsEmpty(const RectU& rect) noexcept {
 		return rect.left == rect.right || rect.top == rect.bottom;
 	}
 
-	static bool Intersect(Rect& result, const Rect& r1, const Rect& r2) noexcept {
+	static bool Intersect(RectU& result, const RectU& r1, const RectU& r2) noexcept {
 		// 计算重叠部分
 		result.left = std::max(r1.left, r2.left);
 		result.top = std::max(r1.top, r2.top);
@@ -30,12 +30,12 @@ struct RectHelper {
 		return result.left < result.right && result.top < result.bottom;
 	}
 
-	static Rect Union(const Rect& r1, const Rect& r2) noexcept {
-		return Rect{ std::min(r1.left, r2.left), std::min(r1.top, r2.top),
+	static RectU Union(const RectU& r1, const RectU& r2) noexcept {
+		return RectU{ std::min(r1.left, r2.left), std::min(r1.top, r2.top),
 			std::max(r1.right, r2.right), std::max(r1.bottom, r2.bottom) };
 	}
 
-	static uint32_t CalcArea(const Rect& rect) noexcept {
+	static uint32_t CalcArea(const RectU& rect) noexcept {
 		assert(rect.right >= rect.left && rect.bottom >= rect.top);
 		return (rect.right - rect.left) * (rect.bottom - rect.top);
 	}

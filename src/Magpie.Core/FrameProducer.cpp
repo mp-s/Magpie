@@ -44,8 +44,8 @@ void FrameProducer::InitializeAsync(
 	const ColorInfo& colorInfo,
 	HMONITOR hMonSrc,
 	const RECT& srcRect,
-	Size rendererSize,
-	Size& outputSize,
+	SizeU rendererSize,
+	SizeU& outputSize,
 	SimpleTask<bool>& task
 ) noexcept {
 	_d3d12Context.CopyDevice(d3d12Context);
@@ -94,8 +94,8 @@ HRESULT FrameProducer::ConsumerEndFrame(
 }
 
 void FrameProducer::OnResizedAsync(
-	Size rendererSize,
-	Size& outputSize,
+	SizeU rendererSize,
+	SizeU& outputSize,
 	SimpleTask<HRESULT>& task
 ) noexcept {
 	_dispatcher.TryEnqueue([&, rendererSize] {
@@ -220,8 +220,8 @@ void FrameProducer::_ProducerThreadProc(
 	const ColorInfo& colorInfo,
 	HMONITOR hMonSrc,
 	RECT srcRect,
-	Size rendererSize,
-	Size& outputSize,
+	SizeU rendererSize,
+	SizeU& outputSize,
 	SimpleTask<bool>& initializeTask
 ) noexcept {
 #ifdef _DEBUG
@@ -319,8 +319,8 @@ bool FrameProducer::_Initialize(
 	const ColorInfo& colorInfo,
 	HMONITOR hMonSrc,
 	const RECT& srcRect,
-	Size rendererSize,
-	Size& outputSize
+	SizeU rendererSize,
+	SizeU& outputSize
 ) noexcept {
 	winrt::init_apartment(winrt::apartment_type::single_threaded);
 
@@ -365,7 +365,7 @@ bool FrameProducer::_Initialize(
 	}
 
 	{
-		const Size inputSize = {
+		const SizeU inputSize = {
 			uint32_t(srcRect.right - srcRect.left),
 			uint32_t(srcRect.bottom - srcRect.top)
 		};

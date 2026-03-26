@@ -103,10 +103,10 @@ private:
 
 	struct _CursorFrame {
 		_CursorType type;
-		Point hotspot;
+		PointU hotspot;
 
 		winrt::com_ptr<ID3D12Resource> texture;
-		Size resSize;
+		SizeU resSize;
 		ByteBuffer resTextureData;
 		// 这两个资源使用完毕后在 _ClearRetiredResources 中释放
 		winrt::com_ptr<ID3D12Resource> uploadBuffer;
@@ -119,7 +119,7 @@ private:
 	};
 
 	struct _CursorInfo {
-		Size size;
+		SizeU size;
 		SmallVector<_CursorFrame, 1> frames;
 		// 序列表 (帧索引值数组)，使多帧可以复用同一个 _CursorFrame。为空表示顺序播放
 		SmallVector<std::pair<uint32_t, std::chrono::nanoseconds>, 0> frameSequence;
@@ -144,8 +144,8 @@ private:
 		POINT cursorPos
 	) noexcept;
 
-	Size _CalcCursorSize(
-		Size cursorBmpSize,
+	SizeU _CalcCursorSize(
+		SizeU cursorBmpSize,
 		uint32_t cursorDpi,
 		uint32_t monitorDpi,
 		bool isCursorDpiAware
@@ -190,7 +190,7 @@ private:
 	void _OnCursorsRegChanged(wil::RegistryChangeKind) noexcept;
 
 	D3D12Context* _d3d12Context = nullptr;
-	Size _srcSize{};
+	SizeU _srcSize{};
 	RECT _rendererRect{};
 	RECT _destRect{};
 	ColorInfo _colorInfo;
@@ -222,7 +222,7 @@ private:
 
 	// 用于从渲染目标复制光标下区域
 	winrt::com_ptr<ID3D12Resource> _tempOriginTexture;
-	Size _tempOriginTextureSize{};
+	SizeU _tempOriginTextureSize{};
 	uint32_t _tempOriginTextureSrvOffset = std::numeric_limits<uint32_t>::max();
 	
 	struct _RetiredTempOriginTexture {

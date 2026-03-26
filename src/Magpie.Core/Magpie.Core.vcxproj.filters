@@ -33,9 +33,6 @@
     </ClInclude>
     <ClInclude Include="ScalingWindow.h" />
     <ClInclude Include="CursorManager.h" />
-    <ClInclude Include="include\EffectDesc.h">
-      <Filter>Include</Filter>
-    </ClInclude>
     <ClInclude Include="include\ScalingOptions.h">
       <Filter>Include</Filter>
     </ClInclude>
@@ -106,9 +103,6 @@
     <ClInclude Include="include\EffectInfo.h">
       <Filter>Include</Filter>
     </ClInclude>
-    <ClInclude Include="include\ShaderEffectParser.h">
-      <Filter>Include</Filter>
-    </ClInclude>
     <ClInclude Include="ShaderEffectCompilerService.h">
       <Filter>Services</Filter>
     </ClInclude>
@@ -137,6 +131,7 @@
     <ClInclude Include="include\LocalizationService.h">
       <Filter>Include</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderEffectParser.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />

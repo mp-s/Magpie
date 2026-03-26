@@ -21,10 +21,12 @@ public:
 
 	virtual bool Bind(
 		ID3D12Resource* inputResource,
-		Size inputSize,
+		SizeU inputSize,
 		const ColorInfo& colorInfo,
-		Size& outputSize
+		SizeU& outputSize
 	) noexcept = 0;
+
+	virtual bool IsReady() noexcept = 0;
 
 	virtual HRESULT Draw(
 		ComputeContext& computeContext,

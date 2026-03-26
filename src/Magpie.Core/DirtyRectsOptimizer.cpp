@@ -5,20 +5,20 @@
 
 namespace Magpie {
 
-static bool IsCornerInRect(Point p, const Rect& r) noexcept {
+static bool IsCornerInRect(PointU p, const RectU& r) noexcept {
 	return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
 }
 
-static bool OptimizeDirtyRectPair(Rect& rect1, Rect& rect2, bool reversed = false) noexcept {
+static bool OptimizeDirtyRectPair(RectU& rect1, RectU& rect2, bool reversed = false) noexcept {
 	if (RectHelper::IsEmpty(rect1) || RectHelper::IsEmpty(rect2)) {
 		return false;
 	}
 
 	// 计算 rect2 有几个角在 rect1 内
-	bool lt = IsCornerInRect(Point{ rect2.left, rect2.top }, rect1);
-	bool rt = IsCornerInRect(Point{ rect2.right, rect2.top }, rect1);
-	bool rb = IsCornerInRect(Point{ rect2.right, rect2.bottom }, rect1);
-	bool lb = IsCornerInRect(Point{ rect2.left, rect2.bottom }, rect1);
+	bool lt = IsCornerInRect(PointU{ rect2.left, rect2.top }, rect1);
+	bool rt = IsCornerInRect(PointU{ rect2.right, rect2.top }, rect1);
+	bool rb = IsCornerInRect(PointU{ rect2.right, rect2.bottom }, rect1);
+	bool lb = IsCornerInRect(PointU{ rect2.left, rect2.bottom }, rect1);
 	uint32_t count = (uint32_t)lt + (uint32_t)rt + (uint32_t)rb + (uint32_t)lb;
 
 	if (count <= 1) {
@@ -124,7 +124,7 @@ static bool OptimizeDirtyRectPair(Rect& rect1, Rect& rect2, bool reversed = fals
 	return false;
 }
 
-static void BasicOptimize(SmallVectorImpl<Rect>& dirtyRects) noexcept {
+static void BasicOptimize(SmallVectorImpl<RectU>& dirtyRects) noexcept {
 	// 持续循环直到不再能优化
 	while (true) {
 		const uint32_t count = (uint32_t)dirtyRects.size();
@@ -145,7 +145,7 @@ static void BasicOptimize(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 
 		// 从后向前删除空矩形
 		for (int i = int(count - 1); i >= 0; --i) {
-			const Rect& rect = dirtyRects[i];
+			const RectU& rect = dirtyRects[i];
 			if (RectHelper::IsEmpty(rect)) {
 				dirtyRects.erase(dirtyRects.begin() + i);
 			}
@@ -153,9 +153,9 @@ static void BasicOptimize(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 	}
 }
 
-static uint32_t CalcTotalPixels(const SmallVectorImpl<Rect>& rects) noexcept {
+static uint32_t CalcTotalPixels(const SmallVectorImpl<RectU>& rects) noexcept {
 	uint32_t result = 0;
-	for (const Rect& rect : rects) {
+	for (const RectU& rect : rects) {
 		result += RectHelper::CalcArea(rect);
 	}
 	return result;
@@ -163,16 +163,19 @@ static uint32_t CalcTotalPixels(const SmallVectorImpl<Rect>& rects) noexcept {
 
 #ifdef MP_DEBUG_INFO
 // 验证优化算法的正确性
-static void ValidateOptimize(const SmallVectorImpl<Rect>& originRects, const SmallVectorImpl<Rect>& newRects) noexcept {
+static void ValidateOptimize(
+	const SmallVectorImpl<RectU>& originRects,
+	const SmallVectorImpl<RectU>& newRects
+) noexcept {
 	if (originRects.empty()) {
 		return;
 	}
 
 	std::vector<bool> pixels;
-	for (const Rect& originRect : originRects) {
+	for (const RectU& originRect : originRects) {
 		// 作为优化先检查有没有被优化后的某个矩形包含
 		bool contained = false;
-		for (const Rect& newRect : newRects) {
+		for (const RectU& newRect : newRects) {
 			if (RectHelper::Contains(newRect, originRect)) {
 				contained = true;
 				break;
@@ -186,7 +189,7 @@ static void ValidateOptimize(const SmallVectorImpl<Rect>& originRects, const Sma
 		const uint32_t originWidth = originRect.right - originRect.left;
 		pixels.assign(size_t((originRect.bottom - originRect.top) * originWidth), false);
 
-		for (Rect newRect : newRects) {
+		for (RectU newRect : newRects) {
 			if (!RectHelper::Intersect(newRect, newRect, originRect)) {
 				continue;
 			}
@@ -201,7 +204,7 @@ static void ValidateOptimize(const SmallVectorImpl<Rect>& originRects, const Sma
 		if (std::find(pixels.begin(), pixels.end(), false) != pixels.end()) {
 			OutputDebugString(L"优化脏矩形算法错误！\n");
 			// 打印脏矩形供调试
-			for (const Rect& rect : originRects) {
+			for (const RectU& rect : originRects) {
 				OutputDebugString(fmt::format(L"{},{},{},{}\n",
 					rect.left, rect.top, rect.right, rect.bottom).c_str());
 			}
@@ -211,7 +214,7 @@ static void ValidateOptimize(const SmallVectorImpl<Rect>& originRects, const Sma
 }
 #endif
 
-void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
+void DirtyRectsOptimizer::Execute(SmallVectorImpl<RectU>& dirtyRects) noexcept {
 	uint32_t rectCount = (uint32_t)dirtyRects.size();
 	if (rectCount <= 1) {
 		return;
@@ -219,7 +222,7 @@ void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 
 #ifdef MP_DEBUG_INFO
 	auto se = wil::scope_exit(std::bind_front(ValidateOptimize, DEBUG_INFO.validateDirtyRectsOptimizer ?
-		SmallVector<Rect>(dirtyRects.begin(), dirtyRects.end()) : SmallVector<Rect>(), std::ref(dirtyRects)));
+		SmallVector<RectU>(dirtyRects.begin(), dirtyRects.end()) : SmallVector<RectU>(), std::ref(dirtyRects)));
 #endif
 
 	if (rectCount <= MAX_CAPTURE_DIRTY_RECT_COUNT * 4) {
@@ -230,7 +233,7 @@ void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 	// 深度优化的复杂度为 n^4，输入矩形数量太多时应削减。花太多时间优化脏矩形是得不偿失的
 	constexpr uint32_t DEEP_OPTIMIZE_LIMIT = MAX_CAPTURE_DIRTY_RECT_COUNT * 2;
 	if (rectCount > DEEP_OPTIMIZE_LIMIT) {
-		Rect& lastRect = dirtyRects[DEEP_OPTIMIZE_LIMIT - 1];
+		RectU& lastRect = dirtyRects[DEEP_OPTIMIZE_LIMIT - 1];
 		for (auto it = dirtyRects.begin() + DEEP_OPTIMIZE_LIMIT; it != dirtyRects.end(); ++it) {
 			lastRect = RectHelper::Union(lastRect, *it);
 		}
@@ -255,15 +258,15 @@ void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 		// 遍历所有的两两合并找出总像素数最少的
 		for (uint32_t i = 0; i < rectCount; ++i) {
 			for (uint32_t j = i + 1; j < rectCount; ++j) {
-				const Rect& rect1 = dirtyRects[i];
-				const Rect& rect2 = dirtyRects[j];
+				const RectU& rect1 = dirtyRects[i];
+				const RectU& rect2 = dirtyRects[j];
 
 				// 两个矩形必须相交才有优化的可能，但脏矩形数量过多时需要强制合并
 				if (!RectHelper::IsOverlap(rect1, rect2) && rectCount <= MAX_CAPTURE_DIRTY_RECT_COUNT) {
 					continue;
 				}
 
-				Rect unionedRect = RectHelper::Union(rect1, rect2);
+				RectU unionedRect = RectHelper::Union(rect1, rect2);
 				uint32_t newTotalPixels = 0;
 				uint32_t newRectCount = 0;
 				bool optimized = false;
@@ -274,7 +277,7 @@ void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 						continue;
 					}
 
-					Rect curRect = dirtyRects[k];
+					RectU curRect = dirtyRects[k];
 					if (OptimizeDirtyRectPair(curRect, unionedRect)) {
 						optimized = true;
 					}
@@ -326,12 +329,12 @@ void DirtyRectsOptimizer::Execute(SmallVectorImpl<Rect>& dirtyRects) noexcept {
 
 #ifdef _DEBUG
 static Ignore _ = [] {
-	auto rectComp = [](const Rect& l, const Rect& r) {
+	auto rectComp = [](const RectU& l, const RectU& r) {
 		return std::tuple(l.left, l.top, l.right, l.bottom) <
 			std::tuple(r.left, r.top, r.right, r.bottom);
 	};
 
-	SmallVector<Rect, 0> dirtyRects;
+	SmallVector<RectU, 0> dirtyRects;
 	dirtyRects.reserve(16);
 
 	dirtyRects.emplace_back(0, 0, 2, 2);
@@ -342,15 +345,15 @@ static Ignore _ = [] {
 	BasicOptimize(dirtyRects);
 	std::sort(dirtyRects.begin(), dirtyRects.end(), rectComp);
 	assert(dirtyRects.size() == 2);
-	assert((dirtyRects[0] == Rect{ 0, 0, 2, 2 }));
-	assert((dirtyRects[1] == Rect{ 1, 1, 4, 4 }));
+	assert((dirtyRects[0] == RectU{ 0, 0, 2, 2 }));
+	assert((dirtyRects[1] == RectU{ 1, 1, 4, 4 }));
 	
 	dirtyRects.clear();
 	dirtyRects.emplace_back(0, 0, 1, 1);
 	dirtyRects.emplace_back(0, 0, 2, 2);
 	BasicOptimize(dirtyRects);
 	assert(dirtyRects.size() == 1);
-	assert((dirtyRects[0] == Rect{ 0, 0, 2, 2 }));
+	assert((dirtyRects[0] == RectU{ 0, 0, 2, 2 }));
 	
 	return Ignore();
 }();

@@ -13,7 +13,7 @@ public:
 
 	bool Initialize(
 		D3D12Context& d3d12Context,
-		Size size,
+		SizeU size,
 		const ColorInfo& colorInfo
 	) noexcept;
 
@@ -42,7 +42,7 @@ public:
 
 	uint64_t GetLatestFrameNumber() const noexcept;
 
-	HRESULT OnResized(Size size) noexcept;
+	HRESULT OnResized(SizeU size) noexcept;
 
 	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
@@ -72,7 +72,7 @@ private:
 	uint64_t _curConsumerFenceValue = 0;
 	winrt::com_ptr<ID3D12Fence1> _producerFence;
 
-	Size _size{};
+	SizeU _size{};
 	bool _isScRGB = false;
 };
 

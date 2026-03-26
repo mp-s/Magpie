@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ShaderEffectDrawer.h"
+#include "EffectsService.h"
 
 namespace Magpie {
 
@@ -12,10 +13,14 @@ bool ShaderEffectDrawer::Initialize(
 
 bool ShaderEffectDrawer::Bind(
 	ID3D12Resource* /*inputResource*/,
-	Size /*inputSize*/,
+	SizeU /*inputSize*/,
 	const ColorInfo& /*colorInfo*/,
-	Size& /*outputSize*/
+	SizeU& /*outputSize*/
 ) noexcept {
+	return false;
+}
+
+bool ShaderEffectDrawer::IsReady() noexcept {
 	return false;
 }
 

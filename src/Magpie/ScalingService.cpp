@@ -331,7 +331,7 @@ ScalingError ScalingService::_StartScaleImpl(HWND hWnd, const Profile& profile, 
 		return ScalingError::InvalidScalingMode;
 	} else {
 		for (const EffectItem& effect : effects) {
-			if (!EffectsService::Get().GetEffect(effect.name)) {
+			if (!EffectsService::Get().GetEffect(StrHelper::UTF16ToUTF8(effect.name))) {
 				// 存在无法解析的效果
 				return ScalingError::InvalidScalingMode;
 			}

@@ -55,13 +55,6 @@ enum class OutputAlignment {
 	COUNT
 };
 
-enum class EffectType {
-	Shader,
-	// 下面的类型未实现
-	ONNX,
-	Extension
-};
-
 enum class ScalingType {
 	Normal,		// Scale 表示缩放倍数
 	Fit,		// Scale 表示相对于屏幕能容纳的最大等比缩放的比例
@@ -70,7 +63,6 @@ enum class ScalingType {
 };
 
 struct EffectOption {
-	EffectType type;
 	std::string name;
 	phmap::flat_hash_map<std::string, float> parameters;
 	ScalingType scalingType = ScalingType::Normal;

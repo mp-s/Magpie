@@ -27,7 +27,7 @@ bool DuplicateFrameChecker::Initialize(
 	ID3D11Device5* d3d11Device,
 	ID3D11DeviceContext4* d3d11DC,
 	const ColorInfo& colorInfo,
-	Size frameSize,
+	SizeU frameSize,
 	uint32_t captureFrameCount,
 	bool disableBoundsChecking
 ) noexcept {
@@ -138,7 +138,7 @@ bool DuplicateFrameChecker::Initialize(
 HRESULT DuplicateFrameChecker::CheckFrame(
 	ID3D11Texture2D* frameResource,
 	uint32_t frameIdx,
-	SmallVectorImpl<Rect>& dirtyRects
+	SmallVectorImpl<RectU>& dirtyRects
 ) noexcept {
 	assert(!dirtyRects.empty() && dirtyRects.size() <= MAX_CAPTURE_DIRTY_RECT_COUNT);
 
@@ -150,7 +150,7 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 
 		if (_isBoundsCheckingDisabled) {
 			// 确保捕获帧右下两边没有多余像素
-			for (const Rect& rect : dirtyRects) {
+			for (const RectU& rect : dirtyRects) {
 				assert(rect.right == desc.Width && rect.bottom == desc.Height);
 			}
 		}
@@ -212,7 +212,7 @@ HRESULT DuplicateFrameChecker::CheckFrame(
 #ifdef MP_DEBUG_INFO
 		if (DEBUG_INFO.enableStatisticsForDynamicDuplicateFrameDetection) {
 			// 预测此帧不会重复，验证是否正确
-			SmallVector<Rect> tempRects(dirtyRects.begin(), dirtyRects.end());
+			SmallVector<RectU> tempRects(dirtyRects.begin(), dirtyRects.end());
 			HRESULT hr = _CheckDirtyRects(frameIdx, tempRects);
 			if (FAILED(hr)) {
 				Logger::Get().ComError("_CheckDirtyRects 失败", hr);
@@ -240,7 +240,10 @@ void DuplicateFrameChecker::OnCaptureStopped() noexcept {
 	std::fill(_frameSrvs.begin(), _frameSrvs.end(), nullptr);
 }
 
-HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept {
+HRESULT DuplicateFrameChecker::_CheckDirtyRects(
+	uint32_t newFrameIdx,
+	SmallVectorImpl<RectU>& dirtyRects
+) noexcept {
 	assert(dirtyRects.size() <= MAX_CAPTURE_DIRTY_RECT_COUNT);
 
 	{
@@ -261,7 +264,7 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVecto
 	++_curTargetValue;
 
 	for (uint32_t i = 0; i < dirtyRectCount; ++i) {
-		const Rect& dirtyRect = dirtyRects[i];
+		const RectU& dirtyRect = dirtyRects[i];
 
 		alignas(32) DirectXHelper::Constant32 constants[] = {
 			{.uintVal = dirtyRect.left},
@@ -287,7 +290,7 @@ HRESULT DuplicateFrameChecker::_CheckDirtyRects(uint32_t newFrameIdx, SmallVecto
 			_deviceContext->CSSetConstantBuffers1(0, 1, &buffer, &firstConstant, &numConstants);
 		}
 		
-		const Rect& dirtyRect = dirtyRects[i];
+		const RectU& dirtyRect = dirtyRects[i];
 		_deviceContext->Dispatch(
 			(dirtyRect.right - dirtyRect.left + DUP_FRAME_DISPATCH_BLOCK_SIZE - 1) / DUP_FRAME_DISPATCH_BLOCK_SIZE,
 			(dirtyRect.bottom - dirtyRect.top + DUP_FRAME_DISPATCH_BLOCK_SIZE - 1) / DUP_FRAME_DISPATCH_BLOCK_SIZE,

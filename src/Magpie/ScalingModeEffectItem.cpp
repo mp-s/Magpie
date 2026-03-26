@@ -26,7 +26,7 @@ ScalingModeEffectItem::ScalingModeEffectItem(uint32_t scalingModeIdx, uint32_t e
 {
 	EffectItem& data = _Data();
 
-	_effectInfo = EffectsService::Get().GetEffect(data.name);
+	_effectInfo = EffectsService::Get().GetEffect(StrHelper::UTF16ToUTF8(data.name));
 
 	if (_effectInfo) {
 		_name = EffectHelper::GetDisplayName(data.name);

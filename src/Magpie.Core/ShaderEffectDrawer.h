@@ -14,10 +14,12 @@ public:
 
 	bool Bind(
 		ID3D12Resource* inputResource,
-		Size inputSize,
+		SizeU inputSize,
 		const ColorInfo& colorInfo,
-		Size& outputSize
+		SizeU& outputSize
 	) noexcept override;
+
+	bool IsReady() noexcept override;
 
 	HRESULT Draw(
 		ComputeContext& computeContext,

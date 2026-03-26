@@ -1,6 +1,7 @@
 #pragma once
-#include <parallel_hashmap/phmap.h>
 #include "EffectInfo.h"
+#include "../ShaderEffectDesc.h"
+#include <parallel_hashmap/phmap.h>
 
 namespace Magpie {
 
@@ -20,8 +21,17 @@ public:
 
 	const std::vector<EffectInfo>& GetEffects() noexcept;
 
-	// 由于 WinUI 使用 UTF-16，这里也以 UTF-16 作为参数以减少编码转换
-	const EffectInfo* GetEffect(std::wstring_view name) noexcept;
+	const EffectInfo* GetEffect(std::string_view name) noexcept;
+
+	std::string SubmitCompileShaderEffectTask(
+		std::string_view effectName,
+		const phmap::flat_hash_map<std::string, float>* inlineParams,
+		D3D_SHADER_MODEL shaderModel,
+		bool isFP16Enabled,
+		bool isAdvancedColorEnabled
+	) noexcept;
+
+	bool GetTaskResult(std::string taskKey, const ShaderEffectDesc* &effectDesc) noexcept;
 
 private:
 	EffectsService() = default;
@@ -29,7 +39,15 @@ private:
 	void _WaitForInitialize() noexcept;
 
 	std::vector<EffectInfo> _effects;
-	phmap::flat_hash_map<std::wstring, uint32_t> _effectsMap;
+	phmap::flat_hash_map<std::string_view, uint32_t> _effectsMap;
+
+	struct _ShaderEffectMemCacheItem {
+		ShaderEffectDesc effectDesc;
+		// UINT_MAX 表示尚未编译完成
+		uint32_t lastAccess = std::numeric_limits<uint32_t>::max();
+	};
+	phmap::flat_hash_map<std::string, _ShaderEffectMemCacheItem> _shaderEffectCache;
+	
 	std::atomic<bool> _initialized = false;
 	bool _initializedCache = false;
 };

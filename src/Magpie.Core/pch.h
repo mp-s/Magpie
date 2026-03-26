@@ -76,41 +76,6 @@ enum class ComponentState {
 	Error
 };
 
-struct Size {
-	uint32_t width;
-	uint32_t height;
-
-	bool operator==(const Size&) const noexcept = default;
-
-	explicit operator SIZE() const noexcept {
-		return { (LONG)width,(LONG)height };
-	}
-};
-
-struct Point {
-	uint32_t x;
-	uint32_t y;
-
-	bool operator==(const Point&) const noexcept = default;
-
-	explicit operator POINT() const noexcept {
-		return { (LONG)x,(LONG)y };
-	}
-};
-
-struct Rect {
-	uint32_t left;
-	uint32_t top;
-	uint32_t right;
-	uint32_t bottom;
-
-	bool operator==(const Rect& other) const = default;
-
-	explicit operator RECT() const noexcept {
-		return { (LONG)left,(LONG)top,(LONG)right,(LONG)bottom };
-	}
-};
-
 struct ColorInfo {
 	winrt::AdvancedColorKind kind = winrt::AdvancedColorKind::StandardDynamicRange;
 	// HDR 模式下最大亮度，1.0 表示 80nit

@@ -21,8 +21,8 @@ void CatmullRomDrawer::Initialize(D3D12Context& d3d12Context) noexcept {
 
 HRESULT CatmullRomDrawer::Draw(
 	ComputeContext& computeContext,
-	Size inputSize,
-	Size outputSize,
+	SizeU inputSize,
+	SizeU outputSize,
 	uint32_t inputSrvOffset,
 	uint32_t outputUavOffset,
 	bool outputSrgb

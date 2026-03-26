@@ -34,7 +34,7 @@ public:
 		bool* waitingForFirstFrame = nullptr
 	) noexcept;
 
-	const Rect& GetOutputRect() const noexcept {
+	const RectU& GetOutputRect() const noexcept {
 		return _outputRect;
 	}
 
@@ -73,7 +73,7 @@ private:
 
 	HRESULT _RenderImpl(bool waitForGpu = false) noexcept;
 
-	void _UpdateOutputRect(Size outputSize) noexcept;
+	void _UpdateOutputRect(SizeU outputSize) noexcept;
 
 	bool _CheckResult(bool success, std::string_view errorMsg) noexcept;
 
@@ -87,7 +87,7 @@ private:
 	winrt::DisplayInformation _displayInfo{ nullptr };
 	winrt::DisplayInformation::AdvancedColorInfoChanged_revoker _acInfoChangedRevoker;
 
-	Rect _outputRect{};
+	RectU _outputRect{};
 
 	// 由多个 D3D12Context 共享
 	DescriptorHeap _csuDescriptorHeap;

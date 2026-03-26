@@ -1,6 +1,5 @@
 #pragma once
 #include "SmallVector.h"
-#include <variant>
 
 namespace Magpie {
 
@@ -39,7 +38,6 @@ enum class EffectSamplerAddressType {
 };
 
 struct ShaderEffectSamplerDesc {
-	std::string name;
 	EffectSamplerFilterType filterType = EffectSamplerFilterType::Point;
 	EffectSamplerAddressType addressType = EffectSamplerAddressType::Clamp;
 };
@@ -51,41 +49,25 @@ enum class ShaderEffectPassFlags {
 DEFINE_ENUM_FLAG_OPERATORS(ShaderEffectPassFlags)
 
 struct ShaderEffectPassDesc {
+	winrt::com_ptr<ID3DBlob> byteCode;
 	// 0: INPUT
 	// 1: OUTPUT
 	// 2+: 中间纹理
 	SmallVector<uint32_t> inputs;
 	SmallVector<uint32_t> outputs;
 	std::array<uint32_t, 3> numThreads{};
-	Size blockSize{};
+	SizeU blockSize{};
 	ShaderEffectPassFlags flags = ShaderEffectPassFlags::None;
 
 	// 用于在叠加层中显示
 	std::string desc;
 };
 
-enum class ShaderEffectFlags {
-	None = 0,
-	UseDynamic = 1,
-	// 用于在叠加层中显示
-	UseFP16 = 1 << 1
-};
-DEFINE_ENUM_FLAG_OPERATORS(ShaderEffectFlags)
-
 struct ShaderEffectDesc {
-	std::pair<std::string, std::string> outputSizeExprs;
-
-	std::vector<std::variant<float, int>> params;
 	// 不包含 INPUT 和 OUTPUT
-	std::vector<ShaderEffectTextureDesc> textures;
-	std::vector<ShaderEffectSamplerDesc> samplers;
-	std::vector<ShaderEffectPassDesc> passes;
-
-	float minFrameRate = 0.0f;
-	ShaderEffectFlags flags = ShaderEffectFlags::None;
-
-	// 用于在叠加层中显示
-	std::string name;
+	SmallVector<ShaderEffectTextureDesc, 0> textures;
+	SmallVector<ShaderEffectSamplerDesc> samplers;
+	SmallVector<ShaderEffectPassDesc, 0> passes;
 };
 
 }

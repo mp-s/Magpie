@@ -5,6 +5,7 @@
 #include "Logger.h"
 #include "StrHelper.h"
 #include "Win32Helper.h"
+#include <rapidhash.h>
 
 namespace Magpie {
 
@@ -67,7 +68,7 @@ winrt::fire_and_forget EffectsService::Initialize() {
 		}
 		
 		auto lock = srwLock.lock_exclusive();
-		_effectsMap.emplace(effectNames[id], (uint32_t)_effects.size());
+		_effectsMap.emplace(effectInfo.name, (uint32_t)_effects.size());
 		_effects.emplace_back(std::move(effectInfo));
 	}, nEffect);
 
@@ -85,11 +86,113 @@ const std::vector<EffectInfo>& EffectsService::GetEffects() noexcept {
 	return _effects;
 }
 
-const EffectInfo* EffectsService::GetEffect(std::wstring_view name) noexcept {
+const EffectInfo* EffectsService::GetEffect(std::string_view name) noexcept {
 	_WaitForInitialize();
 
 	auto it = _effectsMap.find(name);
 	return it != _effectsMap.end() ? &_effects[it->second] : nullptr;
+}
+
+static std::string GetLinearEffectName(std::string_view effectName) {
+	std::string result(effectName);
+	for (char& c : result) {
+		if (c == '\\') {
+			c = '#';
+		}
+	}
+	return result;
+}
+
+static std::string GetCacheFileName(
+	std::string_view linearEffectName,
+	D3D_SHADER_MODEL shaderModel,
+	ShaderEffectParserFlags flags,
+	uint64_t hash
+) {
+	// 缓存文件的命名: {效果名}_{shader model(4)}_{标志位(4)}_{哈希(16)）}
+	return fmt::format("{}\\{}_{:04x}_{:04x}_{:016x}",
+		StrHelper::UTF16ToUTF8(CommonSharedConstants::CACHE_DIR),
+		linearEffectName, (uint32_t)shaderModel, (uint32_t)flags, hash);
+}
+
+std::string EffectsService::SubmitCompileShaderEffectTask(
+	std::string_view effectName,
+	const phmap::flat_hash_map<std::string, float>* inlineParams,
+	D3D_SHADER_MODEL shaderModel,
+	bool isFP16Enabled,
+	bool isAdvancedColorEnabled
+) noexcept {
+	std::string source;
+	{
+		std::wstring fileName = StrHelper::Concat(
+			CommonSharedConstants::EFFECTS_DIR, L"\\", StrHelper::UTF8ToUTF16(effectName), L".hlsl");
+		Win32Helper::ReadTextFile(fileName.c_str(), source);
+	}
+
+	ShaderEffectParserOptions options = {
+		.inlineParams = inlineParams,
+		.shaderModel = shaderModel
+	};
+	if (isFP16Enabled) {
+		options.flags |= ShaderEffectParserFlags::EnableFP16;
+	}
+	if (isAdvancedColorEnabled) {
+		options.flags |= ShaderEffectParserFlags::EnableAdvancedColor;
+	}
+	
+	// 传给 ParseForDesc 的几个参数都会影响字节码，其中 shaderModel 和 flags 不需要参与哈希，
+	// 它们影响缓存键，即缓存文件名。
+	std::string byteCodeKey;
+	byteCodeKey.append(source);
+	if (inlineParams) {
+		for (const auto& pair : *inlineParams) {
+			byteCodeKey.append(fmt::format("|{}|{}", pair.first, std::lroundf(pair.second * 10000)));
+		}
+	}
+	
+	uint64_t hash = rapidhash(byteCodeKey.data(), byteCodeKey.size());
+
+	std::string cacheKey = GetCacheFileName(
+		GetLinearEffectName(effectName), shaderModel, options.flags, hash);
+
+	if (!_shaderEffectCache.contains(cacheKey)) {
+		_shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{});
+
+		ShaderEffectDesc effectDesc;
+		ShaderEffectSource effectSource;
+		std::string errorMsg = ShaderEffectParser::ParseForDesc(
+			effectName,
+			std::move(source),
+			StrHelper::UTF16ToUTF8(CommonSharedConstants::EFFECTS_DIR),
+			options,
+			effectDesc,
+			effectSource
+		);
+		if (errorMsg.empty()) {
+			
+		} else {
+			// 解析失败
+			_shaderEffectCache.erase(cacheKey);
+		}
+	}
+
+	return cacheKey;
+}
+
+bool EffectsService::GetTaskResult(std::string taskKey, const ShaderEffectDesc*& effectDesc) noexcept {
+	auto it = _shaderEffectCache.find(taskKey);
+	if (it == _shaderEffectCache.end()) {
+		// 编译失败
+		return false;
+	}
+
+	if (it->second.lastAccess == std::numeric_limits<uint32_t>::max()) {
+		// 尚未编译完成
+		effectDesc = nullptr;
+		return true;
+	}
+
+	return &it->second.effectDesc;
 }
 
 void EffectsService::_WaitForInitialize() noexcept {

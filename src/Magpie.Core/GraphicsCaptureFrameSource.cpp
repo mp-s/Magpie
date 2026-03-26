@@ -252,7 +252,7 @@ bool GraphicsCaptureFrameSource::Initialize(
 			_d3d11Device.get(),
 			_d3d11DC.get(),
 			colorInfo,
-			Size{ _frameBox.right, _frameBox.bottom },
+			SizeU{ _frameBox.right, _frameBox.bottom },
 			captureFrameCount,
 			!_isDirtyRegionSupported
 		)) {
@@ -438,7 +438,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 		_captureFrameResourceTable[_newCaptureFrameResourceIdx].second.get();
 
 	// curSlot.output 到 curFrameResource 的脏矩形
-	SmallVector<Rect> allDirtyRects;
+	SmallVector<RectU> allDirtyRects;
 	if (_isDirtyRegionSupported) {
 		for (const _FrameResourceSlot& slot : _slots) {
 			allDirtyRects.append(slot.dirtyRects);
@@ -447,7 +447,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 
 #ifdef _DEBUG
 		// 所有脏矩形应在 _frameBox 内
-		for (const Rect& dirtyRect : allDirtyRects) {
+		for (const RectU& dirtyRect : allDirtyRects) {
 			assert(dirtyRect.left >= _frameBox.left && dirtyRect.top >= _frameBox.top &&
 				dirtyRect.right <= _frameBox.right && dirtyRect.bottom <= _frameBox.bottom);
 		}
@@ -505,7 +505,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 			CD3DX12_TEXTURE_COPY_LOCATION dest(curCASlot.bridgeResource.get(), 0);
 
 			if (_isDirtyRegionSupported) {
-				for (const Rect& dirtyRect : allDirtyRects) {
+				for (const RectU& dirtyRect : allDirtyRects) {
 					D3D12_BOX box = {
 						.left = dirtyRect.left,
 						.top = dirtyRect.top,
@@ -554,7 +554,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 				return false;
 			}
 
-			const Rect& dirtyRect = allDirtyRects[0];
+			const RectU& dirtyRect = allDirtyRects[0];
 			return dirtyRect.left == _frameBox.left && dirtyRect.top == _frameBox.top &&
 				dirtyRect.right == _frameBox.right && dirtyRect.bottom == _frameBox.bottom;
 		};
@@ -565,7 +565,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 			CD3DX12_TEXTURE_COPY_LOCATION src(curCASlot.sharedResource.get(), 0);
 			CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
 
-			for (const Rect& dirtyRect : allDirtyRects) {
+			for (const RectU& dirtyRect : allDirtyRects) {
 				D3D12_BOX box = {
 					.left = dirtyRect.left - _frameBox.left,
 					.top = dirtyRect.top - _frameBox.top,
@@ -582,7 +582,7 @@ HRESULT GraphicsCaptureFrameSource::Update(uint32_t& outputIdx) noexcept {
 		CD3DX12_TEXTURE_COPY_LOCATION dest(curSlot.output.get(), 0);
 
 		if (_isDirtyRegionSupported) {
-			for (const Rect& dirtyRect : allDirtyRects) {
+			for (const RectU& dirtyRect : allDirtyRects) {
 				D3D12_BOX box = {
 					.left = dirtyRect.left,
 					.top = dirtyRect.top,
@@ -1121,7 +1121,7 @@ void GraphicsCaptureFrameSource::_Direct3D11CaptureFramePool_FrameArrived(
 	const winrt::IInspectable&
 ) {
 	winrt::Direct3D11CaptureFrame frame{ nullptr };
-	SmallVector<Rect> dirtyRects;
+	SmallVector<RectU> dirtyRects;
 
 	// 取最新帧
 	while (true) {

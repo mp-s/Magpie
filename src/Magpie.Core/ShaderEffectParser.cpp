@@ -432,10 +432,41 @@ static bool ResolveHeaderSortName(
 static bool ResolveHeaderUse(
 	std::string_view& source,
 	ParserState& state,
-	void*
+	void* data
 ) noexcept {
 	std::string_view flags;
-	return GetNextStringUntilLineEnd<false>(source, state, flags);
+	if (!GetNextStringUntilLineEnd<false>(source, state, flags)) {
+		return false;
+	}
+
+	static constexpr std::array FLAG_INFOS = {
+		std::make_pair("DYNAMIC", EffectInfoFlags::UseDynamic)
+	};
+
+	std::bitset<FLAG_INFOS.size()> processed;
+
+	for (std::string_view& token : StrHelper::Split(flags, ',')) {
+		StrHelper::Trim(token);
+		std::string flag = StrHelper::ToUpperCase(token);
+
+		auto it = std::find_if(FLAG_INFOS.begin(), FLAG_INFOS.end(), [&](const auto& flagInfo) {
+			return flagInfo.first == flag;
+		});
+		if (it != FLAG_INFOS.end()) {
+			size_t idx = it - FLAG_INFOS.begin();
+
+			if (processed[idx]) {
+				return false;
+			}
+			processed[idx] = true;
+
+			((EffectInfo*)data)->flags |= it->second;
+		} else {
+			Logger::Get().Warn(StrHelper::Concat("未知的 USE 标志: ", token));
+		}
+	}
+
+	return true;
 }
 
 static bool ResolveHeaderCapability(
@@ -449,9 +480,7 @@ static bool ResolveHeaderCapability(
 	}
 
 	static constexpr std::array FLAG_INFOS = {
-		// 以下为必需
 		std::make_pair("FP16", EffectInfoFlags::SupportFP16),
-		// 以下为可选
 		std::make_pair("ADVANCEDCOLOR", EffectInfoFlags::SupportAdvancedColor)
 	};
 
@@ -474,7 +503,7 @@ static bool ResolveHeaderCapability(
 
 			((EffectInfo*)data)->flags |= it->second;
 		} else {
-			Logger::Get().Warn(StrHelper::Concat("使用了未知 CAPABILITY 标志: ", token));
+			Logger::Get().Warn(StrHelper::Concat("未知的 CAPABILITY 标志: ", token));
 		}
 	}
 
@@ -681,7 +710,12 @@ static bool ResolveParameter(
 		return false;
 	}
 
-	return source.empty();
+	if (!source.empty()) {
+		SetGeneralParseError(state, source, "\n");
+		return false;
+	}
+
+	return true;
 }
 
 std::string ShaderEffectParser::ParseForInfo(
@@ -830,8 +864,8 @@ std::string ShaderEffectParser::ParseForInfo(
 	return std::move(state.errorMsg);
 }
 
-bool ShaderEffectParser::ParseForDesc(
-	std::string&& name,
+std::string ShaderEffectParser::ParseForDesc(
+	std::string_view name,
 	std::string&& source,
 	std::string&& workingFolder,
 	const ShaderEffectParserOptions& /*options*/,
@@ -840,7 +874,6 @@ bool ShaderEffectParser::ParseForDesc(
 ) noexcept {
 	assert(!name.empty() && !source.empty() && !workingFolder.empty());
 
-	effectDesc.name = std::move(name);
 	effectSource.workingFolder = std::move(workingFolder);
 
 	ParserState state = {
@@ -854,7 +887,7 @@ bool ShaderEffectParser::ParseForDesc(
 	}
 	// std::string_view sourceView(source);
 
-	return false;
+	return std::move(state.errorMsg);
 }
 
 }

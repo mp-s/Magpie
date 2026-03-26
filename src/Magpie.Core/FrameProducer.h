@@ -23,8 +23,8 @@ public:
 		const ColorInfo& colorInfo,
 		HMONITOR hMonSrc,
 		const RECT& srcRect,
-		Size rendererSize,
-		Size& outputSize,
+		SizeU rendererSize,
+		SizeU& outputSize,
 		SimpleTask<bool>& task
 	) noexcept;
 
@@ -44,7 +44,7 @@ public:
 		uint64_t fenceValueToSignal
 	) const noexcept;
 
-	void OnResizedAsync(Size rendererSize, Size& outputSize, SimpleTask<HRESULT>& task) noexcept;
+	void OnResizedAsync(SizeU rendererSize, SizeU& outputSize, SimpleTask<HRESULT>& task) noexcept;
 
 	void OnColorInfoChangedAsync(const ColorInfo& colorInfo, SimpleTask<HRESULT>& task) noexcept;
 
@@ -55,8 +55,8 @@ private:
 		const ColorInfo& colorInfo,
 		HMONITOR hMonSrc,
 		RECT srcRect,
-		Size rendererSize,
-		Size& outputSize,
+		SizeU rendererSize,
+		SizeU& outputSize,
 		SimpleTask<bool>& initializeTask
 	) noexcept;
 
@@ -64,8 +64,8 @@ private:
 		const ColorInfo& colorInfo,
 		HMONITOR hMonSrc,
 		const RECT& srcRect,
-		Size rendererSize,
-		Size& outputSize
+		SizeU rendererSize,
+		SizeU& outputSize
 	) noexcept;
 
 	void _CreateInputDescriptors() noexcept;

@@ -14,8 +14,8 @@ public:
 	bool Initialize(
 		D3D12Context& d3d12Context,
 		const ColorInfo& colorInfo,
-		Size inputSize,
-		Size rendererSize
+		SizeU inputSize,
+		SizeU rendererSize
 	) noexcept;
 
 	HRESULT Draw(
@@ -27,19 +27,19 @@ public:
 		uint32_t outputUavOffset
 	) noexcept;
 
-	Size GetOutputSize() const noexcept {
+	SizeU GetOutputSize() const noexcept {
 		return _outputSize;
 	}
 
-	void OnResized(Size rendererSize) noexcept;
+	void OnResized(SizeU rendererSize) noexcept;
 
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
 	D3D12Context* _d3d12Context = nullptr;
 
-	Size _inputSize{};
-	Size _outputSize{};
+	SizeU _inputSize{};
+	SizeU _outputSize{};
 
 	std::optional<CatmullRomDrawer> _catmullRomDrawer;
 

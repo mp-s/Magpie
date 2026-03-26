@@ -4,13 +4,12 @@
 #include "Logger.h"
 #include "ScalingWindow.h"
 #include "DebugInfo.h"
-#include "DescriptorHeap.h"
 
 namespace Magpie {
 
 bool FrameRingBuffer::Initialize(
 	D3D12Context& d3d12Context,
-	Size size,
+	SizeU size,
 	const ColorInfo& colorInfo
 ) noexcept {
 	_d3d12Context = &d3d12Context;
@@ -206,7 +205,7 @@ uint64_t FrameRingBuffer::GetLatestFrameNumber() const noexcept {
 	return _producerFence->GetCompletedValue();
 }
 
-HRESULT FrameRingBuffer::OnResized(Size size) noexcept {
+HRESULT FrameRingBuffer::OnResized(SizeU size) noexcept {
 	_size = size;
 
 	HRESULT hr = _CreateBuffers();

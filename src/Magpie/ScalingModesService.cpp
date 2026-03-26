@@ -1,14 +1,9 @@
 #include "pch.h"
 #include "AppSettings.h"
-#include "EffectHelper.h"
-#include "EffectsService.h"
 #include "JsonHelper.h"
 #include "ScalingMode.h"
 #include "ScalingModesService.h"
 #include "StrHelper.h"
-
-using namespace ::Magpie;
-using namespace winrt;
 
 namespace Magpie {
 

@@ -16,24 +16,28 @@ public:
 		ID3D11Device5* d3d11Device,
 		ID3D11DeviceContext4* d3d11DC,
 		const ColorInfo& colorInfo,
-		Size frameSize,
+		SizeU frameSize,
 		uint32_t captureFrameCount,
 		bool disableBoundsChecking
 	) noexcept;
 
-	HRESULT CheckFrame(ID3D11Texture2D* frameResource, uint32_t frameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
+	HRESULT CheckFrame(
+		ID3D11Texture2D* frameResource,
+		uint32_t frameIdx,
+		SmallVectorImpl<RectU>& dirtyRects
+	) noexcept;
 
 	void OnFrameAdopted(uint32_t frameIdx) noexcept;
 
 	void OnCaptureStopped() noexcept;
 
 private:
-	HRESULT _CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<Rect>& dirtyRects) noexcept;
+	HRESULT _CheckDirtyRects(uint32_t newFrameIdx, SmallVectorImpl<RectU>& dirtyRects) noexcept;
 
 	ID3D11Device5* _device = nullptr;
 	ID3D11DeviceContext4* _deviceContext = nullptr;
 
-	Size _frameSize{};
+	SizeU _frameSize{};
 
 	winrt::com_ptr<ID3D11ComputeShader> _dupFrameCS;
 	winrt::com_ptr<ID3D11Buffer> _constantBuffer;

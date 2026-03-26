@@ -29,7 +29,7 @@ SwapChainPresenter::~SwapChainPresenter() noexcept {
 bool SwapChainPresenter::Initialize(
 	D3D12Context& d3d12Context,
 	HWND hwndAttach,
-	Size size,
+	SizeU size,
 	const ColorInfo& colorInfo
 ) noexcept {
 	_d3d12Context = &d3d12Context;
@@ -318,7 +318,7 @@ HRESULT SwapChainPresenter::EndFrame(bool waitForGpu) noexcept {
 	return S_OK;
 }
 
-HRESULT SwapChainPresenter::OnResized(Size size) noexcept {
+HRESULT SwapChainPresenter::OnResized(SizeU size) noexcept {
 	assert(size.width > 0 && size.height > 0 && size != _size);
 
 	_size = size;

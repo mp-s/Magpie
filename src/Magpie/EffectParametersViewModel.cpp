@@ -59,7 +59,8 @@ EffectParametersViewModel::EffectParametersViewModel(uint32_t scalingModeIdx, ui
 	: _scalingModeIdx(scalingModeIdx), _effectIdx(effectIdx)
 {
 	ScalingMode& scalingMode = ScalingModesService::Get().GetScalingMode(_scalingModeIdx);
-	_effectInfo = EffectsService::Get().GetEffect(scalingMode.effects[_effectIdx].name);
+	_effectInfo = EffectsService::Get().GetEffect(
+		StrHelper::UTF16ToUTF8(scalingMode.effects[_effectIdx].name));
 
 	phmap::flat_hash_map<std::wstring, float>& params = _Data();
 

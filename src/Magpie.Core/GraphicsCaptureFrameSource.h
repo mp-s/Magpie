@@ -94,12 +94,12 @@ private:
 	// 不要在持有 _latestFrameLock 时释放 _latestFrame 或调用其中的方法，和 WGC 内部的
 	// 同步机制冲突。如果此时_Direct3D11CaptureFramePool_FrameArrived 正在执行会死锁。
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _latestFrame{ nullptr };
-	SmallVector<Rect> _latestFrameDirtyRects;
+	SmallVector<RectU> _latestFrameDirtyRects;
 
 	std::vector<std::pair<ID3D11Texture2D*, winrt::com_ptr<ID3D12Resource>>> _captureFrameResourceTable;
 	std::unique_ptr<DuplicateFrameChecker> _duplicateFrameChecker;
 	winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame _newFrame{ nullptr };
-	SmallVector<Rect> _newFrameDirtyRects;
+	SmallVector<RectU> _newFrameDirtyRects;
 	uint32_t _newCaptureFrameResourceIdx = 0;
 
 	struct _FrameCrossAdapterResourceSlot {
@@ -121,7 +121,7 @@ private:
 		// 保留引用防止 WGC 再次写入
 		winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame captureFrame{ nullptr };
 		uint32_t captureFrameResourceIdx = 0;
-		SmallVector<Rect> dirtyRects;
+		SmallVector<RectU> dirtyRects;
 		winrt::com_ptr<ID3D12Resource> output;
 	};
 

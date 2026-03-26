@@ -18,7 +18,6 @@
 #include <ShellScalingApi.h>
 #include <ShlObj.h>
 
-using namespace winrt;
 using namespace winrt::Magpie;
 
 namespace Magpie {
@@ -179,8 +178,8 @@ static HRESULT CALLBACK TaskDialogCallback(
 
 static void ShowErrorMessage(const wchar_t* mainInstruction, const wchar_t* content) noexcept {
 	LocalizationService& ls = LocalizationService::Get();
-	const hstring errorStr = ls.GetLocalizedString(L"AppSettings_Dialog_Error");
-	const hstring exitStr = ls.GetLocalizedString(L"AppSettings_Dialog_Exit");
+	const winrt::hstring errorStr = ls.GetLocalizedString(L"AppSettings_Dialog_Error");
+	const winrt::hstring exitStr = ls.GetLocalizedString(L"AppSettings_Dialog_Exit");
 
 	TASKDIALOG_BUTTON button{ IDCANCEL, exitStr.c_str() };
 	TASKDIALOGCONFIG tdc{
@@ -229,8 +228,8 @@ bool AppSettings::Initialize() noexcept {
 		logger.Error("读取配置文件失败");
 
 		LocalizationService& ls = LocalizationService::Get();
-		hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ReadFailed");
-		hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
+		winrt::hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ReadFailed");
+		winrt::hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
 			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
 
@@ -251,8 +250,8 @@ bool AppSettings::Initialize() noexcept {
 		Logger::Get().Error(fmt::format("解析配置失败\n\t错误码: {}", (int)doc.GetParseError()));
 
 		LocalizationService& ls = LocalizationService::Get();
-		hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_NotValidJson");
-		hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
+		winrt::hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_NotValidJson");
+		winrt::hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
 			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
 
@@ -263,8 +262,8 @@ bool AppSettings::Initialize() noexcept {
 		Logger::Get().Error("配置文件根元素不是 Object");
 
 		LocalizationService& ls = LocalizationService::Get();
-		hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ParseFailed");
-		hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
+		winrt::hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ParseFailed");
+		winrt::hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
 			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
 
@@ -286,12 +285,12 @@ bool AppSettings::Save() noexcept {
 	return _Save(*this);
 }
 
-fire_and_forget AppSettings::SaveAsync() noexcept {
+winrt::fire_and_forget AppSettings::SaveAsync() noexcept {
 	_UpdateWindowPlacement();
 
 	// 拷贝当前配置
 	_AppSettingsData data = *this;
-	co_await resume_background();
+	co_await winrt::resume_background();
 
 	_Save(data);
 }
@@ -715,8 +714,8 @@ void AppSettings::_LoadSettings(const rapidjson::GenericObject<true, rapidjson::
 	if (windowPosNode != root.MemberEnd() && windowPosNode->value.IsObject()) {
 		auto windowPosObj = windowPosNode->value.GetObj();
 
-		Point center{};
-		Size size{};
+		winrt::Point center{};
+		winrt::Size size{};
 		if (JsonHelper::ReadFloat(windowPosObj, "centerX", center.X, true) &&
 			JsonHelper::ReadFloat(windowPosObj, "centerY", center.Y, true) &&
 			JsonHelper::ReadFloat(windowPosObj, "width", size.Width, true) &&

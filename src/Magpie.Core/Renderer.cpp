@@ -120,12 +120,12 @@ ScalingError Renderer::Initialize(
 		return ScalingError::ScalingFailedGeneral;
 	}
 
-	const Size rendererSize = {
+	const SizeU rendererSize = {
 		uint32_t(rendererRect.right - rendererRect.left),
 		uint32_t(rendererRect.bottom - rendererRect.top)
 	};
 
-	Size outputSize;
+	SizeU outputSize;
 	SimpleTask<bool> task;
 	_frameProducer.InitializeAsync(
 		_d3d12Context, _colorInfo, hMonitor, srcRect, rendererSize, outputSize, task);
@@ -239,12 +239,12 @@ void Renderer::OnResized(const RECT& rendererRect, RECT& destRect) noexcept {
 		return;
 	}
 
-	const Size rendererSize = {
+	const SizeU rendererSize = {
 		uint32_t(rendererRect.right - rendererRect.left),
 		uint32_t(rendererRect.bottom - rendererRect.top)
 	};
 
-	Size outputSize;
+	SizeU outputSize;
 	SimpleTask<HRESULT> task;
 	_frameProducer.OnResizedAsync(rendererSize, outputSize, task);
 
@@ -524,7 +524,7 @@ HRESULT Renderer::_RenderImpl(bool waitForGpu) noexcept {
 
 	_graphicsContext.SetRootSignature(_copyRootSignature.get());
 
-	const Size rendererSize = _presenter->GetSize();
+	const SizeU rendererSize = _presenter->GetSize();
 
 	{
 		float outputWidth = float(_outputRect.right - _outputRect.left);
@@ -593,9 +593,9 @@ HRESULT Renderer::_RenderImpl(bool waitForGpu) noexcept {
 	return S_OK;
 }
 
-void Renderer::_UpdateOutputRect(Size outputSize) noexcept {
+void Renderer::_UpdateOutputRect(SizeU outputSize) noexcept {
 	// TODO: 窗口模式缩放始终填充画面
-	const Size rendererSize = _presenter->GetSize();
+	const SizeU rendererSize = _presenter->GetSize();
 	OutputAlignment alignment = ScalingWindow::Get().Options().outputAlignment;
 
 	using enum OutputAlignment;

@@ -15,7 +15,7 @@ public:
 	bool Initialize(
 		D3D12Context& graphicContext,
 		HWND hwndAttach,
-		Size size,
+		SizeU size,
 		const ColorInfo& colorInfo
 	) noexcept;
 
@@ -28,9 +28,9 @@ public:
 
 	HRESULT EndFrame(bool waitForGpu = false) noexcept;
 
-	Size GetSize() const noexcept { return _size; }
+	SizeU GetSize() const noexcept { return _size; }
 
-	HRESULT OnResized(Size size) noexcept;
+	HRESULT OnResized(SizeU size) noexcept;
 
 	void OnResizeStarted() noexcept;
 
@@ -49,7 +49,7 @@ private:
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
 	std::vector<winrt::com_ptr<ID3D12Resource>> _frameBuffers;
 
-	Size _size{};
+	SizeU _size{};
 	uint32_t _bufferCount = 0;
 	uint32_t _rtvBaseOffset = std::numeric_limits<uint32_t>::max();
 	uint32_t _rawRtvBaseOffset = std::numeric_limits<uint32_t>::max();

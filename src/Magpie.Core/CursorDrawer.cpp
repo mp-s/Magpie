@@ -519,7 +519,7 @@ void CursorDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 	_ClearCursorInfos();
 }
 
-static bool GetCursorSizeFromBmps(HBITMAP hColorBmp, HBITMAP hMaskBmp, Size& size) noexcept {
+static bool GetCursorSizeFromBmps(HBITMAP hColorBmp, HBITMAP hMaskBmp, SizeU& size) noexcept {
 	BITMAP bmp{};
 	if (!GetObject(hColorBmp ? hColorBmp : hMaskBmp, sizeof(bmp), &bmp)) {
 		Logger::Get().Win32Error("GetObject 失败");
@@ -532,7 +532,7 @@ static bool GetCursorSizeFromBmps(HBITMAP hColorBmp, HBITMAP hMaskBmp, Size& siz
 	return true;
 }
 
-static bool GetCursorSizeUnderDpi96(HCURSOR hCursor, Size& cursorSize) noexcept {
+static bool GetCursorSizeUnderDpi96(HCURSOR hCursor, SizeU& cursorSize) noexcept {
 	ICONINFO iconInfo{};
 	{
 		DPI_AWARENESS_CONTEXT oldDpiContext =
@@ -596,7 +596,7 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 	wil::unique_hbitmap hResColorBmp(cursorIconInfoEx.hbmColor);
 	wil::unique_hbitmap hResMaskBmp(cursorIconInfoEx.hbmMask);
 
-	Size cursorBmpSize;
+	SizeU cursorBmpSize;
 	if (!GetCursorSizeFromBmps(hResColorBmp.get(), hResMaskBmp.get(), cursorBmpSize)) {
 		Logger::Get().Error("GetCursorSizeFromBmps 失败");
 		return nullptr;
@@ -609,7 +609,7 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		// 如果不能确定光标是否随 DPI 缩放则假设为真，绝大多数时候是对的
 		cursorInfo.size = _CalcCursorSize(cursorBmpSize, SYSTEM_DPI, monitorDpi, true);
 	} else {
-		Size cursorSizeDpi96;
+		SizeU cursorSizeDpi96;
 		if (!GetCursorSizeUnderDpi96(hCursor, cursorSizeDpi96)) {
 			Logger::Get().Error("GetCursorSizeUnderDpi96 失败");
 			return nullptr;
@@ -621,7 +621,7 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 	}
 
 	SmallVector<wil::unique_hcursor, 1> cursorFrameRes;
-	Point resHotspot = { cursorIconInfoEx.xHotspot, cursorIconInfoEx.yHotspot };
+	PointU resHotspot = { cursorIconInfoEx.xHotspot, cursorIconInfoEx.yHotspot };
 
 	// 尝试从光标原始来源加载指定尺寸的资源，如果失败旧只能使用 GetIconInfo 得到的位图，
 	// DPI 虚拟化机制可能导致图像质量严重下降。
@@ -700,8 +700,8 @@ std::pair<const CursorDrawer::_CursorInfoKey, CursorDrawer::_CursorInfo>* Cursor
 		std::move(cursorInfo)).first;
 }
 
-Size CursorDrawer::_CalcCursorSize(
-	Size cursorBmpSize,
+SizeU CursorDrawer::_CalcCursorSize(
+	SizeU cursorBmpSize,
 	uint32_t cursorDpi,
 	uint32_t monitorDpi,
 	bool isCursorDpiAware
@@ -826,7 +826,7 @@ bool CursorDrawer::_ResolveCursorFramePixels(
 	HBITMAP hColorBmp,
 	HBITMAP hMaskBmp
 ) const noexcept {
-	const Size bmpSize = {
+	const SizeU bmpSize = {
 		cursorFrame.resSize.width,
 		hColorBmp ? cursorFrame.resSize.height : cursorFrame.resSize.height * 2
 	};

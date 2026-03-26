@@ -12,8 +12,8 @@ namespace Magpie {
 bool EffectsDrawer::Initialize(
 	D3D12Context& d3d12Context,
 	const ColorInfo& colorInfo,
-	Size inputSize,
-	Size rendererSize
+	SizeU inputSize,
+	SizeU rendererSize
 ) noexcept {
 	_d3d12Context = &d3d12Context;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
@@ -113,7 +113,7 @@ HRESULT EffectsDrawer::Draw(
 	return S_OK;
 }
 
-void EffectsDrawer::OnResized(Size rendererSize) noexcept {
+void EffectsDrawer::OnResized(SizeU rendererSize) noexcept {
 	_outputSize = rendererSize;
 }
 

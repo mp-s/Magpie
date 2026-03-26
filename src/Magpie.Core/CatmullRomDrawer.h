@@ -11,8 +11,8 @@ public:
 
 	HRESULT Draw(
 		ComputeContext& computeContext,
-		Size inputSize,
-		Size outputSize,
+		SizeU inputSize,
+		SizeU outputSize,
 		uint32_t inputSrvOffset,
 		uint32_t outputUavOffset,
 		bool outputSrgb

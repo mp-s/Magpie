@@ -13,9 +13,8 @@ enum class ShaderEffectParserFlags {
 DEFINE_ENUM_FLAG_OPERATORS(ShaderEffectParserFlags)
 
 struct ShaderEffectParserOptions {
-	// 只在效果存在参数时影响字节码。为空表示不内联
+	// 为空表示不内联
 	const phmap::flat_hash_map<std::string, float>* inlineParams = nullptr;
-	// 始终影响字节码
 	D3D_SHADER_MODEL shaderModel = D3D_SHADER_MODEL_5_1;
 	ShaderEffectParserFlags flags = ShaderEffectParserFlags::None;
 };
@@ -36,8 +35,8 @@ struct ShaderEffectParser {
 		struct EffectInfo& effectInfo
 	) noexcept;
 
-	static bool ParseForDesc(
-		std::string&& name,
+	static std::string ParseForDesc(
+		std::string_view name,
 		std::string&& source,
 		std::string&& workingFolder,
 		const ShaderEffectParserOptions& options,

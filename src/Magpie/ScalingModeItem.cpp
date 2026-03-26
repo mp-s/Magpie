@@ -215,7 +215,8 @@ void ScalingModeItem::AddEffect(const hstring& fullName) {
 	EffectItem& effect = _Data().effects.emplace_back();
 	effect.name = fullName;
 
-	const EffectInfo* effectInfo = EffectsService::Get().GetEffect(fullName);
+	const EffectInfo* effectInfo =
+		EffectsService::Get().GetEffect(StrHelper::UTF16ToUTF8(fullName));
 	assert(effectInfo);
 	if (effectInfo->scaleFactor == 0) {
 		// 支持缩放的效果默认等比缩放到充满屏幕
@@ -264,7 +265,7 @@ hstring ScalingModeItem::Description() const noexcept {
 			result.append(L" > ");
 		}
 
-		if (EffectsService::Get().GetEffect(effect.name) != nullptr) {
+		if (EffectsService::Get().GetEffect(StrHelper::UTF16ToUTF8(effect.name))) {
 			result += EffectHelper::GetDisplayName(effect.name);
 		} else {
 			result += L'(';
@@ -282,7 +283,7 @@ bool ScalingModeItem::HasUnkownEffects() const noexcept {
 	}
 
 	for (const EffectItem& effect : _Data().effects) {
-		if (!EffectsService::Get().GetEffect(effect.name)) {
+		if (!EffectsService::Get().GetEffect(StrHelper::UTF16ToUTF8(effect.name))) {
 			return true;
 		}
 	}
