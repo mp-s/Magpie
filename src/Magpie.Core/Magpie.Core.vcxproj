@@ -69,7 +69,7 @@
     <ClInclude Include="include\EffectsService.h" />
     <ClInclude Include="include\LocalizationService.h" />
     <ClInclude Include="ShaderEffectCompilerService.h" />
-    <ClInclude Include="ShaderEffectDesc.h" />
+    <ClInclude Include="ShaderEffectDrawInfo.h" />
     <ClInclude Include="ShaderEffectDrawer.h" />
     <ClInclude Include="GraphicsCaptureFrameSource.h" />
     <ClInclude Include="D3D12Context.h" />

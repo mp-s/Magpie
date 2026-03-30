@@ -4,7 +4,7 @@
 
 namespace Magpie {
 
-bool ShaderEffectCompilerService::Submit(std::string_view /*name*/, ShaderEffectDesc& /*desc*/) const noexcept {
+bool ShaderEffectCompilerService::Submit(std::string_view /*name*/, ShaderEffectDrawInfo& /*desc*/) const noexcept {
 	
 	return false;
 }

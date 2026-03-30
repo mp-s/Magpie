@@ -1,5 +1,5 @@
 #pragma once
-#include "ShaderEffectDesc.h"
+#include "ShaderEffectDrawInfo.h"
 
 namespace Magpie {
 
@@ -13,7 +13,7 @@ public:
 	ShaderEffectCompilerService(const ShaderEffectCompilerService&) = delete;
 	ShaderEffectCompilerService(ShaderEffectCompilerService&&) = delete;
 
-	bool Submit(std::string_view name, ShaderEffectDesc& desc) const noexcept;
+	bool Submit(std::string_view name, ShaderEffectDrawInfo& desc) const noexcept;
 
 private:
 	ShaderEffectCompilerService() = default;

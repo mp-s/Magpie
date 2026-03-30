@@ -4,7 +4,7 @@
 namespace Magpie {
 
 struct EffectInfo;
-struct ShaderEffectDesc;
+struct ShaderEffectDrawInfo;
 
 enum class ShaderEffectParserFlags {
 	None = 0,
@@ -38,7 +38,7 @@ struct ShaderEffectParser {
 		const EffectInfo& effectInfo,
 		std::string&& source,
 		const ShaderEffectParserOptions& options,
-		ShaderEffectDesc& effectDesc,
+		ShaderEffectDrawInfo& drawInfo,
 		ShaderEffectSource& effectSource
 	) noexcept;
 };

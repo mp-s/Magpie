@@ -22,24 +22,27 @@ enum class ShaderEffectTextureFormat {
 };
 
 struct ShaderEffectTextureDesc {
+	std::string name;
 	ShaderEffectTextureFormat format = ShaderEffectTextureFormat::UNKNOWN;
-	std::pair<std::string, std::string> sizeExpr;
+	std::string widthExpr;
+	std::string heightExpr;
 	std::string source;
 };
 
-enum class EffectSamplerFilterType {
+enum class ShaderEffectSamplerFilterType {
 	Point,
 	Linear
 };
 
-enum class EffectSamplerAddressType {
+enum class ShaderEffectSamplerAddressType {
 	Clamp,
 	Wrap
 };
 
 struct ShaderEffectSamplerDesc {
-	EffectSamplerFilterType filterType = EffectSamplerFilterType::Point;
-	EffectSamplerAddressType addressType = EffectSamplerAddressType::Clamp;
+	std::string name;
+	ShaderEffectSamplerFilterType filterType = ShaderEffectSamplerFilterType::Point;
+	ShaderEffectSamplerAddressType addressType = ShaderEffectSamplerAddressType::Clamp;
 };
 
 enum class ShaderEffectPassFlags {
@@ -63,7 +66,7 @@ struct ShaderEffectPassDesc {
 	std::string desc;
 };
 
-struct ShaderEffectDesc {
+struct ShaderEffectDrawInfo {
 	// 不包含 INPUT 和 OUTPUT
 	SmallVector<ShaderEffectTextureDesc, 0> textures;
 	SmallVector<ShaderEffectSamplerDesc> samplers;

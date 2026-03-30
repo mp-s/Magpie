@@ -1,6 +1,6 @@
 #pragma once
 #include "EffectInfo.h"
-#include "../ShaderEffectDesc.h"
+#include "../ShaderEffectDrawInfo.h"
 #include <parallel_hashmap/phmap.h>
 
 namespace Magpie {
@@ -31,7 +31,7 @@ public:
 		bool isAdvancedColorSupported
 	) noexcept;
 
-	bool GetTaskResult(std::string taskKey, const ShaderEffectDesc* &effectDesc) noexcept;
+	bool GetTaskResult(std::string taskKey, const ShaderEffectDrawInfo** effectDesc) noexcept;
 
 	// 缩放结束时调用
 	void CleanCache(bool clearAll) noexcept;
@@ -45,7 +45,7 @@ private:
 	phmap::flat_hash_map<std::string_view, uint32_t> _effectsMap;
 
 	struct _ShaderEffectMemCacheItem {
-		ShaderEffectDesc effectDesc;
+		ShaderEffectDrawInfo effectDesc;
 		// UINT_MAX 表示尚未编译完成
 		uint32_t lastAccess = std::numeric_limits<uint32_t>::max();
 	};

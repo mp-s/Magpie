@@ -106,9 +106,6 @@
     <ClInclude Include="ShaderEffectCompilerService.h">
       <Filter>Services</Filter>
     </ClInclude>
-    <ClInclude Include="ShaderEffectDesc.h">
-      <Filter>EffectDrawer</Filter>
-    </ClInclude>
     <ClInclude Include="CursorHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
@@ -134,6 +131,7 @@
     <ClInclude Include="Renderer.h">
       <Filter>Render</Filter>
     </ClInclude>
+    <ClInclude Include="ShaderEffectDrawInfo.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />

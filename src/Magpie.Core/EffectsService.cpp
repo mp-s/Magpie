@@ -68,8 +68,9 @@ winrt::fire_and_forget EffectsService::Initialize() {
 		}
 		
 		auto lock = srwLock.lock_exclusive();
-		_effectsMap.emplace(effectInfo.name, (uint32_t)_effects.size());
-		_effects.emplace_back(std::move(effectInfo));
+		uint32_t effectIdx = (uint32_t)_effects.size();
+		EffectInfo& movedEffectInfo = _effects.emplace_back(std::move(effectInfo));
+		_effectsMap.emplace(movedEffectInfo.name, effectIdx);
 	}, nEffect);
 
 	_initialized.store(true, std::memory_order_release);
@@ -174,7 +175,7 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	if (!_shaderEffectCache.contains(cacheKey)) {
 		// _shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{});
 
-		ShaderEffectDesc effectDesc;
+		ShaderEffectDrawInfo effectDesc;
 		ShaderEffectSource effectSource;
 		std::string errorMsg = ShaderEffectParser::ParseForDesc(
 			effectInfo,
@@ -194,7 +195,7 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	return cacheKey;
 }
 
-bool EffectsService::GetTaskResult(std::string taskKey, const ShaderEffectDesc*& effectDesc) noexcept {
+bool EffectsService::GetTaskResult(std::string taskKey, const ShaderEffectDrawInfo** effectDesc) noexcept {
 	auto it = _shaderEffectCache.find(taskKey);
 	if (it == _shaderEffectCache.end()) {
 		// 编译失败
@@ -203,11 +204,12 @@ bool EffectsService::GetTaskResult(std::string taskKey, const ShaderEffectDesc*&
 
 	if (it->second.lastAccess == std::numeric_limits<uint32_t>::max()) {
 		// 尚未编译完成
-		effectDesc = nullptr;
+		*effectDesc = nullptr;
 		return true;
 	}
 
-	return &it->second.effectDesc;
+	*effectDesc = &it->second.effectDesc;
+	return true;
 }
 
 void EffectsService::CleanCache(bool /*clearAll*/) noexcept {

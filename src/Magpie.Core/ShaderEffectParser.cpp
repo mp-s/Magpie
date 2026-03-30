@@ -1,10 +1,11 @@
 #include "pch.h"
-#include "ShaderEffectParser.h"
+#include "EffectHelper.h"
 #include "EffectInfo.h"
-#include "StrHelper.h"
-#include "Logger.h"
-#include "ShaderEffectDesc.h"
 #include "LocalizationService.h"
+#include "Logger.h"
+#include "ShaderEffectDrawInfo.h"
+#include "ShaderEffectParser.h"
+#include "StrHelper.h"
 #include <bitset>
 
 namespace Magpie {
@@ -237,7 +238,7 @@ static bool CheckNextToken(std::string_view& source, ParserState& state, std::st
 	if (token == expectedToken) {
 		return true;
 	} else {
-		SetGeneralParseError(state, source, expectedToken);
+		SetGeneralParseError(state, token, expectedToken);
 		return false;
 	}
 }
@@ -260,6 +261,17 @@ static bool RequireLineEnd(std::string_view& source, ParserState& state) noexcep
 	RemoveLeadingSpaces(source, state);
 
 	if (source.empty() || source[0] == '\n') {
+		return true;
+	} else {
+		SetGeneralParseError(state, source, "\n");
+		return false;
+	}
+}
+
+static bool RequireSourceEnd(std::string_view& source, ParserState& state) noexcept {
+	RemoveLeadingBlanks(source, state);
+
+	if (source.empty()) {
 		return true;
 	} else {
 		SetGeneralParseError(state, source, "\n");
@@ -338,6 +350,61 @@ static bool GetNextNumber(std::string_view& source, ParserState& state, T& value
 
 	source.remove_prefix(result.ptr - source.data());
 	state.isNewLine = false;
+	return true;
+}
+
+template <typename Fn>
+static bool FindBlocks(
+	std::string_view sourceView,
+	const Fn& completeCurrentBlock,
+	ParserState& state
+) noexcept {
+	for (size_t i = 0; i < sourceView.size(); ++i) {
+		char c = sourceView[i];
+
+		if (c == '\n') {
+			++state.lineNumber;
+			state.isNewLine = true;
+		} else if (c == '/') {
+			bool isComment;
+			bool isMetaIdicator;
+			if (!RemoveLeadingComment(sourceView, state, i, isComment, isMetaIdicator)) {
+				return false;
+			}
+
+			if (isMetaIdicator) {
+				std::string_view tempSource = sourceView.substr(i + 3);
+				std::string_view token;
+				if (!GetNextToken<false, false>(tempSource, state, token)) {
+					return false;
+				}
+
+				std::string newBlockType = StrHelper::ToUpperCase(token);
+				size_t newBlockOffset = tempSource.data() - sourceView.data();
+
+				// sourceView[i - 1] 是换行符，因此每个区块都以换行结尾。区块开头不包含声明该区块的
+				// 指令，如果该指令没有参数，此区块就以换行符开头。
+				if (newBlockType == "PARAMETER") {
+					completeCurrentBlock(BlockType::Parameter, i, newBlockOffset);
+				} else if (newBlockType == "TEXTURE") {
+					completeCurrentBlock(BlockType::Texture, i, newBlockOffset);
+				} else if (newBlockType == "SAMPLER") {
+					completeCurrentBlock(BlockType::Sampler, i, newBlockOffset);
+				} else if (newBlockType == "COMMON") {
+					completeCurrentBlock(BlockType::Common, i, newBlockOffset);
+				} else if (newBlockType == "PASS") {
+					completeCurrentBlock(BlockType::Pass, i, newBlockOffset);
+				}
+
+				// 下个循环会加一
+				i = newBlockOffset - 1;
+				state.isNewLine = false;
+			}
+		}
+	}
+
+	// 结束最后一个区块。sourceView 以换行符结尾，因此最后一个区块也以换行符结尾。
+	completeCurrentBlock(BlockType::Header, sourceView.size(), std::numeric_limits<size_t>::max());
 	return true;
 }
 
@@ -422,11 +489,7 @@ static bool ResolveHeaderVersion(
 		return false;
 	}
 
-	if (!RequireLineEnd(source, state)) {
-		return false;
-	}
-
-	return true;
+	return RequireLineEnd(source, state);
 }
 
 static bool ResolveHeaderSortName(
@@ -533,14 +596,10 @@ static bool ResolveHeaderScaleFactor(
 		return false;
 	}
 
-	if (!RequireLineEnd(source, state)) {
-		return false;
-	}
-
-	return true;
+	return RequireLineEnd(source, state);
 }
 
-static bool ResolveHeader(
+static bool ResolveHeaderBlock(
 	std::string_view source,
 	ParserState& state,
 	EffectInfo& effectInfo
@@ -577,17 +636,7 @@ static bool ResolveHeader(
 		return false;
 	}
 
-	// 之后不允许有内容
-	if (!RemoveLeadingBlanks(source, state)) {
-		return false;
-	}
-
-	if (!source.empty()) {
-		SetGeneralParseError(state, source, "\n");
-		return false;
-	}
-
-	return true;
+	return RequireSourceEnd(source, state);
 }
 
 static bool ResolveParameterDefault(
@@ -599,11 +648,7 @@ static bool ResolveParameterDefault(
 		return false;
 	}
 
-	if (!RequireLineEnd(source, state)) {
-		return false;
-	}
-
-	return true;
+	return RequireLineEnd(source, state);
 }
 
 static bool ResolveParameterMin(
@@ -615,11 +660,7 @@ static bool ResolveParameterMin(
 		return false;
 	}
 
-	if (!RequireLineEnd(source, state)) {
-		return false;
-	}
-
-	return true;
+	return RequireLineEnd(source, state);
 }
 
 static bool ResolveParameterMax(
@@ -631,11 +672,7 @@ static bool ResolveParameterMax(
 		return false;
 	}
 
-	if (!RequireLineEnd(source, state)) {
-		return false;
-	}
-
-	return true;
+	return RequireLineEnd(source, state);
 }
 
 static bool ResolveParameterStep(
@@ -647,11 +684,7 @@ static bool ResolveParameterStep(
 		return false;
 	}
 
-	if (!RequireLineEnd(source, state)) {
-		return false;
-	}
-
-	return true;
+	return RequireLineEnd(source, state);
 }
 
 static bool ResolveParameterLabel(
@@ -668,7 +701,7 @@ static bool ResolveParameterLabel(
 	return true;
 }
 
-static bool ResolveParameter(
+static bool ResolveParameterBlock(
 	std::string_view source,
 	ParserState& state,
 	EffectInfoParameter& effectInfoParameter
@@ -697,7 +730,7 @@ static bool ResolveParameter(
 	}
 
 	if (token != "float" && token != "int") {
-		SetGeneralParseError(state, source, "float|int");
+		SetGeneralParseError(state, token, "float|int");
 		return false;
 	}
 
@@ -719,72 +752,249 @@ static bool ResolveParameter(
 	source.remove_prefix(1);
 	state.isNewLine = false;
 
-	// 之后不允许有内容
-	if (!RemoveLeadingBlanks(source, state)) {
+	return RequireSourceEnd(source, state);
+}
+
+static bool ResolveTextureWidth(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view expr;
+	if (!GetNextStringUntilLineEnd<false>(source, state, expr)) {
 		return false;
 	}
 
-	if (!source.empty()) {
-		SetGeneralParseError(state, source, "\n");
-		return false;
-	}
-
+	((ShaderEffectTextureDesc*)data)->widthExpr = expr;
 	return true;
 }
 
-template <typename Fn>
-static bool ResolveBlocks(
-	std::string_view sourceView,
-	const Fn& completeCurrentBlock,
-	ParserState& state
+static bool ResolveTextureHeight(
+	std::string_view& source,
+	ParserState& state,
+	void* data
 ) noexcept {
-	for (size_t i = 0; i < sourceView.size(); ++i) {
-		char c = sourceView[i];
+	std::string_view expr;
+	if (!GetNextStringUntilLineEnd<false>(source, state, expr)) {
+		return false;
+	}
 
-		if (c == '\n') {
-			++state.lineNumber;
-			state.isNewLine = true;
-		} else if (c == '/') {
-			bool isComment;
-			bool isMetaIdicator;
-			if (!RemoveLeadingComment(sourceView, state, i, isComment, isMetaIdicator)) {
+	((ShaderEffectTextureDesc*)data)->heightExpr = expr;
+	return true;
+}
+
+static bool ResolveTextureFormat(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view token;
+	if (!GetNextToken<false, false>(source, state, token)) {
+		return false;
+	}
+
+	static const auto formatMap = [] {
+		phmap::flat_hash_map<std::string, ShaderEffectTextureFormat> result;
+
+		// UNKNOWN 不可用
+		constexpr size_t descCount = std::size(EffectHelper::SHADER_TEXTURE_FORMAT_DESCS) - 1;
+		result.reserve(descCount);
+		for (size_t i = 1; i < descCount; ++i) {
+			result.emplace(
+				EffectHelper::SHADER_TEXTURE_FORMAT_DESCS[i].name,
+				(ShaderEffectTextureFormat)i
+			);
+		}
+		return result;
+	}();
+
+	auto it = formatMap.find(StrHelper::ToUpperCase(token));
+	if (it == formatMap.end()) {
+		SetGeneralParseError(state, token);
+		return false;
+	}
+	((ShaderEffectTextureDesc*)data)->format = it->second;
+
+	return RequireLineEnd(source, state);
+}
+
+static bool ResolveTextureSource(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view value;
+	if (!GetNextStringUntilLineEnd<false>(source, state, value)) {
+		return false;
+	}
+
+	((ShaderEffectTextureDesc*)data)->source = value;
+	return true;
+}
+
+static bool ResolveTextureBlock(
+	std::string_view source,
+	ParserState& state, 
+	ShaderEffectTextureDesc& desc
+) noexcept {
+	static constexpr std::array COMMAND_INFOS = {
+		CommandInfo{ "WIDTH", ResolveTextureWidth, false },
+		CommandInfo{ "HEIGHT", ResolveTextureHeight, false },
+		CommandInfo{ "FORMAT", ResolveTextureFormat, false },
+		CommandInfo{ "SOURCE", ResolveTextureSource, false }
+	};
+
+	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &desc)) {
+		return false;
+	}
+
+	if (!CheckNextToken<true>(source, state, "Texture2D")) {
+		return false;
+	}
+
+	std::string_view token;
+	if (!GetNextToken<true, false>(source, state, token)) {
+		return false;
+	}
+
+	if (token == "INPUT" || token == "OUTPUT") {
+		// INPUT 和 OUTPUT 不允许有属性
+		if (!desc.widthExpr.empty() || !desc.heightExpr.empty() ||
+			desc.format != ShaderEffectTextureFormat::UNKNOWN || !desc.source.empty())
+		{
+			state.errorMsg = "INPUT 和 OUTPUT 不允许有属性";
+			return false;
+		}
+	} else {
+		desc.name = token;
+
+		if (desc.source.empty()) {
+			// 不存在 SOURCE 属性时必须指定 WIDTH、HEIGHT 和 FORMAT
+			if (desc.widthExpr.empty()) {
+				state.errorMsg = "缺少 WIDTH 属性";
 				return false;
 			}
 
-			if (isMetaIdicator) {
-				std::string_view tempSource = sourceView.substr(i + 3);
-				std::string_view token;
-				if (!GetNextToken<false, false>(tempSource, state, token)) {
-					return false;
-				}
+			if (desc.heightExpr.empty()) {
+				state.errorMsg = "缺少 HEIGHT 属性";
+				return false;
+			}
 
-				std::string newBlockType = StrHelper::ToUpperCase(token);
-				size_t newBlockOffset = tempSource.data() - sourceView.data();
+			if (desc.format == ShaderEffectTextureFormat::UNKNOWN) {
+				state.errorMsg = "缺少 FORMAT 属性";
+				return false;
+			}
+		} else {
+			// SOURCE 和 WIDTH/HEIGHT 冲突
+			if (!desc.widthExpr.empty() || !desc.heightExpr.empty()) {
+				state.errorMsg = "SOURCE 和 WIDTH/HEIGHT 冲突";
+				return false;
+			}
 
-				// sourceView[i - 1] 是换行符，因此每个区块都以换行结尾。区块开头不包含声明该区块的
-				// 指令，如果该指令没有参数，此区块就以换行符开头。
-				if (newBlockType == "PARAMETER") {
-					completeCurrentBlock(BlockType::Parameter, i, newBlockOffset);
-				} else if (newBlockType == "TEXTURE") {
-					completeCurrentBlock(BlockType::Texture, i, newBlockOffset);
-				} else if (newBlockType == "SAMPLER") {
-					completeCurrentBlock(BlockType::Sampler, i, newBlockOffset);
-				} else if (newBlockType == "COMMON") {
-					completeCurrentBlock(BlockType::Common, i, newBlockOffset);
-				} else if (newBlockType == "PASS") {
-					completeCurrentBlock(BlockType::Pass, i, newBlockOffset);
-				}
-
-				// 下个循环会加一
-				i = newBlockOffset - 1;
-				state.isNewLine = false;
+			// 存在 SOURCE 时 FORMAT 可选，默认值为 R16G16B16A16_FLOAT
+			if (desc.format == ShaderEffectTextureFormat::UNKNOWN) {
+				desc.format = ShaderEffectTextureFormat::R16G16B16A16_FLOAT;
 			}
 		}
 	}
 
-	// 结束最后一个区块。sourceView 以换行符结尾，因此最后一个区块也以换行符结尾。
-	completeCurrentBlock(BlockType::Header, sourceView.size(), std::numeric_limits<size_t>::max());
-	return true;
+	if (!RemoveLeadingBlanks(source, state)) {
+		return false;
+	}
+
+	if (!source.starts_with(';')) {
+		SetGeneralParseError(state, source, ";");
+		return false;
+	}
+
+	source.remove_prefix(1);
+	state.isNewLine = false;
+
+	return RequireSourceEnd(source, state);
+}
+
+static bool ResolveSamplerFilter(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view token;
+	if (!GetNextToken<false, false>(source, state, token)) {
+		return false;
+	}
+
+	std::string tokenUpper = StrHelper::ToUpperCase(token);
+	if (tokenUpper == "LINEAR") {
+		((ShaderEffectSamplerDesc*)data)->filterType = ShaderEffectSamplerFilterType::Linear;
+	} else if (tokenUpper == "POINT") {
+		((ShaderEffectSamplerDesc*)data)->filterType = ShaderEffectSamplerFilterType::Point;
+	} else {
+		SetGeneralParseError(state, token, "LINEAR|POINT");
+	}
+
+	return RequireLineEnd(source, state);
+}
+
+static bool ResolveSamplerAddress(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view token;
+	if (!GetNextToken<false, false>(source, state, token)) {
+		return false;
+	}
+
+	std::string tokenUpper = StrHelper::ToUpperCase(token);
+	if (tokenUpper == "CLAMP") {
+		((ShaderEffectSamplerDesc*)data)->addressType = ShaderEffectSamplerAddressType::Clamp;
+	} else if (tokenUpper == "WRAP") {
+		((ShaderEffectSamplerDesc*)data)->addressType = ShaderEffectSamplerAddressType::Wrap;
+	} else {
+		SetGeneralParseError(state, token, "CLAMP|WRAP");
+	}
+
+	return RequireLineEnd(source, state);
+}
+
+static bool ResolveSamplerBlock(
+	std::string_view source,
+	ParserState& state,
+	ShaderEffectSamplerDesc& desc
+) noexcept {
+	static constexpr std::array COMMAND_INFOS = {
+		CommandInfo{ "FILTER", ResolveSamplerFilter, true },
+		CommandInfo{ "ADDRESS", ResolveSamplerAddress, false },
+	};
+
+	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &desc)) {
+		return false;
+	}
+
+	if (!CheckNextToken<true>(source, state, "SamplerState")) {
+		return false;
+	}
+
+	std::string_view token;
+	if (!GetNextToken<true, false>(source, state, token)) {
+		return false;
+	}
+
+	desc.name = token;
+
+	if (!RemoveLeadingBlanks(source, state)) {
+		return false;
+	}
+
+	if (!source.starts_with(';')) {
+		SetGeneralParseError(state, source, ";");
+		return false;
+	}
+
+	source.remove_prefix(1);
+	state.isNewLine = false;
+
+	return RequireSourceEnd(source, state);
 }
 
 std::string ShaderEffectParser::ParseForInfo(
@@ -851,15 +1061,15 @@ std::string ShaderEffectParser::ParseForInfo(
 		curBlockStartLineNumber = state.lineNumber;
 	};
 
-	if (!ResolveBlocks(sourceView, completeCurrentBlock, state)) {
-		Logger::Get().Error(StrHelper::Concat("ResolveBlocks 失败\n\t错误消息: ", state.errorMsg));
+	if (!FindBlocks(sourceView, completeCurrentBlock, state)) {
+		Logger::Get().Error(StrHelper::Concat("FindBlocks 失败\n\t错误消息: ", state.errorMsg));
 		return std::move(state.errorMsg);
 	}
 
 	state.lineNumber = headerBlock.startLineNumer;
 	state.isNewLine = false;
-	if (!ResolveHeader(headerBlock.source, state, effectInfo)) {
-		Logger::Get().Error(StrHelper::Concat("ResolveHeader 失败\n\t错误消息: ", state.errorMsg));
+	if (!ResolveHeaderBlock(headerBlock.source, state, effectInfo)) {
+		Logger::Get().Error(StrHelper::Concat("ResolveHeaderBlock 失败\n\t错误消息: ", state.errorMsg));
 		return std::move(state.errorMsg);
 	}
 
@@ -867,8 +1077,9 @@ std::string ShaderEffectParser::ParseForInfo(
 	for (size_t i = 0; i < paramBlocks.size(); ++i) {
 		state.lineNumber = paramBlocks[i].startLineNumer;
 		state.isNewLine = false;
-		if (!ResolveParameter(paramBlocks[i].source, state, effectInfo.params[i])) {
-			Logger::Get().Error(fmt::format("ResolveParameter#{} 失败\n\t错误消息: ", state.errorMsg));
+		if (!ResolveParameterBlock(paramBlocks[i].source, state, effectInfo.params[i])) {
+			Logger::Get().Error(fmt::format(
+				"ResolveParameterBlock#{} 失败\n\t错误消息: {}", i, state.errorMsg));
 			return std::move(state.errorMsg);
 		}
 	}
@@ -880,7 +1091,7 @@ std::string ShaderEffectParser::ParseForDesc(
 	const EffectInfo& /*effectInfo*/,
 	std::string&& source,
 	const ShaderEffectParserOptions& /*options*/,
-	ShaderEffectDesc& /*effectDesc*/,
+	ShaderEffectDrawInfo& drawInfo,
 	ShaderEffectSource& /*effectSource*/
 ) noexcept {
 	assert(!source.empty());
@@ -924,20 +1135,20 @@ std::string ShaderEffectParser::ParseForDesc(
 		case BlockType::Parameter:
 			break;
 		case BlockType::Texture:
-			textureBlocks.push_back(BlockData{
-				sourceView.substr(curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
+			textureBlocks.push_back(BlockData{ sourceView.substr(
+				curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
 			break;
 		case BlockType::Sampler:
-			samplerBlocks.push_back(BlockData{
-				sourceView.substr(curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
+			samplerBlocks.push_back(BlockData{ sourceView.substr(
+				curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
 			break;
 		case BlockType::Common:
-			commonBlocks.push_back(BlockData{
-				sourceView.substr(curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
+			commonBlocks.push_back(BlockData{ sourceView.substr(
+				curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
 			break;
 		case BlockType::Pass:
-			passBlocks.push_back(BlockData{
-				sourceView.substr(curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
+			passBlocks.push_back(BlockData{ sourceView.substr(
+				curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
 			break;
 		default:
 			assert(false);
@@ -949,11 +1160,45 @@ std::string ShaderEffectParser::ParseForDesc(
 		curBlockStartLineNumber = state.lineNumber;
 	};
 
-	if (!ResolveBlocks(sourceView, completeCurrentBlock, state)) {
-		Logger::Get().Error(StrHelper::Concat("ResolveBlocks 失败\n\t错误消息: ", state.errorMsg));
+	if (!FindBlocks(sourceView, completeCurrentBlock, state)) {
+		Logger::Get().Error(StrHelper::Concat("FindBlocks 失败\n\t错误消息: ", state.errorMsg));
 		return std::move(state.errorMsg);
 	}
 
+	if (passBlocks.empty()) {
+		state.errorMsg = "未找到 PASS 块";
+		return std::move(state.errorMsg);
+	}
+
+	for (size_t i = 0; i < textureBlocks.size(); ++i) {
+		state.lineNumber = textureBlocks[i].startLineNumer;
+		state.isNewLine = false;
+
+		ShaderEffectTextureDesc desc;
+		if (!ResolveTextureBlock(textureBlocks[i].source, state, desc)) {
+			Logger::Get().Error(fmt::format(
+				"ResolveTextureBlock#{} 失败\n\t错误消息: {}", i, state.errorMsg));
+			return std::move(state.errorMsg);
+		}
+
+		// 排除 INPUT 和 OUTPUT
+		if (!desc.name.empty()) {
+			drawInfo.textures.push_back(std::move(desc));
+		}
+	}
+
+	drawInfo.samplers.resize(samplerBlocks.size());
+	for (size_t i = 0; i < samplerBlocks.size(); ++i) {
+		state.lineNumber = samplerBlocks[i].startLineNumer;
+		state.isNewLine = false;
+
+		if (!ResolveSamplerBlock(samplerBlocks[i].source, state, drawInfo.samplers[i])) {
+			Logger::Get().Error(fmt::format(
+				"ResolveSamplerBlock#{} 失败\n\t错误消息: {}", i, state.errorMsg));
+			return std::move(state.errorMsg);
+		}
+	}
+	
 	return std::move(state.errorMsg);
 }
 

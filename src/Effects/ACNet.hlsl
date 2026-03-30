@@ -2,8 +2,7 @@
 // 移植自 https://github.com/TianZerL/ACNetGLSL/blob/f20a6b6b7327f4caf588b06c6b21f18e40dae1ce/glsl/ACNet.glsl
 
 //!MAGPIE EFFECT
-//!VERSION 4
-//!USE MulAdd
+//!VERSION 5
 //!CAPABILITY FP16
 
 #include "StubDefs.hlsli"
@@ -13,8 +12,6 @@
 Texture2D INPUT;
 
 //!TEXTURE
-//!WIDTH INPUT_WIDTH * 2
-//!HEIGHT INPUT_HEIGHT * 2
 Texture2D OUTPUT;
 
 //!TEXTURE
