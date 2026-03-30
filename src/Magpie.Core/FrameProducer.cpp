@@ -116,8 +116,7 @@ void FrameProducer::OnResizedAsync(
 			return;
 		}
 
-		_effectsDrawer.OnResized(rendererSize);
-		outputSize = _effectsDrawer.GetOutputSize();
+		_effectsDrawer.OnResized(rendererSize, outputSize);
 
 		hr = _frameRingBuffer.OnResized(outputSize);
 		if (!_CheckResult(hr, "FrameRingBuffer::OnResized 失败")) {
@@ -370,12 +369,12 @@ bool FrameProducer::_Initialize(
 			uint32_t(srcRect.bottom - srcRect.top)
 		};
 
-		if (!_effectsDrawer.Initialize(_d3d12Context, colorInfo, inputSize, rendererSize)) {
+		if (!_effectsDrawer.Initialize(_d3d12Context, colorInfo, inputSize, rendererSize, outputSize)) {
 			Logger::Get().Error("EffectsDrawer::Initialize 失败");
 			return false;
 		}
 
-		outputSize = _effectsDrawer.GetOutputSize();
+		assert(outputSize.width <= rendererSize.width && outputSize.height <= rendererSize.height);
 
 		if (!_frameRingBuffer.Initialize(_d3d12Context, outputSize, colorInfo)) {
 			Logger::Get().Error("初始化 FrameRingBuffer 失败");

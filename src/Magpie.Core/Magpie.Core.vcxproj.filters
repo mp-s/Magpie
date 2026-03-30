@@ -121,7 +121,6 @@
     <ClInclude Include="CommandContext.h">
       <Filter>Render</Filter>
     </ClInclude>
-    <ClInclude Include="Renderer.h" />
     <ClInclude Include="RectHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
@@ -132,6 +131,9 @@
       <Filter>Include</Filter>
     </ClInclude>
     <ClInclude Include="ShaderEffectParser.h" />
+    <ClInclude Include="Renderer.h">
+      <Filter>Render</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -201,12 +203,14 @@
     <ClCompile Include="CommandContext.cpp">
       <Filter>Render</Filter>
     </ClCompile>
-    <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="LocalizationService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
     <ClCompile Include="EffectsService.cpp">
       <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Renderer.cpp">
+      <Filter>Render</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

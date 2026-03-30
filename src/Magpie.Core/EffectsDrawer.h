@@ -1,9 +1,12 @@
 #pragma once
 #include "CatmullRomDrawer.h"
+#include "SmallVector.h"
 
 namespace Magpie {
 
 class ComputeContext;
+class EffectDrawerBase;
+struct EffectInfo;
 
 class EffectsDrawer {
 public:
@@ -11,11 +14,14 @@ public:
 	EffectsDrawer(const EffectsDrawer&) = delete;
 	EffectsDrawer(EffectsDrawer&&) = delete;
 
+	~EffectsDrawer() noexcept;
+
 	bool Initialize(
 		D3D12Context& d3d12Context,
 		const ColorInfo& colorInfo,
 		SizeU inputSize,
-		SizeU rendererSize
+		SizeU rendererSize,
+		SizeU& outputSize
 	) noexcept;
 
 	HRESULT Draw(
@@ -31,7 +37,7 @@ public:
 		return _outputSize;
 	}
 
-	void OnResized(SizeU rendererSize) noexcept;
+	void OnResized(SizeU rendererSize, SizeU& outputSize) noexcept;
 
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
@@ -41,7 +47,14 @@ private:
 	SizeU _inputSize{};
 	SizeU _outputSize{};
 
-	std::optional<CatmullRomDrawer> _catmullRomDrawer;
+	struct _EffectData {
+		std::unique_ptr<EffectDrawerBase> drawer;
+		const EffectInfo* effectInfo;
+		SizeU outputSize;
+	};
+
+	SmallVector<_EffectData> _effectDatas;
+	CatmullRomDrawer _catmullRomDrawer;
 
 	winrt::com_ptr<ID3D12QueryHeap> _queryHeap;
 	winrt::com_ptr<ID3D12Resource> _queryResultBuffer;

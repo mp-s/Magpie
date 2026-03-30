@@ -109,70 +109,85 @@ static std::string GetCacheFileName(
 	ShaderEffectParserFlags flags,
 	uint64_t hash
 ) {
-	// 缓存文件的命名: {效果名}_{shader model(4)}_{标志位(4)}_{哈希(16)）}
-	return fmt::format("{}\\{}_{:04x}_{:04x}_{:016x}",
+	// 缓存文件的命名: {效果名}_{shader model(2)}{标志位(4)}{哈希(16)）}
+	return fmt::format("{}\\{}_{:02x}{:04x}{:016x}",
 		StrHelper::UTF16ToUTF8(CommonSharedConstants::CACHE_DIR),
-		linearEffectName, (uint32_t)shaderModel, (uint32_t)flags, hash);
+		linearEffectName, (uint16_t)shaderModel, (uint32_t)flags, hash);
 }
 
 std::string EffectsService::SubmitCompileShaderEffectTask(
 	std::string_view effectName,
 	const phmap::flat_hash_map<std::string, float>* inlineParams,
 	D3D_SHADER_MODEL shaderModel,
-	bool isFP16Enabled,
-	bool isAdvancedColorEnabled
+	bool isFP16Supported,
+	bool isAdvancedColorSupported
 ) noexcept {
+	_WaitForInitialize();
+
+	std::string cacheKey;
+
+	auto it = _effectsMap.find(effectName);
+	if (it == _effectsMap.end()) {
+		return cacheKey;
+	}
+	const EffectInfo& effectInfo = _effects[it->second];
+
 	std::string source;
 	{
 		std::wstring fileName = StrHelper::Concat(
 			CommonSharedConstants::EFFECTS_DIR, L"\\", StrHelper::UTF8ToUTF16(effectName), L".hlsl");
-		Win32Helper::ReadTextFile(fileName.c_str(), source);
+		if (!Win32Helper::ReadTextFile(fileName.c_str(), source)) {
+			return cacheKey;
+		}
 	}
 
 	ShaderEffectParserOptions options = {
 		.inlineParams = inlineParams,
 		.shaderModel = shaderModel
 	};
-	if (isFP16Enabled) {
+	if (isFP16Supported && bool(effectInfo.flags & EffectInfoFlags::SupportFP16)) {
 		options.flags |= ShaderEffectParserFlags::EnableFP16;
 	}
-	if (isAdvancedColorEnabled) {
+	if (isAdvancedColorSupported && bool(effectInfo.flags & EffectInfoFlags::SupportAdvancedColor)) {
 		options.flags |= ShaderEffectParserFlags::EnableAdvancedColor;
 	}
 	
-	// 传给 ParseForDesc 的几个参数都会影响字节码，其中 shaderModel 和 flags 不需要参与哈希，
-	// 它们影响缓存键，即缓存文件名。
-	std::string byteCodeKey;
-	byteCodeKey.append(source);
+	// shaderModel 和 flags 不参与哈希，它们决定缓存键（也是缓存文件名）
+	uint64_t hash = rapidhash(source.data(), source.size());
 	if (inlineParams) {
 		for (const auto& pair : *inlineParams) {
-			byteCodeKey.append(fmt::format("|{}|{}", pair.first, std::lroundf(pair.second * 10000)));
+			for (const EffectInfoParameter& param : effectInfo.params) {
+				if (param.name == pair.first) {
+					// 将参数值归一化然后保留 4 位精度
+					long normValue = std::lroundf((pair.second - param.minValue) /
+						(param.maxValue - param.minValue) * 10000);
+					hash = phmap::HashState().combine(hash, pair.first, normValue);
+					break;
+				}
+			}
 		}
 	}
 	
-	uint64_t hash = rapidhash(byteCodeKey.data(), byteCodeKey.size());
-
-	std::string cacheKey = GetCacheFileName(
+	cacheKey = GetCacheFileName(
 		GetLinearEffectName(effectName), shaderModel, options.flags, hash);
 
 	if (!_shaderEffectCache.contains(cacheKey)) {
-		_shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{});
+		// _shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{});
 
 		ShaderEffectDesc effectDesc;
 		ShaderEffectSource effectSource;
 		std::string errorMsg = ShaderEffectParser::ParseForDesc(
-			effectName,
+			effectInfo,
 			std::move(source),
-			StrHelper::UTF16ToUTF8(CommonSharedConstants::EFFECTS_DIR),
 			options,
 			effectDesc,
 			effectSource
 		);
-		if (errorMsg.empty()) {
-			
-		} else {
+		if (!errorMsg.empty()) {
 			// 解析失败
 			_shaderEffectCache.erase(cacheKey);
+			cacheKey.clear();
+			return cacheKey;
 		}
 	}
 
@@ -193,6 +208,9 @@ bool EffectsService::GetTaskResult(std::string taskKey, const ShaderEffectDesc*&
 	}
 
 	return &it->second.effectDesc;
+}
+
+void EffectsService::CleanCache(bool /*clearAll*/) noexcept {
 }
 
 void EffectsService::_WaitForInitialize() noexcept {

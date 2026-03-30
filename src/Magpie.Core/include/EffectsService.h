@@ -27,11 +27,14 @@ public:
 		std::string_view effectName,
 		const phmap::flat_hash_map<std::string, float>* inlineParams,
 		D3D_SHADER_MODEL shaderModel,
-		bool isFP16Enabled,
-		bool isAdvancedColorEnabled
+		bool isFP16Supported,
+		bool isAdvancedColorSupported
 	) noexcept;
 
 	bool GetTaskResult(std::string taskKey, const ShaderEffectDesc* &effectDesc) noexcept;
+
+	// 缩放结束时调用
+	void CleanCache(bool clearAll) noexcept;
 
 private:
 	EffectsService() = default;

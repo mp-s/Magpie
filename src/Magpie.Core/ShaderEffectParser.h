@@ -3,11 +3,12 @@
 
 namespace Magpie {
 
+struct EffectInfo;
+struct ShaderEffectDesc;
+
 enum class ShaderEffectParserFlags {
 	None = 0,
-	// 只在效果支持 FP16 时影响字节码
 	EnableFP16 = 1,
-	// 只在效果支持 scRGB 时影响字节码
 	EnableAdvancedColor = 1 << 1
 };
 DEFINE_ENUM_FLAG_OPERATORS(ShaderEffectParserFlags)
@@ -21,8 +22,6 @@ struct ShaderEffectParserOptions {
 
 struct ShaderEffectSource {
 	std::vector<std::string> sources;
-	// 用于解析 #include
-	std::string workingFolder;
 	std::vector<std::pair<std::string, std::string>> macros;
 	D3D_SHADER_MODEL shaderModel = D3D_SHADER_MODEL_5_1;
 };
@@ -32,15 +31,14 @@ struct ShaderEffectParser {
 	static std::string ParseForInfo(
 		std::string&& name,
 		std::string&& source,
-		struct EffectInfo& effectInfo
+		EffectInfo& effectInfo
 	) noexcept;
 
 	static std::string ParseForDesc(
-		std::string_view name,
+		const EffectInfo& effectInfo,
 		std::string&& source,
-		std::string&& workingFolder,
 		const ShaderEffectParserOptions& options,
-		struct ShaderEffectDesc& effectDesc,
+		ShaderEffectDesc& effectDesc,
 		ShaderEffectSource& effectSource
 	) noexcept;
 };

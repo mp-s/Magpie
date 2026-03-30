@@ -1,16 +1,17 @@
 #include "pch.h"
-#include "Renderer.h"
 #include "DebugInfo.h"
 #include "DirectXHelper.h"
+#include "EffectDrawerBase.h"
 #include "FrameProducer.h"
+#include "GraphicsCaptureFrameSource.h"
 #include "Logger.h"
+#include "Renderer.h"
 #include "ScalingWindow.h"
-#include "SwapChainPresenter.h"
 #include "shaders/CopyFrameVS.h"
 #include "shaders/CopyFrameVS_SM5.h"
 #include "shaders/TextureBlitPS.h"
 #include "shaders/TextureBlitPS_SM5.h"
-#include "GraphicsCaptureFrameSource.h"
+#include "SwapChainPresenter.h"
 #include <d3dkmthk.h>
 #include <windows.graphics.display.interop.h>
 

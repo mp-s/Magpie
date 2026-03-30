@@ -4,6 +4,7 @@ namespace Magpie {
 
 class D3D12Context;
 struct EffectOption;
+struct EffectInfo;
 class ComputeContext;
 
 class EffectDrawerBase {
@@ -14,17 +15,12 @@ public:
 
 	virtual ~EffectDrawerBase() noexcept = default;
 
-	virtual bool Initialize(
+	virtual const EffectInfo* Initialize(
 		D3D12Context& d3d12Context,
 		const EffectOption& effectOption
 	) noexcept = 0;
 
-	virtual bool Bind(
-		ID3D12Resource* inputResource,
-		SizeU inputSize,
-		const ColorInfo& colorInfo,
-		SizeU& outputSize
-	) noexcept = 0;
+	virtual bool Bind(SizeU inputSize, const ColorInfo& colorInfo) noexcept = 0;
 
 	virtual bool IsReady() noexcept = 0;
 
