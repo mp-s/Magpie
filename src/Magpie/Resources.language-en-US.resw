@@ -1064,12 +1064,12 @@
     <value>Unclosed block comment.</value>
   </data>
   <data name="ShaderEffectParser_GeneralError" xml:space="preserve">
-    <value>Line {}: unable to parse {}.</value>
+    <value>Line {0}: unable to parse {1}.</value>
   </data>
   <data name="ShaderEffectParser_UnsupportedFXVersion" xml:space="preserve">
     <value>Unsupported FX version.</value>
   </data>
   <data name="ShaderEffectParser_GeneralErrorWithExpected" xml:space="preserve">
-    <value>Line {}: unable to parse {}, expected: {}.</value>
+    <value>Line {0}: unable to parse {1}, expected: {2}.</value>
   </data>
 </root>

@@ -4,6 +4,7 @@
 //!MAGPIE EFFECT
 //!VERSION 5
 //!CAPABILITY FP16
+//!SCALE_FACTOR 2
 
 #include "StubDefs.hlsli"
 

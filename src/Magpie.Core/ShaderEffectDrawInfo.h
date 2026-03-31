@@ -52,6 +52,7 @@ enum class ShaderEffectPassFlags {
 DEFINE_ENUM_FLAG_OPERATORS(ShaderEffectPassFlags)
 
 struct ShaderEffectPassDesc {
+	std::string desc;
 	winrt::com_ptr<ID3DBlob> byteCode;
 	// 0: INPUT
 	// 1: OUTPUT
@@ -61,9 +62,6 @@ struct ShaderEffectPassDesc {
 	std::array<uint32_t, 3> numThreads{};
 	SizeU blockSize{};
 	ShaderEffectPassFlags flags = ShaderEffectPassFlags::None;
-
-	// 用于在叠加层中显示
-	std::string desc;
 };
 
 struct ShaderEffectDrawInfo {

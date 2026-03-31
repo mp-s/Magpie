@@ -1064,12 +1064,12 @@
     <value>块注释未闭合。</value>
   </data>
   <data name="ShaderEffectParser_GeneralErrorWithExpected" xml:space="preserve">
-    <value>第 {} 行: 无法解析 {}，期望为：{}。</value>
+    <value>第 {0} 行: 无法解析 {1}，期望为：{2}。</value>
   </data>
   <data name="ShaderEffectParser_UnsupportedFXVersion" xml:space="preserve">
     <value>不支持的 FX 版本。</value>
   </data>
   <data name="ShaderEffectParser_GeneralError" xml:space="preserve">
-    <value>第 {} 行: 无法解析 {}。</value>
+    <value>第 {0} 行: 无法解析 {1}。</value>
   </data>
 </root>

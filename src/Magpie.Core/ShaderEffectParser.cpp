@@ -38,6 +38,17 @@ struct BlockData {
 	uint32_t startLineNumer;
 };
 
+struct CommandInfo {
+	const char* name;
+	bool (*resolver)(std::string_view&, ParserState&, void*) noexcept;
+	bool isRequired;
+};
+
+struct PassPropData {
+	ShaderEffectPassDesc& passDesc;
+	const SmallVectorImpl<ShaderEffectTextureDesc>& textures;
+};
+
 static std::string DebugFormat(std::string_view str) noexcept {
 	return fmt::format("{:?s}", std::span<const char>(str.begin(), str.end()));
 }
@@ -342,8 +353,8 @@ template <typename T>
 static bool GetNextNumber(std::string_view& source, ParserState& state, T& value) noexcept {
 	RemoveLeadingSpaces(source, state);
 
-	const auto& result = std::from_chars(source.data(), source.data() + source.size(), value);
-	if ((int)result.ec) {
+	std::from_chars_result result = std::from_chars(source.data(), source.data() + source.size(), value);
+	if (result.ec != std::errc{}) {
 		SetGeneralParseError(state, source);
 		return false;
 	}
@@ -384,16 +395,20 @@ static bool FindBlocks(
 
 				// sourceView[i - 1] 是换行符，因此每个区块都以换行结尾。区块开头不包含声明该区块的
 				// 指令，如果该指令没有参数，此区块就以换行符开头。
+				bool result = true;
 				if (newBlockType == "PARAMETER") {
-					completeCurrentBlock(BlockType::Parameter, i, newBlockOffset);
+					result = completeCurrentBlock(BlockType::Parameter, i, newBlockOffset);
 				} else if (newBlockType == "TEXTURE") {
-					completeCurrentBlock(BlockType::Texture, i, newBlockOffset);
+					result = completeCurrentBlock(BlockType::Texture, i, newBlockOffset);
 				} else if (newBlockType == "SAMPLER") {
-					completeCurrentBlock(BlockType::Sampler, i, newBlockOffset);
+					result = completeCurrentBlock(BlockType::Sampler, i, newBlockOffset);
 				} else if (newBlockType == "COMMON") {
-					completeCurrentBlock(BlockType::Common, i, newBlockOffset);
+					result = completeCurrentBlock(BlockType::Common, i, newBlockOffset);
 				} else if (newBlockType == "PASS") {
-					completeCurrentBlock(BlockType::Pass, i, newBlockOffset);
+					result = completeCurrentBlock(BlockType::Pass, i, newBlockOffset);
+				}
+				if (!result) {
+					return false;
 				}
 
 				// 下个循环会加一
@@ -404,15 +419,9 @@ static bool FindBlocks(
 	}
 
 	// 结束最后一个区块。sourceView 以换行符结尾，因此最后一个区块也以换行符结尾。
-	completeCurrentBlock(BlockType::Header, sourceView.size(), std::numeric_limits<size_t>::max());
-	return true;
+	return completeCurrentBlock(
+		BlockType::Header, sourceView.size(), std::numeric_limits<size_t>::max());
 }
-
-struct CommandInfo {
-	const char* name;
-	bool (*resolver)(std::string_view&, ParserState&, void*) noexcept;
-	bool isRequired;
-};
 
 static bool ResolveBlockCommon(
 	std::span<const CommandInfo> commandInfos,
@@ -466,6 +475,7 @@ static bool ResolveBlockCommon(
 	// 检查必需项
 	for (uint32_t i = 0; i < commandInfos.size(); ++i) {
 		if (commandInfos[i].isRequired && !processed[i]) {
+			state.errorMsg = StrHelper::Concat("缺少 ", commandInfos[i].name);
 			return false;
 		}
 	}
@@ -997,6 +1007,307 @@ static bool ResolveSamplerBlock(
 	return RequireSourceEnd(source, state);
 }
 
+static bool ResolvePassOut(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	auto& [desc, textures] = *(PassPropData*)data;
+
+	std::string_view value;
+	if (!GetNextStringUntilLineEnd<false>(source, state, value)) {
+		return false;
+	}
+
+	for (std::string_view& token : StrHelper::Split(value, ',')) {
+		StrHelper::Trim(token);
+
+		// 0: INPUT (不允许)
+		// 1: OUTPUT
+		// 2+: 中间纹理
+		if (token == "INPUT") {
+			state.errorMsg = "INPUT 不能作为通道输出";
+			return false;
+		} else if (token == "OUTPUT") {
+			desc.outputs.push_back(1);
+		} else {
+			auto it = std::find_if(textures.begin(), textures.end(), [&](const auto& textureDesc) {
+				return textureDesc.name == token;
+			});
+			if (it == textures.end()) {
+				SetGeneralParseError(state, token);
+				return false;
+			}
+
+			if (it->source.empty()) {
+				desc.outputs.push_back(uint32_t(it - textures.begin()) + 2);
+			} else {
+				state.errorMsg = fmt::format("只读纹理 {} 不能作为通道输出", it->name);
+				return false;
+			}
+		}
+	}
+
+	std::sort(desc.outputs.begin(), desc.outputs.end());
+	
+	// 检查重复成员
+	for (size_t i = 0, end = desc.outputs.size() - 1; i < end; ++i) {
+		if (desc.outputs[i] == desc.outputs[i + 1]) {
+			state.errorMsg = "OUT 存在重复成员";
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool ResolvePassIn(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	auto& [desc, textures] = *(PassPropData*)data;
+
+	std::string_view value;
+	if (!GetNextStringUntilLineEnd<false>(source, state, value)) {
+		return false;
+	}
+
+	for (std::string_view& token : StrHelper::Split(value, ',')) {
+		StrHelper::Trim(token);
+
+		// 0: INPUT
+		// 1: OUTPUT (不允许)
+		// 2+: 中间纹理
+		if (token == "INPUT") {
+			desc.inputs.push_back(0);
+		} else if (token == "OUTPUT") {
+			state.errorMsg = "OUTPUT 不能作为通道输入";
+			return false;
+		} else {
+			auto it = std::find_if(textures.begin(), textures.end(), [&](const auto& textureDesc) {
+				return textureDesc.name == token;
+			});
+			if (it == textures.end()) {
+				SetGeneralParseError(state, token);
+				return false;
+			}
+
+			desc.inputs.push_back(uint32_t(it - textures.begin()) + 2);
+		}
+	}
+
+	std::sort(desc.inputs.begin(), desc.inputs.end());
+
+	// 检查重复成员
+	for (size_t i = 0, end = desc.inputs.size() - 1; i < end; ++i) {
+		if (desc.inputs[i] == desc.inputs[i + 1]) {
+			state.errorMsg = "IN 存在重复成员";
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool ResolvePassDesc(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view value;
+	if (!GetNextStringUntilLineEnd<false>(source, state, value)) {
+		return false;
+	}
+
+	((PassPropData*)data)->passDesc.desc = value;
+	return true;
+}
+
+static bool ResolvePassStyle(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::string_view token;
+	if (!GetNextToken<false, false>(source, state, token)) {
+		return false;
+	}
+
+	std::string tokenUpper = StrHelper::ToUpperCase(token);
+	if (tokenUpper == "PS") {
+		((PassPropData*)data)->passDesc.flags |= ShaderEffectPassFlags::PSStyle;
+	} else if (tokenUpper != "CS") {
+		SetGeneralParseError(state, token, "CS|PS");
+	}
+
+	return RequireLineEnd(source, state);
+}
+
+static bool ResolvePassBlockSize(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	SizeU& blockSize = ((PassPropData*)data)->passDesc.blockSize;
+
+	std::string_view value;
+	if (!GetNextStringUntilLineEnd<false>(source, state, value)) {
+		return false;
+	}
+
+	SmallVector<std::string_view> split = StrHelper::Split(value, ',');
+	if (split.size() > 2) {
+		state.errorMsg = "BLOCK_SIZE 最多允许两个成员";
+		return false;
+	}
+
+	const char* last = split[0].data() + split[0].size();
+	std::from_chars_result result = std::from_chars(split[0].data(), last, blockSize.width);
+	if (result.ec != std::errc{} || result.ptr != last) {
+		SetGeneralParseError(state, split[0]);
+		return false;
+	}
+
+	if (split.size() == 2) {
+		last = split[1].data() + split[1].size();
+		result = std::from_chars(split[1].data(), last, blockSize.height);
+		if (result.ec != std::errc{} || result.ptr != last) {
+			SetGeneralParseError(state, split[1]);
+			return false;
+		}
+	} else {
+		// 只有一个成员则同时指定长和高
+		blockSize.height = blockSize.width;
+	}
+	
+	return true;
+}
+
+static bool ResolvePassNumThreads(
+	std::string_view& source,
+	ParserState& state,
+	void* data
+) noexcept {
+	std::array<uint32_t, 3>& numThreads = ((PassPropData*)data)->passDesc.numThreads;
+
+	std::string_view value;
+	if (!GetNextStringUntilLineEnd<false>(source, state, value)) {
+		return false;
+	}
+
+	SmallVector<std::string_view> split = StrHelper::Split(value, ',');
+	uint32_t elemCount = (uint32_t)split.size();
+	if (elemCount > 3) {
+		state.errorMsg = "NUM_THREADS 最多允许三个成员";
+		return false;
+	}
+
+	for (uint32_t i = 0; i < 3; ++i) {
+		if (i < elemCount) {
+			const char* last = split[i].data() + split[i].size();
+			std::from_chars_result result = std::from_chars(split[i].data(), last, numThreads[i]);
+			if (result.ec != std::errc{} || result.ptr != last) {
+				SetGeneralParseError(state, split[i]);
+				return false;
+			}
+		} else {
+			// 未指定则置一
+			numThreads[i] = 1;
+		}
+	}
+	
+	return true;
+}
+
+static bool ResolvePassBlock(
+	std::string_view& source,
+	ParserState& state,
+	ShaderEffectDrawInfo& drawInfo
+) noexcept {
+	size_t passIdx;
+	if (!GetNextNumber(source, state, passIdx)) {
+		return false;
+	}
+
+	if (!RequireLineEnd(source, state)) {
+		return false;
+	}
+
+	// Pass 序号从 1 开始
+	if (passIdx == 0 || passIdx > drawInfo.passes.size()) {
+		state.errorMsg = "通道序号错误";
+		return false;
+	}
+
+	ShaderEffectPassDesc& curPassDesc = drawInfo.passes[passIdx - 1];
+
+	if (!curPassDesc.outputs.empty()) {
+		state.errorMsg = fmt::format("存在多个 Pass{}", passIdx);
+		return false;
+	}
+
+	static constexpr std::array COMMAND_INFOS = {
+		CommandInfo{ "OUT", ResolvePassOut, true },
+		CommandInfo{ "IN", ResolvePassIn, false },
+		CommandInfo{ "DESC", ResolvePassDesc, false },
+		CommandInfo{ "STYLE", ResolvePassStyle, false },
+		CommandInfo{ "BLOCK_SIZE", ResolvePassBlockSize, false },
+		CommandInfo{ "NUM_THREADS", ResolvePassNumThreads, false }
+	};
+
+	PassPropData data = { curPassDesc, drawInfo.textures };
+	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &data)) {
+		return false;
+	}
+
+	if (bool(curPassDesc.flags & ShaderEffectPassFlags::PSStyle)) {
+		if (curPassDesc.blockSize.width != 0 || curPassDesc.numThreads[0] != 0) {
+			state.errorMsg = "PS 风格不得出现 BLOCK_SIZE 和 NUM_THREADS";
+			return false;
+		}
+
+		curPassDesc.blockSize = { 16,16 };
+		curPassDesc.numThreads = { 64,1,1 };
+	} else {
+		if (curPassDesc.blockSize.width == 0 || curPassDesc.numThreads[0] == 0) {
+			state.errorMsg = "CS 风格必须指定 BLOCK_SIZE 和 NUM_THREADS";
+			return false;
+		}
+	}
+
+	// 不允许同一纹理同时作为输入和输出
+	if (auto it = std::set_intersection(
+		curPassDesc.inputs.begin(),
+		curPassDesc.inputs.end(),
+		curPassDesc.outputs.begin(),
+		curPassDesc.outputs.end(),
+		curPassDesc.inputs.begin()
+	); it != curPassDesc.inputs.begin()) {
+		uint32_t texIdx = curPassDesc.inputs[0];
+		// INPUT 和 OUTPUT 不可能是交集
+		assert(texIdx >= 2);
+		const std::string& texName = drawInfo.textures[size_t(texIdx - 2)].name;
+		state.errorMsg = fmt::format("纹理 {0} 同时作为 Pass{1} 的输入和输出", texName, passIdx);
+		return false;
+	}
+
+	// 最后一个通道的输出只能是 OUTPUT
+	if (passIdx == drawInfo.passes.size()) {
+		if (curPassDesc.outputs.size() != 1 || curPassDesc.outputs[0] != 1) {
+			state.errorMsg = "最后一个通道的输出只能是 OUTPUT";
+			return false;
+		}
+	}
+
+	// 生成默认描述
+	if (curPassDesc.desc.empty()) {
+		curPassDesc.desc = fmt::format("Pass {}", passIdx);
+	}
+
+	return true;
+}
+
 std::string ShaderEffectParser::ParseForInfo(
 	std::string&& name,
 	std::string&& source,
@@ -1059,6 +1370,7 @@ std::string ShaderEffectParser::ParseForInfo(
 		curBlockType = newBlockType;
 		curBlockOffset = newBlockOffset;
 		curBlockStartLineNumber = state.lineNumber;
+		return true;
 	};
 
 	if (!FindBlocks(sourceView, completeCurrentBlock, state)) {
@@ -1084,11 +1396,65 @@ std::string ShaderEffectParser::ParseForInfo(
 		}
 	}
 
+	// 检查是否有重复的标识符
+	{
+		phmap::flat_hash_set<std::string_view> names;
+		for (const EffectInfoParameter& param : effectInfo.params) {
+			if (names.contains(param.name)) {
+				state.errorMsg = fmt::format("标识符 \"{}\" 重复", param.name);
+				return std::move(state.errorMsg);
+			} else {
+				names.insert(param.name);
+			}
+		}
+	}
+	
 	return std::move(state.errorMsg);
 }
 
+static bool CheckForDuplicateName(
+	const EffectInfo& effectInfo,
+	const ShaderEffectDrawInfo& drawInfo,
+	ParserState& state
+) noexcept {
+	phmap::flat_hash_set<std::string_view> names;
+	std::string_view dupName;
+
+	// 参数已在 ParseForInfo 中检查过
+	for (const EffectInfoParameter& param : effectInfo.params) {
+		names.emplace(param.name);
+	}
+
+	for (const ShaderEffectTextureDesc& textureDesc : drawInfo.textures) {
+		if (names.contains(textureDesc.name)) {
+			dupName = textureDesc.name;
+			break;
+		} else {
+			names.emplace(textureDesc.name);
+		}
+	}
+
+	if (dupName.empty()) {
+		for (const ShaderEffectSamplerDesc& samplerDesc : drawInfo.samplers) {
+			if (names.contains(samplerDesc.name)) {
+				dupName = samplerDesc.name;
+				break;
+			} else {
+				names.emplace(samplerDesc.name);
+			}
+		}
+	}
+	
+	if (dupName.empty()) {
+		return true;
+	} else {
+		state.errorMsg = fmt::format("标识符 \"{}\" 重复", dupName);
+		return false;
+	}
+}
+
 std::string ShaderEffectParser::ParseForDesc(
-	const EffectInfo& /*effectInfo*/,
+	const EffectInfo& effectInfo,
 	std::string&& source,
 	const ShaderEffectParserOptions& /*options*/,
 	ShaderEffectDrawInfo& drawInfo,
@@ -1115,7 +1481,7 @@ std::string ShaderEffectParser::ParseForDesc(
 
 	SmallVector<BlockData> textureBlocks;
 	SmallVector<BlockData> samplerBlocks;
-	SmallVector<BlockData> commonBlocks;
+	BlockData commonBlock{};
 	SmallVector<BlockData> passBlocks;
 
 	BlockType curBlockType = BlockType::Header;
@@ -1143,9 +1509,15 @@ std::string ShaderEffectParser::ParseForDesc(
 				curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
 			break;
 		case BlockType::Common:
-			commonBlocks.push_back(BlockData{ sourceView.substr(
-				curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
-			break;
+			if (commonBlock.source.empty()) {
+				commonBlock.source =
+					sourceView.substr(curBlockOffset, curBlockEnd - curBlockOffset);
+				commonBlock.startLineNumer = curBlockStartLineNumber;
+				break;
+			} else {
+				state.errorMsg = "只允许存在一个 COMMON 块";
+				return false;
+			}
 		case BlockType::Pass:
 			passBlocks.push_back(BlockData{ sourceView.substr(
 				curBlockOffset, curBlockEnd - curBlockOffset),curBlockStartLineNumber });
@@ -1158,6 +1530,7 @@ std::string ShaderEffectParser::ParseForDesc(
 		curBlockType = newBlockType;
 		curBlockOffset = newBlockOffset;
 		curBlockStartLineNumber = state.lineNumber;
+		return true;
 	};
 
 	if (!FindBlocks(sourceView, completeCurrentBlock, state)) {
@@ -1197,6 +1570,37 @@ std::string ShaderEffectParser::ParseForDesc(
 				"ResolveSamplerBlock#{} 失败\n\t错误消息: {}", i, state.errorMsg));
 			return std::move(state.errorMsg);
 		}
+	}
+
+	if (!CheckForDuplicateName(effectInfo, drawInfo, state)) {
+		Logger::Get().Error(StrHelper::Concat(
+			"CheckForDuplicateName 失败\n\t错误消息: ", state.errorMsg));
+		return std::move(state.errorMsg);
+	}
+
+	if (!commonBlock.source.empty()) {
+		state.lineNumber = commonBlock.startLineNumer;
+		state.isNewLine = false;
+		if (!RemoveLeadingBlanks(commonBlock.source, state)) {
+			return std::move(state.errorMsg);
+		}
+		commonBlock.startLineNumer = state.lineNumber;
+	}
+	
+	drawInfo.passes.resize(passBlocks.size());
+	for (size_t i = 0; i < passBlocks.size(); ++i) {
+		BlockData& curBlock = passBlocks[i];
+
+		state.lineNumber = curBlock.startLineNumer;
+		state.isNewLine = false;
+
+		// 这会修改 curBlock.source
+		if (!ResolvePassBlock(curBlock.source, state, drawInfo)) {
+			Logger::Get().Error(fmt::format(
+				"ResolvePassBlock#{} 失败\n\t错误消息: {}", i, state.errorMsg));
+			return std::move(state.errorMsg);
+		}
+		curBlock.startLineNumer = state.lineNumber;
 	}
 	
 	return std::move(state.errorMsg);

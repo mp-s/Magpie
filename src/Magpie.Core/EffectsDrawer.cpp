@@ -106,9 +106,9 @@ bool EffectsDrawer::Initialize(
 		float scaleY = float(rendererSize.height) / outputSize.height;
 		if (scaleX <= scaleY) {
 			outputSize.width = rendererSize.width;
-			outputSize.height = std::lroundf(inputSize.height * scaleX);
+			outputSize.height = std::lroundf(outputSize.height * scaleX);
 		} else {
-			outputSize.width = std::lroundf(inputSize.width * scaleY);
+			outputSize.width = std::lroundf(outputSize.width * scaleY);
 			outputSize.height = rendererSize.height;
 		}
 	}
