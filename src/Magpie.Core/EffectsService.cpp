@@ -1,10 +1,11 @@
 #include "pch.h"
 #include "CommonSharedConstants.h"
-#include "ShaderEffectParser.h"
 #include "EffectsService.h"
 #include "Logger.h"
+#include "ShaderEffectParser.h"
 #include "StrHelper.h"
 #include "Win32Helper.h"
+#include <d3dcompiler.h>
 #include <rapidhash.h>
 
 namespace Magpie {
@@ -121,7 +122,9 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	const phmap::flat_hash_map<std::string, float>* inlineParams,
 	D3D_SHADER_MODEL shaderModel,
 	bool isFP16Supported,
-	bool isAdvancedColorSupported
+	bool isAdvancedColorSupported,
+	bool saveSources,
+	bool warningsAreErrors
 ) noexcept {
 	_WaitForInitialize();
 
@@ -142,25 +145,22 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 		}
 	}
 
-	ShaderEffectParserOptions options = {
-		.inlineParams = inlineParams,
-		.shaderModel = shaderModel
-	};
-	if (isFP16Supported && bool(effectInfo.flags & EffectInfoFlags::SupportFP16)) {
-		options.flags |= ShaderEffectParserFlags::EnableFP16;
+	ShaderEffectParserFlags parserFlags = ShaderEffectParserFlags::None;
+	if (isFP16Supported && bool(effectInfo.flags & EffectFlags::SupportFP16)) {
+		parserFlags |= ShaderEffectParserFlags::EnableFP16;
 	}
-	if (isAdvancedColorSupported && bool(effectInfo.flags & EffectInfoFlags::SupportAdvancedColor)) {
-		options.flags |= ShaderEffectParserFlags::EnableAdvancedColor;
+	if (isAdvancedColorSupported && bool(effectInfo.flags & EffectFlags::SupportAdvancedColor)) {
+		parserFlags |= ShaderEffectParserFlags::EnableAdvancedColor;
 	}
 	
 	// shaderModel 和 flags 不参与哈希，它们决定缓存键（也是缓存文件名）
 	uint64_t hash = rapidhash(source.data(), source.size());
 	if (inlineParams) {
 		for (const auto& pair : *inlineParams) {
-			for (const EffectInfoParameter& param : effectInfo.params) {
+			for (const EffectParameterDesc& param : effectInfo.params) {
 				if (param.name == pair.first) {
 					// 将参数值归一化然后保留 4 位精度
-					long normValue = std::lroundf((pair.second - param.minValue) /
+					long normValue = std::lround((pair.second - param.minValue) /
 						(param.maxValue - param.minValue) * 10000);
 					hash = phmap::HashState().combine(hash, pair.first, normValue);
 					break;
@@ -170,49 +170,64 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	}
 	
 	cacheKey = GetCacheFileName(
-		GetLinearEffectName(effectName), shaderModel, options.flags, hash);
+		GetLinearEffectName(effectName), shaderModel, parserFlags, hash);
 
-	if (!_shaderEffectCache.contains(cacheKey)) {
-		// _shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{});
+	{
+		auto lk = _shaderEffectCacheLock.lock_exclusive();
 
-		ShaderEffectDrawInfo effectDesc;
-		ShaderEffectSource effectSource;
-		std::string errorMsg = ShaderEffectParser::ParseForDesc(
-			effectInfo,
-			std::move(source),
-			options,
-			effectDesc,
-			effectSource
-		);
-		if (!errorMsg.empty()) {
-			// 解析失败
-			_shaderEffectCache.erase(cacheKey);
-			cacheKey.clear();
+		if (_shaderEffectCache.contains(cacheKey)) {
 			return cacheKey;
 		}
-	}
 
+		_shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{});
+	}
+	
+	_CompileShaderEffectAsync(
+		std::string(effectName),
+		std::move(source),
+		inlineParams,
+		shaderModel,
+		cacheKey,
+		isFP16Supported,
+		isAdvancedColorSupported,
+		saveSources,
+		warningsAreErrors
+	);
+	
 	return cacheKey;
 }
 
-bool EffectsService::GetTaskResult(std::string taskKey, const ShaderEffectDrawInfo** effectDesc) noexcept {
+bool EffectsService::GetTaskResult(
+	const std::string& taskKey,
+	const ShaderEffectDrawInfo** drawInfo
+) noexcept {
+	auto lk = _shaderEffectCacheLock.lock_shared();
+
 	auto it = _shaderEffectCache.find(taskKey);
 	if (it == _shaderEffectCache.end()) {
 		// 编译失败
 		return false;
 	}
 
-	if (it->second.lastAccess == std::numeric_limits<uint32_t>::max()) {
+	if (it->second.drawInfo.passes.empty()) {
 		// 尚未编译完成
-		*effectDesc = nullptr;
+		*drawInfo = nullptr;
 		return true;
 	}
 
-	*effectDesc = &it->second.effectDesc;
+	*drawInfo = &it->second.drawInfo;
 	return true;
 }
 
-void EffectsService::CleanCache(bool /*clearAll*/) noexcept {
+void EffectsService::ReleaseTask(const std::string& taskKey) noexcept {
+	auto lk = _shaderEffectCacheLock.lock_exclusive();
+
+	auto it = _shaderEffectCache.find(taskKey);
+	if (it == _shaderEffectCache.end()) {
+		return;
+	}
+
+	it->second.lastAccess = _nextLastAccess++;
 }
 
 void EffectsService::_WaitForInitialize() noexcept {
@@ -222,6 +237,187 @@ void EffectsService::_WaitForInitialize() noexcept {
 
 	_initialized.wait(false, std::memory_order_acquire);
 	_initializedCache = true;
+}
+
+class FXCInclude : public ID3DInclude {
+public:
+	FXCInclude(std::filesystem::path&& localDir) : _localDir(std::move(localDir)) {}
+
+	FXCInclude(const FXCInclude&) = default;
+	FXCInclude(FXCInclude&&) = default;
+
+	HRESULT CALLBACK Open(
+		D3D_INCLUDE_TYPE /*IncludeType*/,
+		LPCSTR pFileName,
+		LPCVOID /*pParentData*/,
+		LPCVOID* ppData,
+		UINT* pBytes
+	) noexcept override {
+		std::filesystem::path relativePath = _localDir / StrHelper::UTF8ToUTF16(pFileName);
+
+		std::string file;
+		if (!Win32Helper::ReadTextFile(relativePath.c_str(), file)) {
+			return E_FAIL;
+		}
+
+		char* result = new char[file.size()];
+		std::memcpy(result, file.data(), file.size());
+
+		*ppData = result;
+		*pBytes = (UINT)file.size();
+
+		return S_OK;
+	}
+
+	HRESULT CALLBACK Close(LPCVOID pData) noexcept override {
+		delete[](char*)pData;
+		return S_OK;
+	}
+
+private:
+	std::filesystem::path _localDir;
+};
+
+winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
+	std::string effectName,
+	std::string source,
+	const phmap::flat_hash_map<std::string, float>* inlineParams,
+	D3D_SHADER_MODEL shaderModel,
+	std::string cacheKey,
+	bool isFP16Supported,
+	bool isAdvancedColorSupported,
+	bool saveSources,
+	bool warningsAreErrors
+) noexcept {
+	co_await winrt::resume_background();
+
+	// 如果以后 _effectsMap 会变，这里应加锁
+	auto it = _effectsMap.find(effectName);
+	if (it == _effectsMap.end()) {
+		auto lk = _shaderEffectCacheLock.lock_exclusive();
+		_shaderEffectCache.erase(cacheKey);
+		co_return;
+	}
+	const EffectInfo& effectInfo = _effects[it->second];
+
+	ShaderEffectParserOptions options = {
+		.inlineParams = inlineParams,
+		.shaderModel = shaderModel
+	};
+	if (isFP16Supported && bool(effectInfo.flags & EffectFlags::SupportFP16)) {
+		options.flags |= ShaderEffectParserFlags::EnableFP16;
+	}
+	if (isAdvancedColorSupported && bool(effectInfo.flags & EffectFlags::SupportAdvancedColor)) {
+		options.flags |= ShaderEffectParserFlags::EnableAdvancedColor;
+	}
+
+	ShaderEffectDrawInfo effectDrawInfo;
+	SmallVector<ShaderEffectSource, 0> effectSources;
+	std::string errorMsg = ShaderEffectParser::ParseForDesc(
+		effectInfo,
+		std::move(source),
+		options,
+		effectDrawInfo,
+		effectSources
+	);
+	if (!errorMsg.empty()) {
+		// 解析失败
+		auto lk = _shaderEffectCacheLock.lock_exclusive();
+		_shaderEffectCache.erase(cacheKey);
+	}
+
+	std::wstring sourcesPath;
+	if (saveSources) {
+		sourcesPath = StrHelper::Concat(
+			CommonSharedConstants::SOURCES_DIR, L"\\", StrHelper::UTF8ToUTF16(effectInfo.name));
+
+		std::wstring sourcesDir = sourcesPath.substr(0, sourcesPath.find_last_of(L'\\'));
+		if (!Win32Helper::DirExists(sourcesDir.c_str())) {
+			Win32Helper::CreateDir(sourcesDir, true);
+		}
+	}
+
+	Win32Helper::RunParallel([&](uint32_t id) {
+		const auto& [source, macros] = effectSources[id];
+
+		if (saveSources) {
+			std::wstring fileName = effectDrawInfo.passes.size() == 1
+				? StrHelper::Concat(sourcesPath, L".hlsl")
+				: fmt::format(L"{}_Pass{}.hlsl", sourcesPath, id + 1);
+
+			if (!Win32Helper::WriteTextFile(fileName.c_str(), source)) {
+				Logger::Get().Error(fmt::format("保存 Pass{} 源码失败", id + 1));
+			}
+		}
+
+		{
+			winrt::com_ptr<ID3DBlob> errorMsg;
+
+			UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_ALL_RESOURCES_BOUND;
+			if (warningsAreErrors) {
+				flags |= D3DCOMPILE_WARNINGS_ARE_ERRORS;
+			}
+
+#ifdef _DEBUG
+			flags |= D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_DEBUG;
+#else
+			flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+#endif
+
+			auto shaderMacros = std::make_unique<D3D_SHADER_MACRO[]>(macros.size() + 1);
+			for (size_t i = 0; i < macros.size(); ++i) {
+				shaderMacros[i] = { macros[i].first.c_str(), macros[i].second.c_str() };
+			}
+
+			std::filesystem::path includeDir = CommonSharedConstants::EFFECTS_DIR;
+			size_t delimPos = effectName.find_last_of('\\');
+			if (delimPos != std::string::npos) {
+				includeDir /= StrHelper::UTF8ToUTF16(std::string_view(effectName.c_str(), delimPos));
+			}
+			FXCInclude fxcInclude(std::move(includeDir));
+
+			HRESULT hr = D3DCompile(
+				source.data(),
+				source.size(),
+				fmt::format("{}_Pass{}.hlsl", effectName, id + 1).c_str(),
+				shaderMacros.get(),
+				&fxcInclude,
+				"__M",
+				"cs_5_1",
+				flags,
+				0,
+				effectDrawInfo.passes[id].byteCode.put(),
+				errorMsg.put()
+			);
+			if (FAILED(hr)) {
+				if (errorMsg) {
+					Logger::Get().ComError(StrHelper::Concat("编译计算着色器失败: ", (const char*)errorMsg->GetBufferPointer()), hr);
+				}
+				return;
+			}
+
+			// 警告消息
+			if (errorMsg) {
+				Logger::Get().Warn(StrHelper::Concat("编译计算着色器时产生警告: ", (const char*)errorMsg->GetBufferPointer()));
+			}
+		}
+	}, (uint32_t)effectDrawInfo.passes.size());
+
+	for (const ShaderEffectPassDesc& passDesc : effectDrawInfo.passes) {
+		if (!passDesc.byteCode) {
+			// 编译失败
+			auto lk = _shaderEffectCacheLock.lock_exclusive();
+			_shaderEffectCache.erase(cacheKey);
+			co_return;
+		}
+	}
+
+	auto lk = _shaderEffectCacheLock.lock_exclusive();
+
+	auto it1 = _shaderEffectCache.find(cacheKey);
+	if (it1 != _shaderEffectCache.end()) {
+		it1->second.drawInfo = std::move(effectDrawInfo);
+	}
 }
 
 }

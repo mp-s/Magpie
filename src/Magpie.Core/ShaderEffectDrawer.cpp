@@ -8,6 +8,10 @@
 
 namespace Magpie {
 
+ShaderEffectDrawer::~ShaderEffectDrawer() noexcept {
+	EffectsService::Get().ReleaseTask(_compilationTaskId);
+}
+
 const EffectInfo* ShaderEffectDrawer::Initialize(
 	D3D12Context& d3d12Context,
 	const EffectOption& effectOption
@@ -32,7 +36,9 @@ bool ShaderEffectDrawer::Bind(SizeU /*inputSize*/, const ColorInfo& colorInfo) n
 		options.IsInlineParams() ? &_effectOption->parameters : nullptr,
 		_d3d12Context->GetShaderModel(),
 		_d3d12Context->IsFP16Supported(),
-		colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange
+		colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange,
+		options.IsSaveEffectSources(),
+		options.IsWarningsAreErrors()
 	);
 	if (_compilationTaskId.empty()) {
 		Logger::Get().Error("EffectsService::SubmitCompileShaderEffectTask 失败");
@@ -42,8 +48,16 @@ bool ShaderEffectDrawer::Bind(SizeU /*inputSize*/, const ColorInfo& colorInfo) n
 	return true;
 }
 
-bool ShaderEffectDrawer::IsReady() noexcept {
-	return false;
+EffectDrawerState ShaderEffectDrawer::GetState() noexcept {
+	if (_drawInfo) {
+		return EffectDrawerState::Ready;
+	}
+
+	if (EffectsService::Get().GetTaskResult(_compilationTaskId, &_drawInfo)) {
+		return _drawInfo ? EffectDrawerState::Ready : EffectDrawerState::NotReady;
+	} else {
+		return EffectDrawerState::Error;
+	}
 }
 
 HRESULT ShaderEffectDrawer::Draw(
@@ -51,6 +65,7 @@ HRESULT ShaderEffectDrawer::Draw(
 	uint32_t /*inputSrvOffset*/,
 	uint32_t /*outputUavOffset*/
 ) noexcept {
+	assert(_drawInfo);
 	return E_NOTIMPL;
 }
 

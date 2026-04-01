@@ -166,9 +166,21 @@ struct StrHelper {
 
 	template <typename CHAR_T>
 	static constexpr size_t StrLen(const CHAR_T* str) noexcept {
-		// std::char_traits 相比 std::strlen 支持更多字符类型
-		// 目前 MSVC 使用 __builtin_strlen，可以在编译时计算字符串常量的长度
+		// std::char_traits 相比 std::strlen 支持更多字符类型，也可以在编译时计算
+		// 字符串常量的长度。
 		return std::char_traits<CHAR_T>::length(str);
+	}
+
+	template <typename T>
+	static std::string_view ToString(T value) noexcept {
+		// 可以容纳所有算数类型，来自
+		// https://github.com/microsoft/STL/blob/edd1486e5fe753616b6fd3695da96f352b4092d2/stl/inc/format#L1719-L1729
+		constexpr uint32_t TO_CHARS_BUFFER_SIZE = 24;
+		static char buffer[TO_CHARS_BUFFER_SIZE];
+
+		std::to_chars_result result = std::to_chars(buffer, std::end(buffer), value);
+		assert(result.ec == std::errc{});
+		return std::string_view(buffer, result.ptr);
 	}
 
 	template <typename T1, typename T2, typename... AV,

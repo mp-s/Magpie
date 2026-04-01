@@ -719,8 +719,8 @@ SizeU CursorDrawer::_CalcCursorSize(
 			(GetSystemMetricsForDpi(SM_CXCURSOR, cursorDpi) * 32.0f);
 	}
 	
-	return { (uint32_t)std::lroundf(cursorBmpSize.width * scale),
-		(uint32_t)std::lroundf(cursorBmpSize.height * scale) };
+	return { (uint32_t)std::lround(cursorBmpSize.width * scale),
+		(uint32_t)std::lround(cursorBmpSize.height * scale) };
 }
 
 void CursorDrawer::_TryResolveCursorFramesFromSource(

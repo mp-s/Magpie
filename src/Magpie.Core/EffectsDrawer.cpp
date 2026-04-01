@@ -27,15 +27,15 @@ static SizeU CalcOutputSize(
 	case ScalingType::Normal:
 	{
 		return SizeU{
-			(uint32_t)std::lroundf(inputSize.width * effectOption.scale.first),
-			(uint32_t)std::lroundf(inputSize.height * effectOption.scale.second)
+			(uint32_t)std::lround(inputSize.width * effectOption.scale.first),
+			(uint32_t)std::lround(inputSize.height * effectOption.scale.second)
 		};
 	}
 	case ScalingType::Absolute:
 	{
 		return SizeU{
-			(uint32_t)std::lroundf(effectOption.scale.first),
-			(uint32_t)std::lroundf(effectOption.scale.second)
+			(uint32_t)std::lround(effectOption.scale.first),
+			(uint32_t)std::lround(effectOption.scale.second)
 		};
 	}
 	case ScalingType::Fit:
@@ -54,8 +54,8 @@ static SizeU CalcOutputSize(
 				float(rendererSize.height) / inputSize.height
 			);
 			return SizeU{
-				(uint32_t)std::lroundf(inputSize.width * fillScale * effectOption.scale.first),
-				(uint32_t)std::lroundf(inputSize.height * fillScale * effectOption.scale.second)
+				(uint32_t)std::lround(inputSize.width * fillScale * effectOption.scale.first),
+				(uint32_t)std::lround(inputSize.height * fillScale * effectOption.scale.second)
 			};
 		}
 		[[fallthrough]];
@@ -106,9 +106,9 @@ bool EffectsDrawer::Initialize(
 		float scaleY = float(rendererSize.height) / outputSize.height;
 		if (scaleX <= scaleY) {
 			outputSize.width = rendererSize.width;
-			outputSize.height = std::lroundf(outputSize.height * scaleX);
+			outputSize.height = std::lround(outputSize.height * scaleX);
 		} else {
-			outputSize.width = std::lroundf(outputSize.width * scaleY);
+			outputSize.width = std::lround(outputSize.width * scaleY);
 			outputSize.height = rendererSize.height;
 		}
 	}

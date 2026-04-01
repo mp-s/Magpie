@@ -1,5 +1,4 @@
 #include "pch.h"
-#include "EffectHelper.h"
 #include "EffectInfo.h"
 #include "LocalizationService.h"
 #include "Logger.h"
@@ -527,7 +526,7 @@ static bool ResolveHeaderUse(
 	}
 
 	static constexpr std::array FLAG_INFOS = {
-		std::make_pair("DYNAMIC", EffectInfoFlags::UseDynamic)
+		std::make_pair("DYNAMIC", EffectFlags::UseDynamic)
 	};
 
 	std::bitset<FLAG_INFOS.size()> processed;
@@ -567,8 +566,8 @@ static bool ResolveHeaderCapability(
 	}
 
 	static constexpr std::array FLAG_INFOS = {
-		std::make_pair("FP16", EffectInfoFlags::SupportFP16),
-		std::make_pair("ADVANCEDCOLOR", EffectInfoFlags::SupportAdvancedColor)
+		std::make_pair("FP16", EffectFlags::SupportFP16),
+		std::make_pair("ADVANCEDCOLOR", EffectFlags::SupportAdvancedColor)
 	};
 
 	std::bitset<FLAG_INFOS.size()> processed;
@@ -654,7 +653,7 @@ static bool ResolveParameterDefault(
 	ParserState& state,
 	void* data
 ) noexcept {
-	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->defaultValue)) {
+	if (!GetNextNumber(source, state, ((EffectParameterDesc*)data)->defaultValue)) {
 		return false;
 	}
 
@@ -666,7 +665,7 @@ static bool ResolveParameterMin(
 	ParserState& state,
 	void* data
 ) noexcept {
-	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->minValue)) {
+	if (!GetNextNumber(source, state, ((EffectParameterDesc*)data)->minValue)) {
 		return false;
 	}
 
@@ -678,7 +677,7 @@ static bool ResolveParameterMax(
 	ParserState& state,
 	void* data
 ) noexcept {
-	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->maxValue)) {
+	if (!GetNextNumber(source, state, ((EffectParameterDesc*)data)->maxValue)) {
 		return false;
 	}
 
@@ -690,7 +689,13 @@ static bool ResolveParameterStep(
 	ParserState& state,
 	void* data
 ) noexcept {
-	if (!GetNextNumber(source, state, ((EffectInfoParameter*)data)->step)) {
+	float& step = ((EffectParameterDesc*)data)->step;
+	if (!GetNextNumber(source, state, step)) {
+		return false;
+	}
+
+	if (step <= FLOAT_EPSILON<float>) {
+		state.errorMsg = "非法的 STEP";
 		return false;
 	}
 
@@ -707,14 +712,14 @@ static bool ResolveParameterLabel(
 		return false;
 	}
 
-	((EffectInfoParameter*)data)->label = label;
+	((EffectParameterDesc*)data)->label = label;
 	return true;
 }
 
 static bool ResolveParameterBlock(
 	std::string_view source,
 	ParserState& state,
-	EffectInfoParameter& effectInfoParameter
+	EffectParameterDesc& paramDesc
 ) noexcept {
 	static constexpr std::array COMMAND_INFOS = {
 		CommandInfo{ "DEFAULT", ResolveParameterDefault, true },
@@ -724,12 +729,13 @@ static bool ResolveParameterBlock(
 		CommandInfo{ "LABEL", ResolveParameterLabel, false }
 	};
 
-	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &effectInfoParameter)) {
+	if (!ResolveBlockCommon(COMMAND_INFOS, source, state, &paramDesc)) {
 		return false;
 	}
 
-	if (effectInfoParameter.minValue > effectInfoParameter.defaultValue ||
-		effectInfoParameter.maxValue < effectInfoParameter.defaultValue) {
+	if (paramDesc.minValue > paramDesc.defaultValue ||
+		paramDesc.maxValue < paramDesc.defaultValue) {
+		state.errorMsg = "非法的 MIN、MAX 和 DEFAULT";
 		return false;
 	}
 
@@ -739,8 +745,43 @@ static bool ResolveParameterBlock(
 		return false;
 	}
 
-	if (token != "float" && token != "int") {
-		SetGeneralParseError(state, token, "float|int");
+	if (token == "float") {
+		paramDesc.type = EffectParameterType::Float;
+	} else if (token == "int") {
+		paramDesc.type = EffectParameterType::Int;
+
+		if (std::abs(paramDesc.minValue -
+			std::round(paramDesc.minValue)) > FLOAT_EPSILON<float>)
+		{
+			state.errorMsg = "非法的 MIN";
+		}
+		if (std::abs(paramDesc.maxValue -
+			std::round(paramDesc.maxValue)) > FLOAT_EPSILON<float>)
+		{
+			state.errorMsg = "非法的 MAX";
+		}
+		if (std::abs(paramDesc.defaultValue -
+			std::round(paramDesc.defaultValue)) > FLOAT_EPSILON<float>)
+		{
+			state.errorMsg = "非法的 DEFAULT";
+		}
+	} else if (token == "uint") {
+		paramDesc.type = EffectParameterType::UInt;
+
+		if (paramDesc.minValue < 0 || std::abs(paramDesc.minValue -
+			std::round(paramDesc.minValue)) > FLOAT_EPSILON<float>) {
+			state.errorMsg = "非法的 MIN";
+		}
+		if (paramDesc.maxValue < 0 || std::abs(paramDesc.maxValue -
+			std::round(paramDesc.maxValue)) > FLOAT_EPSILON<float>) {
+			state.errorMsg = "非法的 MAX";
+		}
+		if (paramDesc.defaultValue < 0 || std::abs(paramDesc.defaultValue -
+			std::round(paramDesc.defaultValue)) > FLOAT_EPSILON<float>) {
+			state.errorMsg = "非法的 DEFAULT";
+		}
+	} else {
+		SetGeneralParseError(state, token, "float|int|uint");
 		return false;
 	}
 
@@ -748,7 +789,7 @@ static bool ResolveParameterBlock(
 		return false;
 	}
 
-	effectInfoParameter.name = token;
+	paramDesc.name = token;
 
 	if (!RemoveLeadingBlanks(source, state)) {
 		return false;
@@ -807,13 +848,10 @@ static bool ResolveTextureFormat(
 		phmap::flat_hash_map<std::string, ShaderEffectTextureFormat> result;
 
 		// UNKNOWN 不可用
-		constexpr size_t descCount = std::size(EffectHelper::SHADER_TEXTURE_FORMAT_DESCS) - 1;
-		result.reserve(descCount);
-		for (size_t i = 1; i < descCount; ++i) {
-			result.emplace(
-				EffectHelper::SHADER_TEXTURE_FORMAT_DESCS[i].name,
-				(ShaderEffectTextureFormat)i
-			);
+		constexpr size_t formatCount = std::size(SHADER_TEXTURE_FORMAT_PROPS) - 1;
+		result.reserve(formatCount);
+		for (size_t i = 1; i < formatCount; ++i) {
+			result.emplace(SHADER_TEXTURE_FORMAT_PROPS[i].name, (ShaderEffectTextureFormat)i);
 		}
 		return result;
 	}();
@@ -878,8 +916,13 @@ static bool ResolveTextureBlock(
 	} else {
 		desc.name = token;
 
+		if (desc.format == ShaderEffectTextureFormat::UNKNOWN) {
+			state.errorMsg = "缺少 FORMAT 属性";
+			return false;
+		}
+
 		if (desc.source.empty()) {
-			// 不存在 SOURCE 属性时必须指定 WIDTH、HEIGHT 和 FORMAT
+			// 不存在 SOURCE 属性时必须指定 WIDTH、HEIGHT
 			if (desc.widthExpr.empty()) {
 				state.errorMsg = "缺少 WIDTH 属性";
 				return false;
@@ -889,21 +932,11 @@ static bool ResolveTextureBlock(
 				state.errorMsg = "缺少 HEIGHT 属性";
 				return false;
 			}
-
-			if (desc.format == ShaderEffectTextureFormat::UNKNOWN) {
-				state.errorMsg = "缺少 FORMAT 属性";
-				return false;
-			}
 		} else {
 			// SOURCE 和 WIDTH/HEIGHT 冲突
 			if (!desc.widthExpr.empty() || !desc.heightExpr.empty()) {
 				state.errorMsg = "SOURCE 和 WIDTH/HEIGHT 冲突";
 				return false;
-			}
-
-			// 存在 SOURCE 时 FORMAT 可选，默认值为 R16G16B16A16_FLOAT
-			if (desc.format == ShaderEffectTextureFormat::UNKNOWN) {
-				desc.format = ShaderEffectTextureFormat::R16G16B16A16_FLOAT;
 			}
 		}
 	}
@@ -1225,8 +1258,9 @@ static bool ResolvePassBlock(
 	ParserState& state,
 	ShaderEffectDrawInfo& drawInfo
 ) noexcept {
-	size_t passIdx;
-	if (!GetNextNumber(source, state, passIdx)) {
+	// Pass 序号从 1 开始
+	size_t passIdxBase1;
+	if (!GetNextNumber(source, state, passIdxBase1)) {
 		return false;
 	}
 
@@ -1234,16 +1268,15 @@ static bool ResolvePassBlock(
 		return false;
 	}
 
-	// Pass 序号从 1 开始
-	if (passIdx == 0 || passIdx > drawInfo.passes.size()) {
+	if (passIdxBase1 == 0 || passIdxBase1 > drawInfo.passes.size()) {
 		state.errorMsg = "通道序号错误";
 		return false;
 	}
 
-	ShaderEffectPassDesc& curPassDesc = drawInfo.passes[passIdx - 1];
+	ShaderEffectPassDesc& curPassDesc = drawInfo.passes[passIdxBase1 - 1];
 
 	if (!curPassDesc.outputs.empty()) {
-		state.errorMsg = fmt::format("存在多个 Pass{}", passIdx);
+		state.errorMsg = fmt::format("存在多个 Pass{}", passIdxBase1);
 		return false;
 	}
 
@@ -1288,12 +1321,12 @@ static bool ResolvePassBlock(
 		// INPUT 和 OUTPUT 不可能是交集
 		assert(texIdx >= 2);
 		const std::string& texName = drawInfo.textures[size_t(texIdx - 2)].name;
-		state.errorMsg = fmt::format("纹理 {0} 同时作为 Pass{1} 的输入和输出", texName, passIdx);
+		state.errorMsg = fmt::format("纹理 {0} 同时作为 Pass{1} 的输入和输出", texName, passIdxBase1);
 		return false;
 	}
 
 	// 最后一个通道的输出只能是 OUTPUT
-	if (passIdx == drawInfo.passes.size()) {
+	if (passIdxBase1 == drawInfo.passes.size()) {
 		if (curPassDesc.outputs.size() != 1 || curPassDesc.outputs[0] != 1) {
 			state.errorMsg = "最后一个通道的输出只能是 OUTPUT";
 			return false;
@@ -1302,7 +1335,7 @@ static bool ResolvePassBlock(
 
 	// 生成默认描述
 	if (curPassDesc.desc.empty()) {
-		curPassDesc.desc = fmt::format("Pass {}", passIdx);
+		curPassDesc.desc = fmt::format("Pass {}", passIdxBase1);
 	}
 
 	return true;
@@ -1399,7 +1432,7 @@ std::string ShaderEffectParser::ParseForInfo(
 	// 检查是否有重复的标识符
 	{
 		phmap::flat_hash_set<std::string_view> names;
-		for (const EffectInfoParameter& param : effectInfo.params) {
+		for (const EffectParameterDesc& param : effectInfo.params) {
 			if (names.contains(param.name)) {
 				state.errorMsg = fmt::format("标识符 \"{}\" 重复", param.name);
 				return std::move(state.errorMsg);
@@ -1421,7 +1454,7 @@ static bool CheckForDuplicateName(
 	std::string_view dupName;
 
 	// 参数已在 ParseForInfo 中检查过
-	for (const EffectInfoParameter& param : effectInfo.params) {
+	for (const EffectParameterDesc& param : effectInfo.params) {
 		names.emplace(param.name);
 	}
 
@@ -1453,12 +1486,409 @@ static bool CheckForDuplicateName(
 	}
 }
 
+static void TrimLineBreaks(BlockData& codeBlock) noexcept {
+	for (size_t i = 0; i < codeBlock.source.size(); ++i) {
+		if (codeBlock.source[i] != '\n') {
+			if (i != 0) {
+				codeBlock.source.remove_prefix(i);
+				codeBlock.startLineNumer += (uint32_t)i;
+			}
+			
+			// 每个区块必以 \n 结尾
+			assert(codeBlock.source.ends_with('\n'));
+
+			size_t j = codeBlock.source.size() - 2;
+			for (; j > 0; --j) {
+				if (codeBlock.source[j] != '\n') {
+					break;
+				}
+			}
+			codeBlock.source.remove_suffix(codeBlock.source.size() - 1 - j);
+			return;
+		}
+	}
+
+	codeBlock.source = {};
+}
+
+static std::string_view GetTextureName(
+	const ShaderEffectDrawInfo& drawInfo,
+	uint32_t outputTextureIdx
+) noexcept {
+	if (outputTextureIdx == 0) {
+		return "INPUT";
+	} else if (outputTextureIdx == 1) {
+		return "OUTPUT";
+	} else {
+		return drawInfo.textures[size_t(outputTextureIdx - 2)].name;
+	}
+}
+
+static std::string_view GetTextureTexelType(
+	const ShaderEffectDrawInfo& drawInfo,
+	uint32_t outputTextureIdx
+) noexcept {
+	if (outputTextureIdx <= 1) {
+		return "MF4";
+	} else {
+		ShaderEffectTextureFormat format =
+			drawInfo.textures[size_t(outputTextureIdx - 2)].format;
+		return SHADER_TEXTURE_FORMAT_PROPS[(uint32_t)format].texelType;
+	}
+}
+
+static void GenerateShaderSources(
+	const EffectInfo& effectInfo,
+	const ShaderEffectParserOptions& options,
+	const ShaderEffectDrawInfo& drawInfo,
+	const BlockData& commonCodeBlock,
+	const SmallVectorImpl<BlockData>& passCodeBlocks,
+	SmallVectorImpl<ShaderEffectSource>& effectSources
+) noexcept {
+	const uint32_t passCount = (uint32_t)drawInfo.passes.size();
+
+	// 所有通道共用的常量缓冲区
+	std::string headerCode = R"(cbuffer __CB1 : register(b0) {
+	uint2 __inputSize;
+	uint2 __outputSize;
+	float2 __inputPt;
+	float2 __outputPt;
+	float2 __scale;
+)";
+
+	// PS 样式需要额外常量，除了最后一个通道
+	for (uint32_t i = 0, end = passCount - 1; i < end; ++i) {
+		if (bool(drawInfo.passes[i].flags & ShaderEffectPassFlags::PSStyle)) {
+			headerCode.append(fmt::format("\tfloat2 __pass{0}OutputPt;\n", i + 1));
+		}
+	}
+
+	constexpr const char* PARAM_TYPE_STRS[] = { "float ","int ","uint " };
+
+	if (!options.inlineParams) {
+		for (const EffectParameterDesc& paramDesc : effectInfo.params) {
+			headerCode.append("\t")
+				.append(PARAM_TYPE_STRS[(int)paramDesc.type])
+				.append(paramDesc.name)
+				.append(";\n");
+		}
+	}
+
+	headerCode.append("};\n");
+
+	if (options.inlineParams) {
+		for (const EffectParameterDesc& paramDesc : effectInfo.params) {
+			headerCode.append("static const ")
+				.append(PARAM_TYPE_STRS[(int)paramDesc.type])
+				.append(paramDesc.name)
+				.append(" = ");
+
+			auto it = options.inlineParams->find(paramDesc.name);
+			float value = it == options.inlineParams->end() ? paramDesc.defaultValue : it->second;
+			if (paramDesc.type == EffectParameterType::Float) {
+				headerCode.append(StrHelper::ToString(value));
+			} else {
+				headerCode.append(StrHelper::ToString(std::lround(value)));
+			}
+
+			headerCode.append(";\n");
+		}
+
+		headerCode.append("\n");
+	}
+
+	effectSources.resize(passCount);
+	for (uint32_t passIdx = 0; passIdx < passCount; ++passIdx) {
+		auto& [source, macros] = effectSources[passIdx];
+		const ShaderEffectPassDesc& curPassDesc = drawInfo.passes[passIdx];
+		const BlockData& curPassCodeBlock = passCodeBlocks[passIdx];
+
+		// 内置宏
+		macros.reserve(32);
+		macros.emplace_back("MP_BLOCK_WIDTH", StrHelper::ToString(curPassDesc.blockSize.width));
+		macros.emplace_back("MP_BLOCK_HEIGHT", StrHelper::ToString(curPassDesc.blockSize.height));
+		macros.emplace_back("MP_NUM_THREADS_X", StrHelper::ToString(curPassDesc.numThreads[0]));
+		macros.emplace_back("MP_NUM_THREADS_Y", StrHelper::ToString(curPassDesc.numThreads[1]));
+		macros.emplace_back("MP_NUM_THREADS_Z", StrHelper::ToString(curPassDesc.numThreads[2]));
+
+		if (bool(curPassDesc.flags & ShaderEffectPassFlags::PSStyle)) {
+			macros.emplace_back("MP_PS_STYLE", "");
+		}
+
+		if (options.inlineParams) {
+			macros.emplace_back("MP_INLINE_PARAMS", "");
+		}
+
+#ifdef _DEBUG
+		macros.emplace_back("MP_DEBUG", "");
+#endif
+
+		// MF 宏
+		static const char* NUMBER_STRS[] = { "1","2","3","4" };
+		if (bool(effectInfo.flags & EffectFlags::SupportFP16) &&
+			bool(options.flags & ShaderEffectParserFlags::EnableFP16)) {
+			macros.emplace_back("MP_FP16", "");
+			macros.emplace_back("MF", "min16float");
+
+			for (uint32_t i = 0; i < 4; ++i) {
+				macros.emplace_back(
+					StrHelper::Concat("MF", NUMBER_STRS[i]),
+					StrHelper::Concat("min16float", NUMBER_STRS[i])
+				);
+
+				for (uint32_t j = 0; j < 4; ++j) {
+					macros.emplace_back(
+						StrHelper::Concat("MF", NUMBER_STRS[i], "x", NUMBER_STRS[j]),
+						StrHelper::Concat("min16float", NUMBER_STRS[i], "x", NUMBER_STRS[j])
+					);
+				}
+			}
+		} else {
+			macros.emplace_back("MF", "float");
+
+			for (uint32_t i = 0; i < 4; ++i) {
+				macros.emplace_back(
+					StrHelper::Concat("MF", NUMBER_STRS[i]),
+					StrHelper::Concat("float", NUMBER_STRS[i])
+				);
+
+				for (uint32_t j = 0; j < 4; ++j) {
+					macros.emplace_back(
+						StrHelper::Concat("MF", NUMBER_STRS[i], "x", NUMBER_STRS[j]),
+						StrHelper::Concat("float", NUMBER_STRS[i], "x", NUMBER_STRS[j])
+					);
+				}
+			}
+		}
+
+		// 估算需要的空间
+		source.reserve(headerCode.size() + commonCodeBlock.source.size() +
+			curPassCodeBlock.source.size() + 4096u);
+
+		// 常量缓冲区
+		source.append(headerCode);
+
+		// SRV
+		for (uint32_t i = 0, end = (uint32_t)curPassDesc.inputs.size(); i < end; ++i) {
+			uint32_t curInput = curPassDesc.inputs[i];
+			assert(curInput != 1);
+
+			if (curInput == 0) {
+				assert(i == 0);
+				source.append("Texture2D<MF4> INPUT : register(t0);\n");
+			} else {
+				const ShaderEffectTextureDesc& texDesc = drawInfo.textures[size_t(curInput - 2)];
+				const char* texelType = SHADER_TEXTURE_FORMAT_PROPS[(uint32_t)texDesc.format].texelType;
+				source.append(fmt::format("Texture2D<{}> {} : register(t{});\n", texelType, texDesc.name, i));
+			}
+		}
+
+		// UAV
+		for (uint32_t i = 0, end = (uint32_t)curPassDesc.outputs.size(); i < end; ++i) {
+			uint32_t curOutput = curPassDesc.outputs[i];
+			assert(curOutput != 0);
+
+			if (curOutput == 1) {
+				assert(i == 0);
+				source.append(fmt::format("RWTexture2D<MF4> OUTPUT : register(u0);\n"));
+			} else {
+				const ShaderEffectTextureDesc& texDesc = drawInfo.textures[size_t(curOutput - 2)];
+				const char* texelType = SHADER_TEXTURE_FORMAT_PROPS[(uint32_t)texDesc.format].uavTexelType;
+				source.append(fmt::format("RWTexture2D<{}> {} : register(u{});\n", texelType, texDesc.name, i));
+			}
+		}
+
+		// 采样器
+		for (uint32_t i = 0, end = (uint32_t)drawInfo.samplers.size(); i < end; ++i) {
+			source.append(fmt::format("SamplerState {} : register(s{});\n",
+				drawInfo.samplers[i].name, i));
+		}
+
+		source.push_back('\n');
+
+		// 内置函数
+		// MulAdd 旨在用 mad 代替 mul，经测试这可以大幅提高性能，且和 FP16 的兼容性更好，见 GH#1049。
+		source.append(R"(uint __Bfe(uint src, uint off, uint bits) { uint mask = (1u << bits) - 1; return (src >> off) & mask; }
+uint __BfiM(uint src, uint ins, uint bits) { uint mask = (1u << bits) - 1; return (ins & mask) | (src & (~mask)); }
+uint2 Rmp8x8(uint a) { return uint2(__Bfe(a, 1u, 3u), __BfiM(__Bfe(a, 3u, 3u), a, 1u)); }
+uint2 GetInputSize() { return __inputSize; }
+float2 GetInputPt() { return __inputPt; }
+uint2 GetOutputSize() { return __outputSize; }
+float2 GetOutputPt() { return __outputPt; }
+float2 GetScale() { return __scale; }
+MF2 MulAdd(MF2 x, MF2x2 y, MF2 a) {
+	MF2 result = a;
+	result = mad(x.x, y._m00_m01, result);
+	result = mad(x.y, y._m10_m11, result);
+	return result;
+}
+MF3 MulAdd(MF2 x, MF2x3 y, MF3 a) {
+	MF3 result = a;
+	result = mad(x.x, y._m00_m01_m02, result);
+	result = mad(x.y, y._m10_m11_m12, result);
+	return result;
+}
+MF4 MulAdd(MF2 x, MF2x4 y, MF4 a) {
+	MF4 result = a;
+	result = mad(x.x, y._m00_m01_m02_m03, result);
+	result = mad(x.y, y._m10_m11_m12_m13, result);
+	return result;
+}
+MF2 MulAdd(MF3 x, MF3x2 y, MF2 a) {
+	MF2 result = a;
+	result = mad(x.x, y._m00_m01, result);
+	result = mad(x.y, y._m10_m11, result);
+	result = mad(x.z, y._m20_m21, result);
+	return result;
+}
+MF3 MulAdd(MF3 x, MF3x3 y, MF3 a) {
+	MF3 result = a;
+	result = mad(x.x, y._m00_m01_m02, result);
+	result = mad(x.y, y._m10_m11_m12, result);
+	result = mad(x.z, y._m20_m21_m22, result);
+	return result;
+}
+MF4 MulAdd(MF3 x, MF3x4 y, MF4 a) {
+	MF4 result = a;
+	result = mad(x.x, y._m00_m01_m02_m03, result);
+	result = mad(x.y, y._m10_m11_m12_m13, result);
+	result = mad(x.z, y._m20_m21_m22_m23, result);
+	return result;
+}
+MF2 MulAdd(MF4 x, MF4x2 y, MF2 a) {
+	MF2 result = a;
+	result = mad(x.x, y._m00_m01, result);
+	result = mad(x.y, y._m10_m11, result);
+	result = mad(x.z, y._m20_m21, result);
+	result = mad(x.w, y._m30_m31, result);
+	return result;
+}
+MF3 MulAdd(MF4 x, MF4x3 y, MF3 a) {
+	MF3 result = a;
+	result = mad(x.x, y._m00_m01_m02, result);
+	result = mad(x.y, y._m10_m11_m12, result);
+	result = mad(x.z, y._m20_m21_m22, result);
+	result = mad(x.w, y._m30_m31_m32, result);
+	return result;
+}
+MF4 MulAdd(MF4 x, MF4x4 y, MF4 a) {
+	MF4 result = a;
+	result = mad(x.x, y._m00_m01_m02_m03, result);
+	result = mad(x.y, y._m10_m11_m12_m13, result);
+	result = mad(x.z, y._m20_m21_m22_m23, result);
+	result = mad(x.w, y._m30_m31_m32_m33, result);
+	return result;
+}
+
+)");
+
+		source.append(commonCodeBlock.source);
+		source.push_back('\n');
+		source.append(curPassCodeBlock.source)
+			.append("\n\n");
+
+		// 着色器入口
+		const uint32_t passIdxBase1 = passIdx + 1;
+		if (bool(curPassDesc.flags & ShaderEffectPassFlags::PSStyle)) {
+			uint32_t outputCount = (uint32_t)curPassDesc.outputs.size();
+
+			if (outputCount <= 1u) {
+				std::string outputPt;
+				if (passIdxBase1 == passCount) {
+					// 最后一个通道
+					outputPt = "__outputPt";
+				} else {
+					outputPt = fmt::format("__pass{}OutputPt", passIdxBase1);
+				}
+
+				source.append(fmt::format(R"([numthreads(64, 1, 1)]
+void __M(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {{
+	uint2 gxy = (gid.xy << 4u) + Rmp8x8(tid.x);
+	float2 pos = (gxy + 0.5f) * {1};
+	float2 step = 8 * {1};
+
+	{2}[gxy] = Pass{0}(pos);
+
+	gxy.x += 8u;
+	pos.x += step.x;
+	{2}[gxy] = Pass{0}(pos);
+	
+	gxy.y += 8u;
+	pos.y += step.y;
+	{2}[gxy] = Pass{0}(pos);
+	
+	gxy.x -= 8u;
+	pos.x -= step.x;
+	{2}[gxy] = Pass{0}(pos);
+}}
+)", passIdxBase1, outputPt, GetTextureName(drawInfo, curPassDesc.outputs[0])));
+			} else {
+				// 多渲染目标
+				source.append(fmt::format(R"([numthreads(64, 1, 1)]
+void __M(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {{
+	uint2 gxy = (gid.xy << 4u) + Rmp8x8(tid.x);
+	float2 pos = (gxy + 0.5f) * __pass{0}OutputPt;
+	float2 step = 8 * __pass{0}OutputPt;
+)", passIdxBase1));
+				for (uint32_t i = 0; i < outputCount; ++i) {
+					source.append(fmt::format("\t{} c{};\n",
+						GetTextureTexelType(drawInfo, curPassDesc.outputs[i]), i));
+				}
+
+				std::string callPass = fmt::format("\tPass{}(pos, ", passIdxBase1);
+
+				for (uint32_t i = 0, end = outputCount - 1; i < end; ++i) {
+					callPass.append(fmt::format("c{}, ", i));
+				}
+				callPass.append(fmt::format("c{});\n", outputCount - 1));
+				for (uint32_t i = 0; i < outputCount; ++i) {
+					callPass.append(fmt::format("\t\t\t{}[gxy] = c{};\n",
+						GetTextureName(drawInfo, curPassDesc.outputs[i]), i));
+				}
+
+				source.append(fmt::format(R"({0}
+	gxy.x += 8u;
+	pos.x += step.x;
+	{0}
+	
+	gxy.y += 8u;
+	pos.y += step.y;
+	{0}
+	
+	gxy.x -= 8u;
+	pos.x -= step.x;
+	{0}
+}}
+)", callPass, passIdxBase1));
+			}
+		} else {
+			// 大部分情况下 BLOCK_SIZE 都是 2 的整数次幂，这时将乘法转换为位移
+			std::string blockStartExpr;
+			if (curPassDesc.blockSize.width == curPassDesc.blockSize.height &&
+				std::has_single_bit(curPassDesc.blockSize.width))
+			{
+				int nShift = std::bit_width(curPassDesc.blockSize.width) - 1;
+				blockStartExpr = fmt::format("(gid.xy << {})", nShift);
+			} else {
+				blockStartExpr = fmt::format("gid.xy * uint2({}, {})",
+					curPassDesc.blockSize.width, curPassDesc.blockSize.height);
+			}
+
+			source.append(fmt::format(R"([numthreads({}, {}, {})]
+void __M(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {{
+	Pass{}({}, tid);
+}}
+)", curPassDesc.numThreads[0], curPassDesc.numThreads[1], curPassDesc.numThreads[2], passIdxBase1, blockStartExpr));
+		}
+	}
+}
+
 std::string ShaderEffectParser::ParseForDesc(
 	const EffectInfo& effectInfo,
 	std::string&& source,
-	const ShaderEffectParserOptions& /*options*/,
+	const ShaderEffectParserOptions& options,
 	ShaderEffectDrawInfo& drawInfo,
-	ShaderEffectSource& /*effectSource*/
+	SmallVectorImpl<ShaderEffectSource>& effectSources
 ) noexcept {
 	assert(!source.empty());
 
@@ -1585,6 +2015,8 @@ std::string ShaderEffectParser::ParseForDesc(
 			return std::move(state.errorMsg);
 		}
 		commonBlock.startLineNumer = state.lineNumber;
+
+		TrimLineBreaks(commonBlock);
 	}
 	
 	drawInfo.passes.resize(passBlocks.size());
@@ -1601,8 +2033,11 @@ std::string ShaderEffectParser::ParseForDesc(
 			return std::move(state.errorMsg);
 		}
 		curBlock.startLineNumer = state.lineNumber;
+
+		TrimLineBreaks(curBlock);
 	}
-	
+
+	GenerateShaderSources(effectInfo, options, drawInfo, commonBlock, passBlocks, effectSources);
 	return std::move(state.errorMsg);
 }
 

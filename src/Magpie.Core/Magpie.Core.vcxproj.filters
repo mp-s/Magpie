@@ -28,9 +28,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
-    <ClInclude Include="EffectHelper.h">
-      <Filter>Helpers</Filter>
-    </ClInclude>
     <ClInclude Include="ScalingWindow.h" />
     <ClInclude Include="CursorManager.h" />
     <ClInclude Include="include\ScalingOptions.h">
@@ -102,9 +99,6 @@
     </ClInclude>
     <ClInclude Include="include\EffectInfo.h">
       <Filter>Include</Filter>
-    </ClInclude>
-    <ClInclude Include="ShaderEffectCompilerService.h">
-      <Filter>Services</Filter>
     </ClInclude>
     <ClInclude Include="CursorHelper.h">
       <Filter>Helpers</Filter>
@@ -189,9 +183,6 @@
       <Filter>EffectDrawer</Filter>
     </ClCompile>
     <ClCompile Include="ShaderEffectParser.cpp" />
-    <ClCompile Include="ShaderEffectCompilerService.cpp">
-      <Filter>Services</Filter>
-    </ClCompile>
     <ClCompile Include="CursorHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>

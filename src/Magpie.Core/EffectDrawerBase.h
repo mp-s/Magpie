@@ -7,6 +7,12 @@ struct EffectOption;
 struct EffectInfo;
 class ComputeContext;
 
+enum class EffectDrawerState {
+	NotReady,
+	Ready,
+	Error
+};
+
 class EffectDrawerBase {
 public:
 	EffectDrawerBase() = default;
@@ -22,7 +28,7 @@ public:
 
 	virtual bool Bind(SizeU inputSize, const ColorInfo& colorInfo) noexcept = 0;
 
-	virtual bool IsReady() noexcept = 0;
+	virtual EffectDrawerState GetState() noexcept = 0;
 
 	virtual HRESULT Draw(
 		ComputeContext& computeContext,

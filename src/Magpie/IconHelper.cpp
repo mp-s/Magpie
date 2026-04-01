@@ -80,9 +80,9 @@ static SoftwareBitmap HIcon2SoftwareBitmap(HICON hIcon) {
 				// 预乘 Alpha 通道
 				const float alpha = pixels[i + 3] / 255.0f;
 
-				pixels[i] = (uint8_t)std::lroundf(pixels[i] * alpha);
-				pixels[i + 1] = (uint8_t)std::lroundf(pixels[i + 1] * alpha);
-				pixels[i + 2] = (uint8_t)std::lroundf(pixels[i + 2] * alpha);
+				pixels[i] = (uint8_t)std::lround(pixels[i] * alpha);
+				pixels[i + 1] = (uint8_t)std::lround(pixels[i + 1] * alpha);
+				pixels[i + 2] = (uint8_t)std::lround(pixels[i + 2] * alpha);
 			}
 		} else if (iconInfo.hbmMask) {
 			// 彩色掩码图标
@@ -251,9 +251,9 @@ SoftwareBitmap IconHelper::ExtractIconFromExe(const wchar_t* fileName, uint32_t 
 			// 预乘 Alpha 通道
 			float alpha = pixels[i + 3] / 255.0f;
 
-			pixels[i] = (BYTE)std::lroundf(pixels[i] * alpha);
-			pixels[i + 1] = (BYTE)std::lroundf(pixels[i + 1] * alpha);
-			pixels[i + 2] = (BYTE)std::lroundf(pixels[i + 2] * alpha);
+			pixels[i] = (BYTE)std::lround(pixels[i] * alpha);
+			pixels[i + 1] = (BYTE)std::lround(pixels[i + 1] * alpha);
+			pixels[i + 2] = (BYTE)std::lround(pixels[i + 2] * alpha);
 		}
 	}
 

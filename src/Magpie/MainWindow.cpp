@@ -183,8 +183,8 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 		// 设置窗口最小尺寸
 		MINMAXINFO* mmi = (MINMAXINFO*)lParam;
 		mmi->ptMinTrackSize = { 
-			std::lroundf(500 * CurrentDpi() / float(USER_DEFAULT_SCREEN_DPI)),
-			std::lroundf(300 * CurrentDpi() / float(USER_DEFAULT_SCREEN_DPI))
+			std::lround(500 * CurrentDpi() / float(USER_DEFAULT_SCREEN_DPI)),
+			std::lround(300 * CurrentDpi() / float(USER_DEFAULT_SCREEN_DPI))
 		};
 		return 0;
 	}
@@ -350,7 +350,7 @@ std::pair<POINT, SIZE> MainWindow::_CreateWindow() noexcept {
 		// 如果窗口中心点不在任何屏幕上，则查找最近的屏幕。如果窗口尺寸太大无法被屏幕容纳，
 		// 则还原为默认位置和尺寸。
 		const HMONITOR hMon = MonitorFromPoint(
-			{ std::lroundf(windowCenter.X),std::lroundf(windowCenter.Y) },
+			{ std::lround(windowCenter.X),std::lround(windowCenter.Y) },
 			MONITOR_DEFAULTTONEAREST
 		);
 
@@ -363,18 +363,18 @@ std::pair<POINT, SIZE> MainWindow::_CreateWindow() noexcept {
 			windowSizeInDips.Height * dpiFactor
 		};
 
-		windowSize.cx = std::lroundf(windowSizeInPixels.Width);
-		windowSize.cy = std::lroundf(windowSizeInPixels.Height);
+		windowSize.cx = std::lround(windowSizeInPixels.Width);
+		windowSize.cy = std::lround(windowSizeInPixels.Height);
 
 		MONITORINFO mi{ .cbSize = sizeof(mi) };
 		GetMonitorInfo(hMon, &mi);
 
 		// 确保启动位置在屏幕工作区内。不允许启动时跨越多个屏幕
 		if (windowSize.cx <= mi.rcWork.right - mi.rcWork.left && windowSize.cy <= mi.rcWork.bottom - mi.rcWork.top) {
-			windowPos.x = std::lroundf(windowCenter.X - windowSizeInPixels.Width / 2);
+			windowPos.x = std::lround(windowCenter.X - windowSizeInPixels.Width / 2);
 			windowPos.x = std::clamp(windowPos.x, mi.rcWork.left, mi.rcWork.right - windowSize.cx);
 
-			windowPos.y = std::lroundf(windowCenter.Y - windowSizeInPixels.Height / 2);
+			windowPos.y = std::lround(windowCenter.Y - windowSizeInPixels.Height / 2);
 			windowPos.y = std::clamp(windowPos.y, mi.rcWork.top, mi.rcWork.bottom - windowSize.cy);
 		} else {
 			// 屏幕工作区无法容纳窗口则使用默认窗口尺寸
@@ -435,8 +435,8 @@ std::pair<POINT, SIZE> MainWindow::_CreateWindow() noexcept {
 			}
 		}
 
-		windowSize.cx = std::lroundf(windowSizeInDips.Width * dpiFactor);
-		windowSize.cy = std::lroundf(windowSizeInDips.Height * dpiFactor);
+		windowSize.cx = std::lround(windowSizeInDips.Width * dpiFactor);
+		windowSize.cy = std::lround(windowSizeInDips.Height * dpiFactor);
 
 		// 确保启动位置在屏幕工作区内
 		RECT targetRect;

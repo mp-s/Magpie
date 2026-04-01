@@ -1,4 +1,5 @@
 #pragma once
+#include "SmallVector.h"
 #include <parallel_hashmap/phmap.h>
 
 namespace Magpie {
@@ -21,9 +22,8 @@ struct ShaderEffectParserOptions {
 };
 
 struct ShaderEffectSource {
-	std::vector<std::string> sources;
-	std::vector<std::pair<std::string, std::string>> macros;
-	D3D_SHADER_MODEL shaderModel = D3D_SHADER_MODEL_5_1;
+	std::string source;
+	SmallVector<std::pair<std::string, std::string>, 0> macros;
 };
 
 struct ShaderEffectParser {
@@ -39,7 +39,7 @@ struct ShaderEffectParser {
 		std::string&& source,
 		const ShaderEffectParserOptions& options,
 		ShaderEffectDrawInfo& drawInfo,
-		ShaderEffectSource& effectSource
+		SmallVectorImpl<ShaderEffectSource>& effectSources
 	) noexcept;
 };
 

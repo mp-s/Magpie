@@ -740,7 +740,7 @@ void AppSettings::_LoadSettings(const rapidjson::GenericObject<true, rapidjson::
 				// 如果窗口位置不存在屏幕则使用主屏幕的缩放，猜错的后果仅是窗口尺寸错误，
 				// 无论如何原始缩放信息已经丢失。
 				const HMONITOR hMon = MonitorFromPoint(
-					{ std::lroundf(_mainWindowCenter.X), std::lroundf(_mainWindowCenter.Y) },
+					{ std::lround(_mainWindowCenter.X), std::lround(_mainWindowCenter.Y) },
 					MONITOR_DEFAULTTOPRIMARY
 				);
 

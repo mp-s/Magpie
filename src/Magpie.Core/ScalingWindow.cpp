@@ -186,7 +186,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 					windowWidth = srcSize.cx;
 				}
 			} else {
-				windowWidth = (LONG)std::lroundf(srcSize.cx * _options.initialWindowedScaleFactor);
+				windowWidth = (LONG)std::lround(srcSize.cx * _options.initialWindowedScaleFactor);
 			}
 		} else {
 			// 恢复上次窗口模式缩放尺寸
@@ -1006,7 +1006,7 @@ bool ScalingWindow::_CalcWindowedScalingWindowSize(int& width, int& height, bool
 
 	// 计算最小尺寸时使用源窗口包含窗口框架的矩形而不是被缩放区域
 	const RECT& srcFrameRect = _srcTracker.WindowFrameRect();
-	const int spaceAround = (int)lroundf(WINDOWED_MODE_MIN_SPACE_AROUND *
+	const int spaceAround = (int)lround(WINDOWED_MODE_MIN_SPACE_AROUND *
 		dpi / float(USER_DEFAULT_SCREEN_DPI));
 	const int minRendererWidth = srcFrameRect.right - srcFrameRect.left + spaceAround;
 	const int minRendererHeight = srcFrameRect.bottom - srcFrameRect.top + spaceAround;
@@ -1035,23 +1035,23 @@ bool ScalingWindow::_CalcWindowedScalingWindowSize(int& width, int& height, bool
 	int rendererHeight;
 	if (width != 0) {
 		rendererWidth = width;
-		rendererHeight = (int)std::lroundf(rendererWidth * srcAspectRatio);
+		rendererHeight = (int)std::lround(rendererWidth * srcAspectRatio);
 	} else {
 		assert(height != 0);
 		rendererHeight = height;
-		rendererWidth = (int)std::lroundf(rendererHeight / srcAspectRatio);
+		rendererWidth = (int)std::lround(rendererHeight / srcAspectRatio);
 	}
 
 	// 确保渲染窗口比源窗口稍大
 	if (rendererWidth > rendererHeight) {
 		if (rendererHeight < minRendererHeight) {
 			rendererHeight = minRendererHeight;
-			rendererWidth = (int)std::lroundf(rendererHeight / srcAspectRatio);
+			rendererWidth = (int)std::lround(rendererHeight / srcAspectRatio);
 		}
 	} else {
 		if (rendererWidth < minRendererWidth) {
 			rendererWidth = minRendererWidth;
-			rendererHeight = (int)std::lroundf(rendererWidth * srcAspectRatio);
+			rendererHeight = (int)std::lround(rendererWidth * srcAspectRatio);
 		}
 	}
 
@@ -1063,13 +1063,13 @@ bool ScalingWindow::_CalcWindowedScalingWindowSize(int& width, int& height, bool
 	const int maxHeight = GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi);
 	if (width > maxWidth || height > maxHeight) {
 		// 尝试最大宽度，失败则使用最大高度
-		int testHeight = (int)std::lroundf((maxWidth - xExtraSpace) * srcAspectRatio) + yExtraSpace;
+		int testHeight = (int)std::lround((maxWidth - xExtraSpace) * srcAspectRatio) + yExtraSpace;
 		if (testHeight < maxHeight) {
 			width = maxWidth;
 			height = testHeight;
 		} else {
 			height = maxHeight;
-			width = (int)std::lroundf((maxHeight - yExtraSpace) / srcAspectRatio) + xExtraSpace;
+			width = (int)std::lround((maxHeight - yExtraSpace) / srcAspectRatio) + xExtraSpace;
 		}
 
 		rendererWidth = width - xExtraSpace;

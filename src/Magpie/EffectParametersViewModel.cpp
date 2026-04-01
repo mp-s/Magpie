@@ -67,7 +67,7 @@ EffectParametersViewModel::EffectParametersViewModel(uint32_t scalingModeIdx, ui
 	std::vector<IInspectable> boolParams;
 	std::vector<IInspectable> floatParams;
 	for (uint32_t i = 0, size = (uint32_t)_effectInfo->params.size(); i < size; ++i) {
-		const EffectInfoParameter& param = _effectInfo->params[i];
+		const EffectParameterDesc& param = _effectInfo->params[i];
 
 		std::optional<float> paramValue;
 		{

@@ -377,7 +377,7 @@ fire_and_forget RootPage::_LoadIcon(MUXC::NavigationViewItem const& item, const 
 	bool preferLightTheme = App::Get().IsLightTheme();
 	bool isPackaged = profile.isPackaged;
 	std::wstring path = profile.pathRule;
-	const uint32_t iconSize = (uint32_t)std::lroundf(
+	const uint32_t iconSize = (uint32_t)std::lround(
 		16.0f * App::Get().MainWindow().CurrentDpi() / USER_DEFAULT_SCREEN_DPI);
 
 	co_await resume_background();

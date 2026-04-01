@@ -3,9 +3,11 @@
 
 namespace Magpie {
 
+struct ShaderEffectDrawInfo;
+
 class ShaderEffectDrawer : public EffectDrawerBase {
 public:
-	virtual ~ShaderEffectDrawer() noexcept = default;
+	virtual ~ShaderEffectDrawer() noexcept;
 
 	const EffectInfo* Initialize(
 		D3D12Context& d3d12Context,
@@ -14,7 +16,7 @@ public:
 
 	bool Bind(SizeU inputSize, const ColorInfo& colorInfo) noexcept override;
 
-	bool IsReady() noexcept override;
+	EffectDrawerState GetState() noexcept override;
 
 	HRESULT Draw(
 		ComputeContext& computeContext,
@@ -25,7 +27,9 @@ public:
 private:
 	D3D12Context* _d3d12Context = nullptr;
 	const EffectOption* _effectOption = nullptr;
+
 	std::string _compilationTaskId;
+	const ShaderEffectDrawInfo* _drawInfo;
 };
 
 }
