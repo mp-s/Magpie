@@ -5,6 +5,8 @@ namespace Magpie {
 
 enum class ShaderEffectTextureFormat {
 	UNKNOWN,
+	// 在 sRGB 和 scRGB 下提供不同的精度
+	COLOR_SPACE_ADAPTIVE,
 	R8_UNORM,
 	R8_SNORM,
 	R16_UNORM,
@@ -38,7 +40,8 @@ struct ShaderEffectTextureFormatProps {
 };
 
 static constexpr ShaderEffectTextureFormatProps SHADER_TEXTURE_FORMAT_PROPS[] = {
-	{"UNKNOWN", DXGI_FORMAT_UNKNOWN, 4, "float4", "float4"},
+	{"UNKNOWN", DXGI_FORMAT_UNKNOWN, 4, nullptr, nullptr},
+	{"COLOR_SPACE_ADAPTIVE", DXGI_FORMAT_UNKNOWN, 4, "MF", "MF"},
 	{"R8_UNORM", DXGI_FORMAT_R8_UNORM, 1, "MF", "unorm MF"},
 	{"R8_SNORM", DXGI_FORMAT_R8_SNORM, 1, "MF", "snorm MF"},
 	{"R16_UNORM", DXGI_FORMAT_R16_UNORM, 1, "MF", "unorm MF"},

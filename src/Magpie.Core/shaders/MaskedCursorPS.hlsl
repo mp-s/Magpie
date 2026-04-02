@@ -40,7 +40,7 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 	
 	// 255.001953 来自
 	// https://stackoverflow.com/questions/52103720/why-does-d3dcolortoubyte4-multiplies-components-by-255-001953f
-	origin = (uint3(origin * 255.001953f) ^ uint3(mask.rgb * 255.001953f)) / 255.0f;
+	origin = (uint3(origin * 255.001953) ^ uint3(mask.rgb * 255.001953)) / 255.0;
 	
 #ifndef MP_SRGB
 	origin *= white;

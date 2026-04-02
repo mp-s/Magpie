@@ -46,12 +46,12 @@ void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 #else
 	// w z
 	// x y
-	float4 mask = 1.0f;
+	float4 mask = 1.0;
 	if (gxy.x + 1 >= dirtyRect.z) {
-		mask.yz = 0.0f;
+		mask.yz = 0.0;
 	}
 	if (gxy.y + 1 >= dirtyRect.w) {
-		mask.xy = 0.0f;
+		mask.xy = 0.0;
 	}
 	
 	float4 c1 = tex1.GatherRed(sam, pos);

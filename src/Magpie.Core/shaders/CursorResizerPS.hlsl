@@ -18,7 +18,7 @@ float4 weight4(float x) {
 
 float4 main(noperspective float2 uv : TEXCOORD) : SV_Target {
 	float2 pos = uv * inputSize;
-	float2 pos1 = floor(pos - 0.5f) + 0.5f;
+	float2 pos1 = floor(pos - 0.5) + 0.5;
 	float2 f = pos - pos1;
 
 	float4 rowtaps = weight4(f.x);

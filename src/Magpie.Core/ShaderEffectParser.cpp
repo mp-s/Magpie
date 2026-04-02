@@ -938,6 +938,12 @@ static bool ResolveTextureBlock(
 				state.errorMsg = "SOURCE 和 WIDTH/HEIGHT 冲突";
 				return false;
 			}
+
+			// SOURCE 和 COLOR_SPACE_ADAPTIVE 格式冲突
+			if (desc.format == ShaderEffectTextureFormat::COLOR_SPACE_ADAPTIVE) {
+				state.errorMsg = "SOURCE 和 COLOR_SPACE_ADAPTIVE 格式冲突";
+				return false;
+			}
 		}
 	}
 
@@ -1546,6 +1552,10 @@ static void GenerateShaderSources(
 	SmallVectorImpl<ShaderEffectSource>& effectSources
 ) noexcept {
 	const uint32_t passCount = (uint32_t)drawInfo.passes.size();
+	const bool isFP16Enabled = bool(effectInfo.flags & EffectFlags::SupportFP16) &&
+		bool(options.flags & ShaderEffectParserFlags::EnableFP16);
+	const bool isAdvancedColorEnabled = bool(effectInfo.flags & EffectFlags::SupportAdvancedColor) &&
+		bool(options.flags & ShaderEffectParserFlags::EnableAdvancedColor);
 
 	// 所有通道共用的常量缓冲区
 	std::string headerCode = R"(cbuffer __CB1 : register(b0) {
@@ -1561,6 +1571,11 @@ static void GenerateShaderSources(
 		if (bool(drawInfo.passes[i].flags & ShaderEffectPassFlags::PSStyle)) {
 			headerCode.append(fmt::format("\tfloat2 __pass{0}OutputPt;\n", i + 1));
 		}
+	}
+
+	// WCG/HDR 需要额外常量
+	if (isAdvancedColorEnabled) {
+		headerCode.append("\tfloat __maxLuminance;\n\tfloat __sdrWhiteLevel\n");
 	}
 
 	constexpr const char* PARAM_TYPE_STRS[] = { "float ","int ","uint " };
@@ -1604,7 +1619,10 @@ static void GenerateShaderSources(
 		const BlockData& curPassCodeBlock = passCodeBlocks[passIdx];
 
 		// 内置宏
-		macros.reserve(32);
+		macros.reserve(48);
+#ifdef _DEBUG
+		macros.emplace_back("MP_DEBUG", "");
+#endif
 		macros.emplace_back("MP_BLOCK_WIDTH", StrHelper::ToString(curPassDesc.blockSize.width));
 		macros.emplace_back("MP_BLOCK_HEIGHT", StrHelper::ToString(curPassDesc.blockSize.height));
 		macros.emplace_back("MP_NUM_THREADS_X", StrHelper::ToString(curPassDesc.numThreads[0]));
@@ -1619,14 +1637,40 @@ static void GenerateShaderSources(
 			macros.emplace_back("MP_INLINE_PARAMS", "");
 		}
 
-#ifdef _DEBUG
-		macros.emplace_back("MP_DEBUG", "");
-#endif
+		if (isAdvancedColorEnabled) {
+			macros.emplace_back("MP_CS_SCRGB", "");
+		} else {
+			macros.emplace_back("MP_CS_LINEAR_SRGB", "");
+		}
 
+		// MP_SM 宏
+		{
+			// 不包含 SM 5.1，因为 D3D12 始终支持
+			constexpr std::array allModelVersions = {
+				std::make_pair(D3D_SHADER_MODEL_6_9, "MP_SM_6_9"),
+				std::make_pair(D3D_SHADER_MODEL_6_8, "MP_SM_6_8"),
+				std::make_pair(D3D_SHADER_MODEL_6_7, "MP_SM_6_7"),
+				std::make_pair(D3D_SHADER_MODEL_6_6, "MP_SM_6_6"),
+				std::make_pair(D3D_SHADER_MODEL_6_5, "MP_SM_6_5"),
+				std::make_pair(D3D_SHADER_MODEL_6_4, "MP_SM_6_4"),
+				std::make_pair(D3D_SHADER_MODEL_6_3, "MP_SM_6_3"),
+				std::make_pair(D3D_SHADER_MODEL_6_2, "MP_SM_6_2"),
+				std::make_pair(D3D_SHADER_MODEL_6_1, "MP_SM_6_1"),
+				std::make_pair(D3D_SHADER_MODEL_6_0, "MP_SM_6_0")
+			};
+			auto it = std::find_if(
+				allModelVersions.begin(),
+				allModelVersions.end(),
+				[&](const auto& pair) { return pair.first == options.shaderModel; }
+			);
+			for (; it != allModelVersions.end(); ++it) {
+				macros.emplace_back(it->second, "");
+			}
+		}
+		
 		// MF 宏
 		static const char* NUMBER_STRS[] = { "1","2","3","4" };
-		if (bool(effectInfo.flags & EffectFlags::SupportFP16) &&
-			bool(options.flags & ShaderEffectParserFlags::EnableFP16)) {
+		if (isFP16Enabled) {
 			macros.emplace_back("MP_FP16", "");
 			macros.emplace_back("MF", "min16float");
 
@@ -1779,9 +1823,14 @@ MF4 MulAdd(MF4 x, MF4x4 y, MF4 a) {
 	result = mad(x.w, y._m30_m31_m32_m33, result);
 	return result;
 }
-
 )");
+		if (isAdvancedColorEnabled) {
+			source.append(R"(float GetMaxLuminance() { return __maxLuminance; }
+float GetSdrWhiteLevel() { return __sdrWhiteLevel; }
+)");
+		}
 
+		source.push_back('\n');
 		source.append(commonCodeBlock.source);
 		source.push_back('\n');
 		source.append(curPassCodeBlock.source)
@@ -1804,7 +1853,7 @@ MF4 MulAdd(MF4 x, MF4x4 y, MF4 a) {
 				source.append(fmt::format(R"([numthreads(64, 1, 1)]
 void __M(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {{
 	uint2 gxy = (gid.xy << 4u) + Rmp8x8(tid.x);
-	float2 pos = (gxy + 0.5f) * {1};
+	float2 pos = (gxy + 0.5) * {1};
 	float2 step = 8 * {1};
 
 	{2}[gxy] = Pass{0}(pos);
@@ -1827,7 +1876,7 @@ void __M(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {{
 				source.append(fmt::format(R"([numthreads(64, 1, 1)]
 void __M(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {{
 	uint2 gxy = (gid.xy << 4u) + Rmp8x8(tid.x);
-	float2 pos = (gxy + 0.5f) * __pass{0}OutputPt;
+	float2 pos = (gxy + 0.5) * __pass{0}OutputPt;
 	float2 step = 8 * __pass{0}OutputPt;
 )", passIdxBase1));
 				for (uint32_t i = 0; i < outputCount; ++i) {

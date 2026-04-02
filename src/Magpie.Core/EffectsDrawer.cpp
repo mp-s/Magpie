@@ -92,12 +92,17 @@ bool EffectsDrawer::Initialize(
 		effectData.drawer = std::make_unique<ShaderEffectDrawer>();
 		effectData.effectInfo = effectData.drawer->Initialize(d3d12Context, options.effects[i]);
 		if (!effectData.effectInfo) {
+			Logger::Get().Error("ShaderEffectDrawer::Initialize 失败");
 			return false;
 		}
 
-		outputSize = CalcOutputSize(
+		// outputSize 是前一个效果的输出尺寸，即当前效果的输入尺寸
+		effectData.outputSize = CalcOutputSize(
 			effectData.effectInfo->scaleFactor, outputSize, rendererSize, effectOption);
-		effectData.outputSize = outputSize;
+
+		effectData.drawer->Bind(outputSize, effectData.outputSize, colorInfo);
+
+		outputSize = effectData.outputSize;
 	}
 
 	// 如果输出尺寸比渲染区域更大则使用 CatmullRom 等比缩小，更小时不放大
@@ -114,12 +119,6 @@ bool EffectsDrawer::Initialize(
 	}
 
 	_outputSize = outputSize;
-
-	for (auto& effectData : _effectDatas) {
-		if (!effectData.drawer->Bind(outputSize, colorInfo)) {
-			return false;
-		}
-	}
 
 	// CatmullRomDrawer 将在渲染时按需创建 PSO，初始化无代价
 	_catmullRomDrawer.Initialize(d3d12Context);
@@ -191,6 +190,16 @@ HRESULT EffectsDrawer::Draw(
 	// }
 
 	//commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
+
+	for (auto& effectData : _effectDatas) {
+		EffectDrawerState state;
+		std::string msg;
+		HRESULT hr = effectData.drawer->Update(state, msg);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("ShaderEffectDrawer::Update 失败", hr);
+			return hr;
+		}
+	}
 
 	_catmullRomDrawer.Draw(
 		computeContext, _inputSize, _outputSize, inputSrvOffset, outputUavOffset, false);

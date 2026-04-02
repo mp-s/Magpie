@@ -26,9 +26,9 @@ public:
 		const EffectOption& effectOption
 	) noexcept = 0;
 
-	virtual bool Bind(SizeU inputSize, const ColorInfo& colorInfo) noexcept = 0;
+	virtual void Bind(SizeU inputSize, SizeU outputSize, const ColorInfo& colorInfo) noexcept = 0;
 
-	virtual EffectDrawerState GetState() noexcept = 0;
+	virtual HRESULT Update(EffectDrawerState& state, std::string& message) noexcept = 0;
 
 	virtual HRESULT Draw(
 		ComputeContext& computeContext,

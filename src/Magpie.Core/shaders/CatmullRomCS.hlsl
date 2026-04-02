@@ -25,7 +25,7 @@ float4 weight4(float x) {
 
 float4 CatmullRom(float2 pos) {
 	pos *= inputSize;
-	float2 pos1 = floor(pos - 0.5f) + 0.5f;
+	float2 pos1 = floor(pos - 0.5) + 0.5;
 	float2 f = pos - pos1;
 
 	float4 rowtaps = weight4(f.x);
@@ -44,8 +44,8 @@ float4 CatmullRom(float2 pos) {
 	float v_middle_offset = coltaps.z * inputPt.y / v_weight_sum;
 	float v_middle = uv1.y + v_middle_offset;
 
-	int2 coord_top_left = int2(max(uv0 * inputSize, 0.5f));
-	int2 coord_bottom_right = int2(min(uv3 * inputSize, inputSize - 0.5f));
+	int2 coord_top_left = int2(max(uv0 * inputSize, 0.5));
+	int2 coord_bottom_right = int2(min(uv3 * inputSize, inputSize - 0.5));
 
 	float3 top = inputTex.Load(int3(coord_top_left, 0)).rgb * rowtaps.x;
 	top += inputTex.SampleLevel(linearSampler, float2(u_middle, uv0.y), 0).rgb * u_weight_sum;
@@ -71,7 +71,7 @@ float4 CatmullRom(float2 pos) {
 [numthreads(64, 1, 1)]
 void main(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID) {
 	uint2 gxy = (gid.xy << 4) + Rmp8x8(tid.x);
-	float2 pos = (gxy + 0.5f) * outputPt;
+	float2 pos = (gxy + 0.5) * outputPt;
 	const float2 step = 8 * outputPt;
 
 	outputTex[gxy] = CatmullRom(pos);

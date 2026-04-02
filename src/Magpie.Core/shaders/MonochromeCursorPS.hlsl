@@ -25,9 +25,9 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 #ifdef MP_SRGB
 		float c = xorMask ? 1.0f : 0.0f;
 #else
-		float c = xorMask ? sdrWhiteLevel : 0.0f;
+		float c = xorMask ? sdrWhiteLevel : 0.0;
 #endif
-		return float4(c, c, c, 1.0f);
+		return float4(c, c, c, 1.0);
 	}
 	
 	float3 origin = originTex[uint2(uv * cursorSize) + originOffset].rgb;
@@ -42,7 +42,7 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 	
 	if (xorMask) {
 		// 反色
-		origin = 1.0f - origin;
+		origin = 1.0 - origin;
 	}
 #else
 	if (xorMask) {
@@ -53,5 +53,5 @@ float4 main(noperspective float2 uv : TEXCOORD) : SV_TARGET {
 	}
 #endif
 	
-	return float4(origin, 1.0f);
+	return float4(origin, 1.0);
 }
