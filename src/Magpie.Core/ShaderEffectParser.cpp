@@ -1575,7 +1575,7 @@ static void GenerateShaderSources(
 
 	// WCG/HDR 需要额外常量
 	if (isAdvancedColorEnabled) {
-		headerCode.append("\tfloat __maxLuminance;\n\tfloat __sdrWhiteLevel\n");
+		headerCode.append("\tfloat __maxLuminance;\n\tfloat __sdrWhiteLevel;\n");
 	}
 
 	constexpr const char* PARAM_TYPE_STRS[] = { "float ","int ","uint " };

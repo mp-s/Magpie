@@ -42,6 +42,8 @@ public:
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
 private:
+	uint32_t _CalcDescriptorCount() const noexcept;
+
 	D3D12Context* _d3d12Context = nullptr;
 
 	SizeU _inputSize{};
@@ -49,12 +51,16 @@ private:
 
 	struct _EffectData {
 		std::unique_ptr<EffectDrawerBase> drawer;
-		const EffectInfo* effectInfo;
-		SizeU outputSize;
+		const EffectInfo* effectInfo = nullptr;
+		SizeU outputSize{};
+		winrt::com_ptr<ID3D12Resource> outputTexture;
 	};
 
 	SmallVector<_EffectData> _effectDatas;
 	CatmullRomDrawer _catmullRomDrawer;
+
+	// 描述符的布局是 SRV|UAV|SRV|UAV|...
+	uint32_t _descriptorBaseOffset = std::numeric_limits<uint32_t>::max();
 
 	winrt::com_ptr<ID3D12QueryHeap> _queryHeap;
 	winrt::com_ptr<ID3D12Resource> _queryResultBuffer;

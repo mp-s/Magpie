@@ -156,16 +156,21 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	// shaderModel 和 flags 不参与哈希，它们决定缓存键（也是缓存文件名）
 	uint64_t hash = rapidhash(source.data(), source.size());
 	if (inlineParams) {
-		for (const auto& pair : *inlineParams) {
-			for (const EffectParameterDesc& param : effectInfo.params) {
-				if (param.name == pair.first) {
-					// 将参数值归一化然后保留 4 位精度
-					long normValue = std::lround((pair.second - param.minValue) /
-						(param.maxValue - param.minValue) * 10000);
-					hash = phmap::HashState().combine(hash, pair.first, normValue);
-					break;
-				}
+		// 即使 inlineParams 中不包含的参数也参与哈希，否则无法区分未启用内联变量和
+		// 启用但 inlineParams 中没有成员。
+		for (const EffectParameterDesc& param : effectInfo.params) {
+			float value;
+			auto it1 = inlineParams->find(param.name);
+			if (it1 != inlineParams->end()) {
+				value = it1->second;
+			} else {
+				value = param.defaultValue;
 			}
+
+			// 将参数值归一化然后保留 4 位精度
+			long normValue = std::lround((value - param.minValue) /
+				(param.maxValue - param.minValue) * 10000);
+			hash = phmap::HashState().combine(hash, normValue);
 		}
 	}
 	
@@ -260,7 +265,7 @@ public:
 			return E_FAIL;
 		}
 
-		char* result = new char[file.size()];
+		char* result = std::make_unique<char[]>(file.size()).release();
 		std::memcpy(result, file.data(), file.size());
 
 		*ppData = result;
@@ -270,7 +275,7 @@ public:
 	}
 
 	HRESULT CALLBACK Close(LPCVOID pData) noexcept override {
-		delete[](char*)pData;
+		std::unique_ptr<char[]>((char*)pData);
 		return S_OK;
 	}
 

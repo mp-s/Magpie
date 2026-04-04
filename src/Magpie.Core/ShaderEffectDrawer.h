@@ -30,6 +30,7 @@ private:
 
 	D3D12Context* _d3d12Context = nullptr;
 	const EffectOption* _effectOption = nullptr;
+	const EffectInfo* _effectInfo = nullptr;
 
 	SizeU _inputSize{};
 	SizeU _outputSize{};
@@ -41,12 +42,28 @@ private:
 	struct _PassData {
 		winrt::com_ptr<ID3D12RootSignature> rootSignature;
 		winrt::com_ptr<ID3D12PipelineState> pso;
-		uint32_t descriptorBaseOffset = std::numeric_limits<uint32_t>::max();
+		// 这里是 _descriptorBaseOffset 中成员的引用，无需释放
+		uint32_t descriptorBaseOffset;
 		SizeU dispatchCount;
 	};
 	SmallVector<_PassData> _passDatas;
+
+	winrt::com_ptr<ID3D12Resource> _constantBuffer;
+	winrt::com_ptr<ID3D12Resource> _constantUploadBuffer;
+	void* _constantUploadBufferData = nullptr;
+	uint32_t _constantsDataSize = 0;
+
 	SmallVector<winrt::com_ptr<ID3D12Resource>> _textures;
-	uint32_t _descriptorCount = 0;
+	// 描述符布局: CBV | [SRV] | [UAV] | [SRV] | ...
+	// 多个通道的 SRV 和 UAV 可能合并，_textureDescriptorMap 保存了布局。描述符总数是
+	// _textureDescriptorMap.size() + 1。
+	uint32_t _descriptorBaseOffset = std::numeric_limits<uint32_t>::max();
+	// 和 ShaderEffectPassDesc 的 inputs/outputs 不同，这里存储 _textures 中元素索引，
+	// 从 0 开始。虽然可以用额外字段区分 SRV 和 UAV，但这里想尽可能避免堆分配，因此 UAV
+	// 的索引都加上 _textures.size() 作为区分。
+	SmallVector<uint32_t> _textureDescriptorMap;
+
+	bool _isConstantBufferOutdated = false;
 };
 
 }

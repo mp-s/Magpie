@@ -62,7 +62,8 @@ private:
 		// UINT_MAX 表示正在使用中
 		uint32_t lastAccess = std::numeric_limits<uint32_t>::max();
 	};
-	phmap::flat_hash_map<std::string, _ShaderEffectMemCacheItem> _shaderEffectCache;
+	// 需确保 drawInfo 地址稳定
+	phmap::node_hash_map<std::string, _ShaderEffectMemCacheItem> _shaderEffectCache;
 	wil::srwlock _shaderEffectCacheLock;
 	uint32_t _nextLastAccess = 0;
 	

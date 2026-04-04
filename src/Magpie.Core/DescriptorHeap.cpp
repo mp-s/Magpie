@@ -46,6 +46,7 @@ bool DescriptorHeap::Initialize(
 }
 
 HRESULT DescriptorHeap::Alloc(uint32_t count, uint32_t& offset) noexcept {
+	assert(count != 0);
 	auto lk = _freeBlocksLock.lock_exclusive();
 
 	for (auto it = _freeBlocks.begin(); it != _freeBlocks.end(); ++it) {
@@ -74,7 +75,7 @@ static uint32_t GetBlockOffset(const std::pair<const uint32_t, uint32_t>& freeBl
 }
 
 void DescriptorHeap::Free(uint32_t offset, uint32_t count) noexcept {
-	assert(offset != std::numeric_limits<uint32_t>::max() && offset + count <= _capacity);
+	assert(count != 0 && offset != std::numeric_limits<uint32_t>::max() && offset + count <= _capacity);
 
 	auto lk = _freeBlocksLock.lock_exclusive();
 

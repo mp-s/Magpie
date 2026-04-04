@@ -7,10 +7,17 @@
 #include "ScalingWindow.h"
 #include "ShaderEffectDrawer.h"
 #include "EffectInfo.h"
+#include "DescriptorHeap.h"
 
 namespace Magpie {
 
-EffectsDrawer::~EffectsDrawer() noexcept {}
+EffectsDrawer::~EffectsDrawer() noexcept {
+#ifdef _DEBUG
+	if (_descriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
+		_d3d12Context->GetDescriptorHeap().Free(_descriptorBaseOffset, _CalcDescriptorCount());
+	}
+#endif
+}
 
 static SizeU CalcOutputSize(
 	uint32_t scaleFactor,
@@ -85,6 +92,7 @@ bool EffectsDrawer::Initialize(
 	_effectDatas.resize(effectCount);
 	outputSize = inputSize;
 
+	// 效果的初始化可能是异步的，因此尽早进行
 	for (uint32_t i = 0; i < effectCount; ++i) {
 		auto& effectData = _effectDatas[i];
 		const auto& effectOption = options.effects[i];
@@ -119,6 +127,61 @@ bool EffectsDrawer::Initialize(
 	}
 
 	_outputSize = outputSize;
+
+	// 创建效果的输入/输出纹理
+	if (uint32_t descriptorCount = _CalcDescriptorCount()) {
+		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
+		HRESULT hr = descriptorHeap.Alloc(descriptorCount, _descriptorBaseOffset);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
+			return false;
+		}
+
+		CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(descriptorHeap.GetCpuHandle(_descriptorBaseOffset));
+		const uint32_t descriptorSize = descriptorHeap.GetDescriptorSize();
+
+		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
+
+		D3D12_HEAP_FLAGS heapFlags = _d3d12Context->IsHeapFlagCreateNotZeroedSupported() ?
+			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
+
+		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+			_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R10G10B10A2_UNORM,
+			0, 0, 1, 1, 1, 0,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+		);
+
+		CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
+			CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(texDesc.Format, 1);
+		CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc =
+			CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(texDesc.Format);
+
+		for (uint32_t i = 0; i < effectCount; ++i) {
+			auto& effectData = _effectDatas[i];
+
+			// 如果不需要缩小，最后一个效果直接写入环形缓冲，不需要创建输出纹理
+			if (i == effectCount - 1 && effectData.outputSize == _outputSize) {
+				break;
+			}
+
+			texDesc.Width = effectData.outputSize.width;
+			texDesc.Height = effectData.outputSize.height;
+
+			hr = device->CreateCommittedResource(&heapProps, heapFlags, &texDesc,
+				D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&effectData.outputTexture));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("CreateCommittedResource 失败", hr);
+				return false;
+			}
+
+			device->CreateShaderResourceView(effectData.outputTexture.get(), &srvDesc, cpuHandle);
+			cpuHandle.Offset(descriptorSize);
+
+			device->CreateUnorderedAccessView(
+				effectData.outputTexture.get(), nullptr, &uavDesc, cpuHandle);
+			cpuHandle.Offset(descriptorSize);
+		}
+	}
 
 	// CatmullRomDrawer 将在渲染时按需创建 PSO，初始化无代价
 	_catmullRomDrawer.Initialize(d3d12Context);
@@ -218,6 +281,28 @@ void EffectsDrawer::OnResized(SizeU rendererSize, SizeU& outputSize) noexcept {
 
 void EffectsDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+}
+
+uint32_t EffectsDrawer::_CalcDescriptorCount() const noexcept {
+	// 如果最后一个效果的缩放类型是 Fit 或 Fill 且缩放比例不大于 1，那么始终可以直接写入环形缓冲区，
+	// 需要的描述符数量可以减少两个。
+	// 还有更复杂的情况，如倒数第二个效果是 Fit(0.5,0.5)，最后一个效果放大一倍，也可以认为输出尺寸
+	// 永远不会大于 rendererSize，不过这较为复杂，还有舍入的问题，安全起见不进行优化。
+	uint32_t count = (uint32_t)_effectDatas.size() * 2;
+
+	if (_effectDatas.back().effectInfo->scaleFactor != 0) {
+		return count;
+	}
+
+	const EffectOption& effectOption = ScalingWindow::Get().Options().effects.back();
+	if ((effectOption.scalingType == ScalingType::Fit || effectOption.scalingType == ScalingType::Fill) &&
+		effectOption.scale.first < 1 + FLOAT_EPSILON<float> &&
+		effectOption.scale.second < 1 + FLOAT_EPSILON<float>)
+	{
+		return count - 2;
+	} else {
+		return count;
+	}
 }
 
 }

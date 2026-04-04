@@ -1,5 +1,4 @@
 #pragma once
-#include <d3d11_4.h>
 #include <d3d12.h>
 
 namespace Magpie {
@@ -7,8 +6,20 @@ namespace Magpie {
 struct DirectXHelper {
 	union Constant32 {
 		float floatVal;
-		uint32_t uintVal;
 		int intVal;
+		uint32_t uintVal;
+
+		static Constant32 Float(float value) noexcept {
+			return Constant32{ .floatVal = value };
+		}
+
+		static Constant32 Int(int value) noexcept {
+			return Constant32{ .intVal = value };
+		}
+
+		static Constant32 UInt(uint32_t value) noexcept {
+			return Constant32{ .uintVal = value };
+		}
 	};
 
 	static bool IsWARP(const DXGI_ADAPTER_DESC1& desc) noexcept {

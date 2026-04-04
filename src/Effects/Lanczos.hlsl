@@ -3,6 +3,7 @@
 
 //!MAGPIE EFFECT
 //!VERSION 5
+//!CAPABILITY AdvancedColor
 
 //!PARAMETER
 //!LABEL Anti-ringing Strength

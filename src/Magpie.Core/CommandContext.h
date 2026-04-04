@@ -74,6 +74,21 @@ public:
 			CD3DX12_RESOURCE_BARRIER::Transition(resource, stateBefore, stateAfter, 0));
 	}
 
+	void CopyBufferRegion(
+		ID3D12Resource* destBuffer,
+		uint32_t destOffset,
+		ID3D12Resource* srcBuffer,
+		uint32_t srcOffset,
+		uint32_t numBytes,
+		bool shouldFlushBarriers
+	) noexcept {
+		if (shouldFlushBarriers) {
+			_FlushBarriers();
+		}
+		
+		_commandList->CopyBufferRegion(destBuffer, destOffset, srcBuffer, srcOffset, numBytes);
+	}
+
 	void CopyTextureRegion(
 		ID3D12Resource* destResource,
 		uint32_t dstX,
