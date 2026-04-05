@@ -208,9 +208,6 @@
     <FxCompile Include="shaders\MonochromeCursorPS_sRGB.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
-    <FxCompile Include="shaders\RtxTrueHdrPostCS.hlsl">
-      <ShaderType>Compute</ShaderType>
-    </FxCompile>
     <FxCompile Include="shaders\RtxTrueHdrPreCS.hlsl">
       <ShaderType>Compute</ShaderType>
     </FxCompile>

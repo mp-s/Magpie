@@ -23,7 +23,7 @@ public:
 		return _inputSize;
 	}
 
-	HRESULT Draw(uint32_t inputSrvOffset, uint32_t outputUavOffset) noexcept;
+	HRESULT Draw(uint32_t inputSrvOffset, ID3D12Resource* outputTexture) noexcept;
 
 	void OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
 
@@ -36,7 +36,6 @@ private:
 	ColorInfo _colorInfo;
 
 	winrt::com_ptr<ID3D12Resource> _ngxInputResource;
-	winrt::com_ptr<ID3D12Resource> _ngxOutputResource;
 
 	uint32_t _descriptorBaseOffset = std::numeric_limits<uint32_t>::max();
 
@@ -44,9 +43,7 @@ private:
 	NVSDK_NGX_Handle* _trueHdrFeature = nullptr;
 
 	winrt::com_ptr<ID3D12RootSignature> _preRootSignature;
-	winrt::com_ptr<ID3D12RootSignature> _postRootSignature;
 	winrt::com_ptr<ID3D12PipelineState> _prePSO;
-	winrt::com_ptr<ID3D12PipelineState> _postPSO;
 
 	bool _isNgxInitialized = false;
 };

@@ -13,7 +13,7 @@ EffectsDrawer::~EffectsDrawer() noexcept {
 #ifdef _DEBUG
 	if (_rtxTrueHdrOutputDescriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
 		_graphicsContext->GetDescriptorHeap()
-			.Free(_rtxTrueHdrOutputDescriptorBaseOffset, 2);
+			.Free(_rtxTrueHdrOutputDescriptorBaseOffset, 1);
 	}
 #endif
 }
@@ -86,20 +86,15 @@ bool EffectsDrawer::Initialize(
 			
 			auto& descriptorHeap = graphicsContext.GetDescriptorHeap();
 
-			hr = descriptorHeap.Alloc(2, _rtxTrueHdrOutputDescriptorBaseOffset);
+			hr = descriptorHeap.Alloc(1, _rtxTrueHdrOutputDescriptorBaseOffset);
 			if (FAILED(hr)) {
 				return false;
 			}
 
-			CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc =
-				CD3DX12_UNORDERED_ACCESS_VIEW_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT);
-			device->CreateUnorderedAccessView(_rtxTrueHdrOutput.get(), nullptr, &uavDesc,
-				descriptorHeap.GetCpuHandle(_rtxTrueHdrOutputDescriptorBaseOffset));
-
 			CD3DX12_SHADER_RESOURCE_VIEW_DESC srcDesc =
 				CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, 1);
 			device->CreateShaderResourceView(_rtxTrueHdrOutput.get(), &srcDesc,
-				descriptorHeap.GetCpuHandle(_rtxTrueHdrOutputDescriptorBaseOffset + 1));
+				descriptorHeap.GetCpuHandle(_rtxTrueHdrOutputDescriptorBaseOffset));
 		}
 	}
 #endif
@@ -150,7 +145,7 @@ bool EffectsDrawer::Initialize(
 HRESULT EffectsDrawer::Draw(
 	uint32_t frameIndex,
 	ID3D12Resource* /*inputResource*/,
-	ID3D12Resource* /*outputResource*/,
+	ID3D12Resource* outputResource,
 	uint32_t inputSrvOffset,
 	uint32_t outputUavOffset
 ) noexcept {
@@ -181,36 +176,19 @@ HRESULT EffectsDrawer::Draw(
 
 #ifdef MP_ENABLE_RTX_TRUE_HDR
 	if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
-		uint32_t curOutputUavOffset = _rtxTrueHdrOutputDescriptorBaseOffset;
-		if (_rtxTrueHdrOutput) {
-			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				_rtxTrueHdrOutput.get(),
-				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-				D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-				0
-			);
-			commandList->ResourceBarrier(1, &barrier);
-		} else {
+		if (!_rtxTrueHdrOutput) {
 			postResize = false;
-			curOutputUavOffset = outputUavOffset;
 		}
 
-		HRESULT hr = _rtxTrueHdrDrawer->Draw(inputSrvOffset, curOutputUavOffset);
+		HRESULT hr = _rtxTrueHdrDrawer->Draw(
+			inputSrvOffset, _rtxTrueHdrOutput ? _rtxTrueHdrOutput.get() : outputResource);
 		if (FAILED(hr)) {
 			return hr;
 		}
 
 		if (_rtxTrueHdrOutput) {
-			inputSrvOffset = _rtxTrueHdrOutputDescriptorBaseOffset + 1;
+			inputSrvOffset = _rtxTrueHdrOutputDescriptorBaseOffset;
 			curInputSize = _rtxTrueHdrDrawer->GetOutputSize();
-
-			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				_rtxTrueHdrOutput.get(),
-				D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-				0
-			);
-			commandList->ResourceBarrier(1, &barrier);
 		}
 	}
 #endif

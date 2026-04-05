@@ -388,9 +388,6 @@
     <FxCompile Include="shaders\MaskedCursorPS_sRGB.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="shaders\RtxTrueHdrPostCS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="shaders\RtxTrueHdrPreCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
