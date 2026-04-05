@@ -20,7 +20,7 @@ ShaderEffectDrawer::~ShaderEffectDrawer() noexcept {
 #ifdef _DEBUG
 	if (_descriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
 		_d3d12Context->GetDescriptorHeap().Free(
-			_descriptorBaseOffset, (uint32_t)_textureDescriptorMap.size() + 1);
+			_descriptorBaseOffset, (uint32_t)_textureDescriptorMap.size());
 	}
 #endif
 
@@ -122,8 +122,8 @@ HRESULT ShaderEffectDrawer::Update(EffectDrawerState& state, std::string& messag
 
 HRESULT ShaderEffectDrawer::Draw(
 	ComputeContext& computeContext,
-	uint32_t /*inputSrvOffset*/,
-	uint32_t /*outputUavOffset*/
+	uint32_t inputSrvOffset,
+	uint32_t outputUavOffset
 ) noexcept {
 	assert(_drawInfo);
 
@@ -140,7 +140,67 @@ HRESULT ShaderEffectDrawer::Draw(
 		);
 	}
 
-	return E_NOTIMPL;
+	for (uint32_t i = 0; i < _passDatas.size(); ++i) {
+		const _PassData& curPassData = _passDatas[i];
+		const ShaderEffectPassDesc& passDesc = _drawInfo->passes[i];
+
+		computeContext.SetPipelineState(curPassData.pso.get());
+		computeContext.SetRootSignature(curPassData.rootSignature.get());
+
+		// 合并状态转换
+		for (uint32_t input : passDesc.inputs) {
+			if (input == 0) {
+				continue;
+			}
+
+			auto oldState = std::exchange(_textureStates[size_t(input - 2)],
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			if (oldState != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) {
+				computeContext.InsertTransitionBarrier(
+					_textures[size_t(input - 2)].get(),
+					oldState,
+					D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+				);
+			}
+		}
+
+		for (uint32_t output : passDesc.outputs) {
+			if (output == 1) {
+				continue;
+			}
+
+			auto oldState = std::exchange(_textureStates[size_t(output - 2)],
+				D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			if (oldState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
+				computeContext.InsertTransitionBarrier(
+					_textures[size_t(output - 2)].get(),
+					oldState,
+					D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+				);
+			}
+		}
+
+		computeContext.SetComputeRootConstantBufferView(0, _constantBuffer->GetGPUVirtualAddress());
+
+		uint32_t rootParameterIndex = 1;
+
+		if (!passDesc.inputs.empty() && passDesc.inputs[0] == 0) {
+			computeContext.SetRootDescriptorTable(rootParameterIndex++, inputSrvOffset);
+		}
+
+		if (passDesc.outputs[0] == 1) {
+			computeContext.SetRootDescriptorTable(rootParameterIndex++, outputUavOffset);
+		}
+
+		// 不需要额外的描述符时 passData.descriptorBaseOffset 为 UINT_MAX
+		if (curPassData.descriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
+			computeContext.SetRootDescriptorTable(rootParameterIndex++, curPassData.descriptorBaseOffset);
+		}
+
+		computeContext.Dispatch(curPassData.dispatchCount.first, curPassData.dispatchCount.second);
+	}
+
+	return S_OK;
 }
 
 HRESULT ShaderEffectDrawer::_CreateDeviceResources() {
@@ -323,6 +383,7 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() {
 			}
 		}
 
+		// 不需要额外的描述符时 passData.descriptorBaseOffset 为 UINT_MAX
 		if (!descriptorCounts.empty()) {
 			// 按需要的描述符数量从多到少排序，这可以提高复用描述符的概率
 			std::sort(
@@ -382,173 +443,19 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() {
 		}
 
 		HRESULT hr = _d3d12Context->GetDescriptorHeap()
-			.Alloc((uint32_t)_textureDescriptorMap.size() + 1, _descriptorBaseOffset);
+			.Alloc((uint32_t)_textureDescriptorMap.size(), _descriptorBaseOffset);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
 			return hr;
 		}
 
-		// 索引 0 是 CBV
 		for (_PassData& passData : _passDatas) {
-			passData.descriptorBaseOffset += _descriptorBaseOffset + 1;
+			if (passData.descriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
+				passData.descriptorBaseOffset += _descriptorBaseOffset;
+			}
 		}
 	}
 
-	// 常量缓冲区可以复用。常量缓冲区布局如下：
-	// uint2 __inputSize;
-	// uint2 __outputSize;
-	// float2 __inputPt;
-	// float2 __outputPt;
-	// float2 __scale;
-	// ↓ PS 样式参数 ↓
-	// [float2 __pass1OutputPt;]
-	// [float2 __pass2OutputPt;]
-	// [...]
-	// ↓ WCG/HDR 参数 ↓
-	// [float __maxLuminance;]
-	// [float __sdrWhiteLevel;]
-	// ↓ 效果参数 ↓
-	// [float param1;]
-	// [uint param2;]
-	// [...]
-	if (!_constantBuffer) {
-		// 10 个内置常量
-		uint32_t paramCount = 10;
-		// PS 样式需要额外常量，除了最后一个通道
-		for (uint32_t i = 0, end = (uint32_t)_drawInfo->passes.size() - 1; i < end; ++i) {
-			if (bool(_drawInfo->passes[i].flags & ShaderEffectPassFlags::PSStyle)) {
-				paramCount += 2;
-			}
-		}
-		// WCG/HDR 需要额外常量，始终预留位置使常量缓冲区可以复用
-		paramCount += 2;
-		// 未启用内联参数时每个参数占用一个常量
-		if (!options.IsInlineParams()) {
-			paramCount += (uint32_t)_effectInfo->params.size();
-		}
-		
-		D3D12_HEAP_FLAGS heapFlag = _d3d12Context->IsHeapFlagCreateNotZeroedSupported() ?
-			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-
-		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
-
-		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(UINT64(paramCount * 4));
-
-		HRESULT hr = device->CreateCommittedResource(
-			&heapProperties,
-			heapFlag,
-			&bufferDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&_constantUploadBuffer)
-		);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
-			return hr;
-		}
-
-		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
-		// 常量缓冲区必须对齐到 256 字节
-		bufferDesc.Width = (bufferDesc.Width + 255) & ~255;
-		hr = device->CreateCommittedResource(
-			&heapProperties,
-			heapFlag,
-			&bufferDesc,
-			D3D12_RESOURCE_STATE_COMMON,
-			nullptr,
-			IID_PPV_ARGS(&_constantBuffer)
-		);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("CreateCommittedResource 失败", hr);
-			return hr;
-		}
-
-		auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
-		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {
-			.BufferLocation = _constantBuffer->GetGPUVirtualAddress(),
-			.SizeInBytes = (UINT)bufferDesc.Width
-		};
-		device->CreateConstantBufferView(
-			&cbvDesc, descriptorHeap.GetCpuHandle(_descriptorBaseOffset));
-
-		// 无需解除映射
-		D3D12_RANGE readRange{};
-		hr = _constantUploadBuffer->Map(0, &readRange, &_constantUploadBufferData);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
-			return hr;
-		}
-	}
-
-	// 更新 _constantUploadBuffer，_constantBuffer 将在 Draw 中更新
-	{
-		using Constant32 = DirectXHelper::Constant32;
-		// SmallVector 中数据地址偏移量是 16 字节，alignas(16) 使 SmallVector
-		// 和其中数据都对齐到 16 字节边界。
-		alignas(16) SmallVector<Constant32, 32> constants;
-		assert((uint8_t*)constants.data() - (uint8_t*)&constants == 16);
-
-		constants.emplace_back(Constant32::UInt(_inputSize.width));
-		constants.emplace_back(Constant32::UInt(_inputSize.height));
-		constants.emplace_back(Constant32::UInt(_outputSize.width));
-		constants.emplace_back(Constant32::UInt(_outputSize.height));
-		constants.emplace_back(Constant32::Float(1.0f / _inputSize.width));
-		constants.emplace_back(Constant32::Float(1.0f / _inputSize.height));
-		constants.emplace_back(Constant32::Float(1.0f / _outputSize.width));
-		constants.emplace_back(Constant32::Float(1.0f / _outputSize.height));
-		constants.emplace_back(Constant32::Float((float)_outputSize.width / _inputSize.width));
-		constants.emplace_back(Constant32::Float((float)_outputSize.height / _inputSize.height));
-
-		// PS 样式参数
-		for (uint32_t i = 0, end = (uint32_t)_drawInfo->passes.size() - 1; i < end; ++i) {
-			if (bool(_drawInfo->passes[i].flags & ShaderEffectPassFlags::PSStyle)) {
-				uint32_t output = _drawInfo->passes[i].outputs[0];
-				if (output == 1) {
-					constants.emplace_back(Constant32::Float(1.0f / _outputSize.width));
-					constants.emplace_back(Constant32::Float(1.0f / _outputSize.height));
-				} else {
-					D3D12_RESOURCE_DESC texDesc = _textures[size_t(output - 2)]->GetDesc();
-					constants.emplace_back(Constant32::Float(1.0f / texDesc.Width));
-					constants.emplace_back(Constant32::Float(1.0f / texDesc.Height));
-				}
-			}
-		}
-
-		// WCG/HDR 参数
-		if (bool(_effectInfo->flags & EffectFlags::SupportAdvancedColor) &&
-			_colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange)
-		{
-			constants.emplace_back(Constant32::Float(_colorInfo.maxLuminance));
-			constants.emplace_back(Constant32::Float(_colorInfo.sdrWhiteLevel));
-		}
-
-		// 效果参数
-		if (!options.IsInlineParams()) {
-			for (const EffectParameterDesc& paramDesc : _effectInfo->params) {
-				auto it = _effectOption->parameters.find(paramDesc.name);
-				float value = it == _effectOption->parameters.end() ? paramDesc.defaultValue : it->second;
-				switch (paramDesc.type) {
-				case EffectParameterType::Float:
-					constants.emplace_back(Constant32::Float(value));
-					break;
-				case EffectParameterType::Int:
-					constants.emplace_back(Constant32::Int(std::lround(value)));
-					break;
-				default:
-					assert(paramDesc.type == EffectParameterType::UInt);
-					constants.emplace_back(Constant32::UInt((uint32_t)std::lround(value)));
-					break;
-				}
-			}
-		}
-
-		_constantsDataSize = (uint32_t)constants.size() * 4;
-		assert(_constantsDataSize <= _constantUploadBuffer->GetDesc().Width);
-		std::memcpy(_constantUploadBufferData, constants.data(), _constantsDataSize);
-
-		_isConstantBufferOutdated = true;
-	}
-	
 	{
 		_textures.resize(_drawInfo->textures.size());
 
@@ -632,9 +539,8 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() {
 				auto& descriptorHeap = _d3d12Context->GetDescriptorHeap();
 				const uint32_t descriptorSize = descriptorHeap.GetDescriptorSize();
 
-				// 索引 0 是 CBV
 				CD3DX12_CPU_DESCRIPTOR_HANDLE baseHandle(
-					descriptorHeap.GetCpuHandle(_descriptorBaseOffset), descriptorSize);
+					descriptorHeap.GetCpuHandle(_descriptorBaseOffset));
 
 				CD3DX12_SHADER_RESOURCE_VIEW_DESC srvDesc =
 					CD3DX12_SHADER_RESOURCE_VIEW_DESC::Tex2D(dxgiFormat, 1);
@@ -649,7 +555,7 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() {
 					device->CreateShaderResourceView(_textures[texIdx].get(), &srvDesc,
 						CD3DX12_CPU_DESCRIPTOR_HANDLE(baseHandle, (INT)offset, descriptorSize));
 				}
-				
+
 				// 为了和 SRV 做区分，UAV 的索引加上纹理总数
 				uint32_t uavIdx = uint32_t(texIdx + _textures.size());
 				CD3DX12_UNORDERED_ACCESS_VIEW_DESC uavDesc =
@@ -667,8 +573,160 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() {
 				}
 			}
 		}
+
+		if (_textureStates.empty()) {
+			// 纹理创建时处于 UNORDERED_ACCESS 状态
+			_textureStates.resize(_textures.size(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		}
 	}
 
+	// 常量缓冲区可以复用。常量缓冲区布局如下：
+	// uint2 __inputSize;
+	// uint2 __outputSize;
+	// float2 __inputPt;
+	// float2 __outputPt;
+	// float2 __scale;
+	// ↓ PS 样式参数 ↓
+	// [float2 __pass1OutputPt;]
+	// [float2 __pass2OutputPt;]
+	// [...]
+	// ↓ WCG/HDR 参数 ↓
+	// [float __maxLuminance;]
+	// [float __sdrWhiteLevel;]
+	// ↓ 效果参数 ↓
+	// [float param1;]
+	// [uint param2;]
+	// [...]
+	if (!_constantBuffer) {
+		// 10 个内置常量
+		uint32_t paramCount = 10;
+		// PS 样式需要额外常量，除了最后一个通道
+		for (uint32_t i = 0, end = (uint32_t)_drawInfo->passes.size() - 1; i < end; ++i) {
+			if (bool(_drawInfo->passes[i].flags & ShaderEffectPassFlags::PSStyle)) {
+				paramCount += 2;
+			}
+		}
+		// WCG/HDR 需要额外常量，始终预留位置使常量缓冲区可以复用
+		paramCount += 2;
+		// 未启用内联参数时每个参数占用一个常量
+		if (!options.IsInlineParams()) {
+			paramCount += (uint32_t)_effectInfo->params.size();
+		}
+		
+		D3D12_HEAP_FLAGS heapFlag = _d3d12Context->IsHeapFlagCreateNotZeroedSupported() ?
+			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
+
+		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
+
+		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(UINT64(paramCount * 4));
+
+		HRESULT hr = device->CreateCommittedResource(
+			&heapProperties,
+			heapFlag,
+			&bufferDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&_constantUploadBuffer)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return hr;
+		}
+
+		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		// 常量缓冲区必须对齐到 256 字节
+		bufferDesc.Width = (bufferDesc.Width + 255) & ~255;
+		hr = device->CreateCommittedResource(
+			&heapProperties,
+			heapFlag,
+			&bufferDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&_constantBuffer)
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("CreateCommittedResource 失败", hr);
+			return hr;
+		}
+
+		// 无需解除映射
+		D3D12_RANGE readRange{};
+		hr = _constantUploadBuffer->Map(0, &readRange, &_constantUploadBufferData);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("ID3D12Resource::Map 失败", hr);
+			return hr;
+		}
+	}
+
+	// 更新 _constantUploadBuffer，_constantBuffer 将在 Draw 中更新
+	{
+		using Constant32 = DirectXHelper::Constant32;
+		// SmallVector 中数据地址偏移量是 16 字节，alignas(16) 使 SmallVector
+		// 和其中数据都对齐到 16 字节边界。
+		alignas(16) SmallVector<Constant32, 32> constants;
+		assert((uint8_t*)constants.data() - (uint8_t*)&constants == 16);
+
+		constants.emplace_back(Constant32::UInt(_inputSize.width));
+		constants.emplace_back(Constant32::UInt(_inputSize.height));
+		constants.emplace_back(Constant32::UInt(_outputSize.width));
+		constants.emplace_back(Constant32::UInt(_outputSize.height));
+		constants.emplace_back(Constant32::Float(1.0f / _inputSize.width));
+		constants.emplace_back(Constant32::Float(1.0f / _inputSize.height));
+		constants.emplace_back(Constant32::Float(1.0f / _outputSize.width));
+		constants.emplace_back(Constant32::Float(1.0f / _outputSize.height));
+		constants.emplace_back(Constant32::Float((float)_outputSize.width / _inputSize.width));
+		constants.emplace_back(Constant32::Float((float)_outputSize.height / _inputSize.height));
+
+		// PS 样式参数
+		for (uint32_t i = 0, end = (uint32_t)_drawInfo->passes.size() - 1; i < end; ++i) {
+			if (bool(_drawInfo->passes[i].flags & ShaderEffectPassFlags::PSStyle)) {
+				uint32_t output = _drawInfo->passes[i].outputs[0];
+				if (output == 1) {
+					constants.emplace_back(Constant32::Float(1.0f / _outputSize.width));
+					constants.emplace_back(Constant32::Float(1.0f / _outputSize.height));
+				} else {
+					D3D12_RESOURCE_DESC texDesc = _textures[size_t(output - 2)]->GetDesc();
+					constants.emplace_back(Constant32::Float(1.0f / texDesc.Width));
+					constants.emplace_back(Constant32::Float(1.0f / texDesc.Height));
+				}
+			}
+		}
+
+		// WCG/HDR 参数
+		if (bool(_effectInfo->flags & EffectFlags::SupportAdvancedColor) &&
+			_colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange)
+		{
+			constants.emplace_back(Constant32::Float(_colorInfo.maxLuminance));
+			constants.emplace_back(Constant32::Float(_colorInfo.sdrWhiteLevel));
+		}
+
+		// 效果参数
+		if (!options.IsInlineParams()) {
+			for (const EffectParameterDesc& paramDesc : _effectInfo->params) {
+				auto it = _effectOption->parameters.find(paramDesc.name);
+				float value = it == _effectOption->parameters.end() ? paramDesc.defaultValue : it->second;
+				switch (paramDesc.type) {
+				case EffectParameterType::Float:
+					constants.emplace_back(Constant32::Float(value));
+					break;
+				case EffectParameterType::Int:
+					constants.emplace_back(Constant32::Int(std::lround(value)));
+					break;
+				default:
+					assert(paramDesc.type == EffectParameterType::UInt);
+					constants.emplace_back(Constant32::UInt((uint32_t)std::lround(value)));
+					break;
+				}
+			}
+		}
+
+		_constantsDataSize = (uint32_t)constants.size() * 4;
+		assert(_constantsDataSize <= _constantUploadBuffer->GetDesc().Width);
+		std::memcpy(_constantUploadBufferData, constants.data(), _constantsDataSize);
+
+		_isConstantBufferOutdated = true;
+	}
+	
 	for (uint32_t passIdx = 0; passIdx < passCount; ++passIdx) {
 		const ShaderEffectPassDesc& curPassDesc = _drawInfo->passes[passIdx];
 

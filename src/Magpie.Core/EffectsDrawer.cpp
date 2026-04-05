@@ -167,8 +167,9 @@ bool EffectsDrawer::Initialize(
 			texDesc.Width = effectData.outputSize.width;
 			texDesc.Height = effectData.outputSize.height;
 
-			hr = device->CreateCommittedResource(&heapProps, heapFlags, &texDesc,
-				D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&effectData.outputTexture));
+			hr = device->CreateCommittedResource(
+				&heapProps, heapFlags, &texDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+				nullptr, IID_PPV_ARGS(&effectData.outputTexture));
 			if (FAILED(hr)) {
 				Logger::Get().ComError("CreateCommittedResource 失败", hr);
 				return false;
@@ -254,18 +255,128 @@ HRESULT EffectsDrawer::Draw(
 
 	//commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex);
 
-	for (auto& effectData : _effectDatas) {
+	const uint32_t effectCount = (uint32_t)_effectDatas.size();
+	// 如果多个连续的效果都不能渲染，则合并为一个 CatmullRom
+	uint32_t catmullRomStartIdx = std::numeric_limits<uint32_t>::max();
+
+	for (uint32_t effectIdx = 0; effectIdx < effectCount; ++effectIdx) {
 		EffectDrawerState state;
 		std::string msg;
-		HRESULT hr = effectData.drawer->Update(state, msg);
+		HRESULT hr = _effectDatas[effectIdx].drawer->Update(state, msg);
 		if (FAILED(hr)) {
 			Logger::Get().ComError("ShaderEffectDrawer::Update 失败", hr);
 			return hr;
 		}
+
+		if (state != EffectDrawerState::Ready) {
+			if (catmullRomStartIdx == std::numeric_limits<uint32_t>::max()) {
+				catmullRomStartIdx = effectIdx;
+			}
+			continue;
+		}
+
+		if (catmullRomStartIdx != std::numeric_limits<uint32_t>::max()) {
+			catmullRomStartIdx = std::numeric_limits<uint32_t>::max();
+
+			SizeU inputSize;
+			uint32_t inputSrv;
+			if (catmullRomStartIdx == 0) {
+				inputSize = _inputSize;
+				inputSrv = inputSrvOffset;
+			} else {
+				uint32_t prevIdx = catmullRomStartIdx - 1;
+				inputSize = _effectDatas[prevIdx].outputSize;
+				inputSrv = _descriptorBaseOffset + prevIdx * 2;
+
+				computeContext.InsertTransitionBarrier(
+					_effectDatas[prevIdx].outputTexture.get(),
+					D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+					D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+				);
+			}
+
+			computeContext.InsertTransitionBarrier(
+				_effectDatas[size_t(effectIdx - 1)].outputTexture.get(),
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+				D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+			);
+
+			_catmullRomDrawer.Draw(
+				computeContext,
+				inputSize,
+				_effectDatas[size_t(effectIdx - 1)].outputSize,
+				inputSrv,
+				_descriptorBaseOffset + effectIdx * 2 - 1,
+				false
+			);
+		}
+
+		bool writeToRingBuffer = effectIdx == effectCount - 1 &&
+			_effectDatas[effectIdx].outputSize == _outputSize;
+
+		if (effectIdx != 0) {
+			computeContext.InsertTransitionBarrier(
+				_effectDatas[size_t(effectIdx - 1)].outputTexture.get(),
+				D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+			);
+		}
+
+		if (!writeToRingBuffer) {
+			computeContext.InsertTransitionBarrier(
+				_effectDatas[effectIdx].outputTexture.get(),
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+				D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+			);
+		}
+
+		hr = _effectDatas[effectIdx].drawer->Draw(
+			computeContext,
+			effectIdx == 0 ? inputSrvOffset : _descriptorBaseOffset + (effectIdx - 1) * 2,
+			writeToRingBuffer ? outputUavOffset : _descriptorBaseOffset + effectIdx * 2 + 1
+		);
+		if (FAILED(hr)) {
+			Logger::Get().ComError("EffectDrawerBase::Draw 失败", hr);
+			return hr;
+		}
 	}
 
-	_catmullRomDrawer.Draw(
-		computeContext, _inputSize, _outputSize, inputSrvOffset, outputUavOffset, false);
+	if (catmullRomStartIdx != std::numeric_limits<uint32_t>::max()) {
+		SizeU inputSize;
+		uint32_t inputSrv;
+		if (catmullRomStartIdx == 0) {
+			inputSize = _inputSize;
+			inputSrv = inputSrvOffset;
+		} else {
+			uint32_t prevIdx = catmullRomStartIdx - 1;
+			inputSize = _effectDatas[prevIdx].outputSize;
+			inputSrv = _descriptorBaseOffset + prevIdx * 2;
+
+			computeContext.InsertTransitionBarrier(
+				_effectDatas[prevIdx].outputTexture.get(),
+				D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+			);
+		}
+
+		_catmullRomDrawer.Draw(
+			computeContext, inputSize, _outputSize, inputSrv, outputUavOffset, false);
+	} else if (_effectDatas.back().outputSize != _outputSize) {
+		computeContext.InsertTransitionBarrier(
+			_effectDatas.back().outputTexture.get(),
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+			D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+		);
+
+		_catmullRomDrawer.Draw(
+			computeContext,
+			_effectDatas.back().outputSize,
+			_outputSize,
+			_descriptorBaseOffset + (effectCount - 1) * 2,
+			outputUavOffset,
+			false
+		);
+	}
 
 	// commandList->EndQuery(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex + 1);
 	// commandList->ResolveQueryData(_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, queryHeapIndex, 2,

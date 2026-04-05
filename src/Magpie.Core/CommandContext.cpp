@@ -16,11 +16,28 @@ void ComputeContext::SetRoot32BitConstants(
 	_commandList->SetComputeRoot32BitConstants(rootParameterIndex, constantCount, pData, 0);
 }
 
+void ComputeContext::SetComputeRootConstantBufferView(
+	uint32_t rootParameterIndex,
+	D3D12_GPU_VIRTUAL_ADDRESS bufferLocation
+) noexcept {
+	// 存在 DATA_STATIC 标志时 SetComputeRootConstantBufferView 会检查资源状态
+	if (_d3d12Context->GetRootSignatureVersion() >= D3D_ROOT_SIGNATURE_VERSION_1_1) {
+		_FlushBarriers();
+	}
+	
+	_commandList->SetComputeRootConstantBufferView(rootParameterIndex, bufferLocation);
+}
+
 void ComputeContext::SetRootDescriptorTable(
 	uint32_t rootParameterIndex,
 	uint32_t baseDescriptorOffset
 ) noexcept {
 	assert(baseDescriptorOffset != std::numeric_limits<uint32_t>::max());
+
+	// 存在 DATA_STATIC 标志时 SetComputeRootDescriptorTable 会检查资源状态
+	if (_d3d12Context->GetRootSignatureVersion() >= D3D_ROOT_SIGNATURE_VERSION_1_1) {
+		_FlushBarriers();
+	}
 
 	_commandList->SetComputeRootDescriptorTable(
 		rootParameterIndex,
@@ -59,7 +76,7 @@ void GraphicsContext::SetRootDescriptorTable(
 ) noexcept {
 	assert(baseDescriptorOffset != std::numeric_limits<uint32_t>::max());
 
-	// 存在 DATA_STATIC_WHILE_SET_AT_EXECUTE 时 SetGraphicsRootDescriptorTable 会检查资源状态
+	// 存在 DATA_STATIC 标志时 SetGraphicsRootDescriptorTable 会检查资源状态
 	if (_d3d12Context->GetRootSignatureVersion() >= D3D_ROOT_SIGNATURE_VERSION_1_1) {
 		_FlushBarriers();
 	}

@@ -153,6 +153,11 @@ public:
 		const void* pData
 	) noexcept;
 
+	void SetComputeRootConstantBufferView(
+		uint32_t rootParameterIndex,
+		D3D12_GPU_VIRTUAL_ADDRESS bufferLocation
+	) noexcept;
+
 	void SetRootDescriptorTable(
 		uint32_t rootParameterIndex,
 		uint32_t baseDescriptorOffset
@@ -160,7 +165,7 @@ public:
 
 	void Dispatch(
 		uint32_t threadGroupCountX,
-		uint32_t threadGroupCountY,
+		uint32_t threadGroupCountY = 1,
 		uint32_t threadGroupCountZ = 1
 	) noexcept;
 
