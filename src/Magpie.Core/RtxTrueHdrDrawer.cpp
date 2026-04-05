@@ -5,7 +5,6 @@
 #include "RtxTrueHdrDrawer.h"
 #include "GraphicsContext.h"
 #include "DescriptorHeap.h"
-#include "shaders/RtxTrueHdrPostCS.h"
 #include "shaders/RtxTrueHdrPreCS.h"
 #include "Logger.h"
 #include "Win32Helper.h"
@@ -155,11 +154,11 @@ HRESULT RtxTrueHdrDrawer::Draw(uint32_t inputSrvOffset, ID3D12Resource* outputTe
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutTop, 0);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutRight, _inputSize.width);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_OutBottom, _inputSize.height);
-		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Contrast, 20);
+		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Contrast, 30);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_Saturation, 0);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_MiddleGray, 80);
 		NVSDK_NGX_Parameter_SetUI(_ngxParameters, NVSDK_NGX_Parameter_TrueHDR_MaxLuminance,
-			(uint32_t)std::lroundf(_colorInfo.maxLuminance * SCENE_REFERRED_SDR_WHITE_LEVEL));
+			std::clamp((uint32_t)std::lroundf(_colorInfo.maxLuminance * SCENE_REFERRED_SDR_WHITE_LEVEL), 400u, 2000u));
 	}
 
 	NVSDK_NGX_Parameter_SetD3d12Resource(
