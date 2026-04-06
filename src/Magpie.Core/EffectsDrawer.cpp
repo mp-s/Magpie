@@ -113,19 +113,24 @@ bool EffectsDrawer::Initialize(
 		outputSize = effectData.outputSize;
 	}
 
-	// 如果输出尺寸比渲染区域更大则使用 CatmullRom 等比缩小，更小时不放大
-	if (outputSize.width > rendererSize.width || outputSize.height > rendererSize.height) {
-		float scaleX = float(rendererSize.width) / outputSize.width;
-		float scaleY = float(rendererSize.height) / outputSize.height;
-		if (scaleX <= scaleY) {
-			outputSize.width = rendererSize.width;
-			outputSize.height = std::lround(outputSize.height * scaleX);
-		} else {
-			outputSize.width = std::lround(outputSize.width * scaleY);
-			outputSize.height = rendererSize.height;
+	// 如果输出尺寸比渲染区域更大则使用 CatmullRom 等比缩小，窗口模式缩放下可能要放大
+	if (outputSize != rendererSize) {
+		if (options.IsWindowedMode() ||
+			outputSize.width > rendererSize.width ||
+			outputSize.height > rendererSize.height)
+		{
+			float scaleX = float(rendererSize.width) / outputSize.width;
+			float scaleY = float(rendererSize.height) / outputSize.height;
+			if (scaleX <= scaleY) {
+				outputSize.width = rendererSize.width;
+				outputSize.height = std::lround(outputSize.height * scaleX);
+			} else {
+				outputSize.width = std::lround(outputSize.width * scaleY);
+				outputSize.height = rendererSize.height;
+			}
 		}
 	}
-
+	
 	_outputSize = outputSize;
 
 	// 创建效果的输入/输出纹理

@@ -6,8 +6,8 @@
 
 
 //!MAGPIE EFFECT
-//!VERSION 4
-
+//!VERSION 5
+//!SCALE_FACTOR 1
 
 //!PARAMETER
 //!LABEL Sharpness
@@ -24,8 +24,6 @@ float curveHeight;
 Texture2D INPUT;
 
 //!TEXTURE
-//!WIDTH INPUT_WIDTH
-//!HEIGHT INPUT_HEIGHT
 Texture2D OUTPUT;
 
 //!SAMPLER

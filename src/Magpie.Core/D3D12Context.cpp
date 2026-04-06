@@ -82,16 +82,29 @@ bool D3D12Context::Initialize(
 	}
 
 	// 检查 FP16 支持
-	{
-		D3D12_FEATURE_DATA_D3D12_OPTIONS data{};
-		hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &data, sizeof(data));
-		if (SUCCEEDED(hr)) {
-			_isFP16Supported = data.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;
-		} else {
-			Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
+	if (!ScalingWindow::Get().Options().IsFP16Disabled()) {
+		{
+			D3D12_FEATURE_DATA_D3D12_OPTIONS data{};
+			hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &data, sizeof(data));
+			if (SUCCEEDED(hr)) {
+				_isMinFloat16Supported = data.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT;
+			} else {
+				Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
+			}
+		}
+		
+		// SM 6.2 开始支持原生 16 位标量
+		if (_shaderModel >= D3D_SHADER_MODEL_6_2) {
+			D3D12_FEATURE_DATA_D3D12_OPTIONS4 data{};
+			hr = _device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &data, sizeof(data));
+			if (SUCCEEDED(hr)) {
+				_isNative16BitSupported = data.Native16BitShaderOpsSupported;
+			} else {
+				Logger::Get().ComWarn("CheckFeatureSupport 失败", hr);
+			}
 		}
 	}
-
+	
 	_LogDeviceInfo();
 
 	if (!_InitializeDeviceResources(
@@ -112,7 +125,8 @@ void D3D12Context::CopyDevice(const D3D12Context& other) {
 	_isUMA = other._isUMA;
 	_isHeapFlagCreateNotZeroedSupported = other._isHeapFlagCreateNotZeroedSupported;
 	_isGPUUploadHeapSupported = other._isGPUUploadHeapSupported;
-	_isFP16Supported = other._isFP16Supported;
+	_isMinFloat16Supported = other._isMinFloat16Supported;
+	_isNative16BitSupported = other._isNative16BitSupported;
 }
 
 bool D3D12Context::InitializeAfterCopyDevice(
@@ -603,14 +617,16 @@ void D3D12Context::_LogDeviceInfo() noexcept {
 	集成显卡: {}
 	D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 支持: {}
 	Resizable BAR 支持: {}
-	FP16 支持: {})",
+	min16float 支持: {}
+	原生 16 位标量支持: {})",
 		featureLevel,
 		shaderModel,
 		_rootSignatureVersion == D3D_ROOT_SIGNATURE_VERSION_1_1 ? "1.1" : "1.0",
 		boolStrs[_isUMA],
 		boolStrs[_isHeapFlagCreateNotZeroedSupported],
 		boolStrs[_isGPUUploadHeapSupported],
-		boolStrs[_isFP16Supported]
+		boolStrs[_isMinFloat16Supported],
+		boolStrs[_isNative16BitSupported]
 	));
 }
 

@@ -27,7 +27,8 @@ public:
 		std::string_view effectName,
 		const phmap::flat_hash_map<std::string, float>* inlineParams,
 		D3D_SHADER_MODEL shaderModel,
-		bool isFP16Supported,
+		bool isMinFloat16Supported,
+		bool isNative16BitSupported,
 		bool isAdvancedColorSupported,
 		bool saveSources,
 		bool warningsAreErrors
@@ -48,8 +49,7 @@ private:
 		const phmap::flat_hash_map<std::string, float>* inlineParams,
 		D3D_SHADER_MODEL shaderModel,
 		std::string cacheKey,
-		bool isFP16Supported,
-		bool isAdvancedColorSupported,
+		uint32_t parserFlags,
 		bool saveSources,
 		bool warningsAreErrors
 	) noexcept;

@@ -76,8 +76,12 @@ public:
 		return _isGPUUploadHeapSupported;
 	}
 
-	bool IsFP16Supported() const noexcept {
-		return _isFP16Supported;
+	bool IsMinFloat16Supported() const noexcept {
+		return _isMinFloat16Supported;
+	}
+
+	bool IsNative16BitSupported() const noexcept {
+		return _isNative16BitSupported;
 	}
 
 	uint32_t GetMaxInFlightFrameCount() const noexcept {
@@ -145,7 +149,8 @@ private:
 	bool _isUMA = false;
 	bool _isHeapFlagCreateNotZeroedSupported = false;
 	bool _isGPUUploadHeapSupported = false;
-	bool _isFP16Supported = false;
+	bool _isMinFloat16Supported = false;
+	bool _isNative16BitSupported = false;
 };
 
 }

@@ -9,8 +9,10 @@ struct ShaderEffectDrawInfo;
 
 enum class ShaderEffectParserFlags {
 	None = 0,
-	EnableFP16 = 1,
-	EnableAdvancedColor = 1 << 1
+	// EnableMinFloat16 和 EnableNative16Bit 不能同时出现
+	EnableMinFloat16 = 1,
+	EnableNative16Bit = 1 << 1,
+	EnableAdvancedColor = 1 << 2
 };
 DEFINE_ENUM_FLAG_OPERATORS(ShaderEffectParserFlags)
 

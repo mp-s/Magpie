@@ -7,6 +7,7 @@
 #include "Win32Helper.h"
 #include <d3dcompiler.h>
 #include <rapidhash.h>
+#include <dxcapi.h>
 
 namespace Magpie {
 
@@ -121,7 +122,8 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	std::string_view effectName,
 	const phmap::flat_hash_map<std::string, float>* inlineParams,
 	D3D_SHADER_MODEL shaderModel,
-	bool isFP16Supported,
+	bool isMinFloat16Supported,
+	bool isNative16BitSupported,
 	bool isAdvancedColorSupported,
 	bool saveSources,
 	bool warningsAreErrors
@@ -146,10 +148,14 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	}
 
 	ShaderEffectParserFlags parserFlags = ShaderEffectParserFlags::None;
-	if (isFP16Supported && bool(effectInfo.flags & EffectFlags::SupportFP16)) {
-		parserFlags |= ShaderEffectParserFlags::EnableFP16;
+	if (bool(effectInfo.flags & EffectFlags::SupportFP16)) {
+		if (isNative16BitSupported) {
+			parserFlags |= ShaderEffectParserFlags::EnableNative16Bit;
+		} else if (isMinFloat16Supported) {
+			parserFlags |= ShaderEffectParserFlags::EnableMinFloat16;
+		}
 	}
-	if (isAdvancedColorSupported && bool(effectInfo.flags & EffectFlags::SupportAdvancedColor)) {
+	if (bool(effectInfo.flags & EffectFlags::SupportAdvancedColor) && isAdvancedColorSupported) {
 		parserFlags |= ShaderEffectParserFlags::EnableAdvancedColor;
 	}
 	
@@ -193,8 +199,7 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 		inlineParams,
 		shaderModel,
 		cacheKey,
-		isFP16Supported,
-		isAdvancedColorSupported,
+		(uint32_t)parserFlags,
 		saveSources,
 		warningsAreErrors
 	);
@@ -275,7 +280,7 @@ public:
 	}
 
 	HRESULT CALLBACK Close(LPCVOID pData) noexcept override {
-		std::unique_ptr<char[]>((char*)pData);
+		std::unique_ptr<char[]> temp((char*)pData);
 		return S_OK;
 	}
 
@@ -289,8 +294,7 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 	const phmap::flat_hash_map<std::string, float>* inlineParams,
 	D3D_SHADER_MODEL shaderModel,
 	std::string cacheKey,
-	bool isFP16Supported,
-	bool isAdvancedColorSupported,
+	uint32_t parserFlags,
 	bool saveSources,
 	bool warningsAreErrors
 ) noexcept {
@@ -307,15 +311,10 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 
 	ShaderEffectParserOptions options = {
 		.inlineParams = inlineParams,
-		.shaderModel = shaderModel
+		.shaderModel = shaderModel,
+		.flags = (ShaderEffectParserFlags)parserFlags
 	};
-	if (isFP16Supported && bool(effectInfo.flags & EffectFlags::SupportFP16)) {
-		options.flags |= ShaderEffectParserFlags::EnableFP16;
-	}
-	if (isAdvancedColorSupported && bool(effectInfo.flags & EffectFlags::SupportAdvancedColor)) {
-		options.flags |= ShaderEffectParserFlags::EnableAdvancedColor;
-	}
-
+	
 	ShaderEffectDrawInfo effectDrawInfo;
 	SmallVector<ShaderEffectSource, 0> effectSources;
 	std::string errorMsg = ShaderEffectParser::ParseForDesc(
@@ -355,7 +354,128 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 			}
 		}
 
-		{
+		// SM 6.0 及以上使用 DXC 编译，SM 5.1 使用 FXC 编译
+		if (shaderModel >= D3D_SHADER_MODEL_6_0) {
+			winrt::com_ptr<IDxcUtils> dxcUtils;
+			winrt::com_ptr<IDxcCompiler3> dxcCompiler;
+
+			HRESULT hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxcUtils));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("DxcCreateInstance 失败", hr);
+				return;
+			}
+
+			hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxcCompiler));
+			if (FAILED(hr)) {
+				Logger::Get().ComError("DxcCreateInstance 失败", hr);
+				return;
+			}
+
+			DxcBuffer sourceBuffer = {
+				.Ptr = source.data(),
+				.Size = source.size(),
+				.Encoding = DXC_CP_UTF8
+			};
+
+			std::vector<const wchar_t*> arguments;
+
+			arguments.push_back(L"-HV");
+			arguments.push_back(L"2018");
+
+			arguments.push_back(L"-E");
+			arguments.push_back(L"__M");
+
+			arguments.push_back(L"-T");
+			const wchar_t* profile;
+			switch (shaderModel) {
+			case D3D_SHADER_MODEL_6_9:
+				profile = L"cs_6_9";
+				break;
+			case D3D_SHADER_MODEL_6_8:
+				profile = L"cs_6_8";
+				break;
+			case D3D_SHADER_MODEL_6_7:
+				profile = L"cs_6_7";
+				break;
+			case D3D_SHADER_MODEL_6_6:
+				profile = L"cs_6_6";
+				break;
+			case D3D_SHADER_MODEL_6_5:
+				profile = L"cs_6_5";
+				break;
+			case D3D_SHADER_MODEL_6_4:
+				profile = L"cs_6_4";
+				break;
+			case D3D_SHADER_MODEL_6_3:
+				profile = L"cs_6_3";
+				break;
+			case D3D_SHADER_MODEL_6_2:
+				profile = L"cs_6_2";
+				break;
+			case D3D_SHADER_MODEL_6_1:
+				profile = L"cs_6_1";
+				break;
+			default:
+				profile = L"cs_6_0";
+				break;
+			}
+			arguments.push_back(profile);
+
+			if (bool(options.flags & ShaderEffectParserFlags::EnableNative16Bit)) {
+				arguments.push_back(L"-enable-16bit-types");
+			}
+			
+			std::vector<std::wstring> macroStrs;
+			for (const std::pair<std::string, std::string>& macro : macros) {
+				arguments.push_back(L"-D");
+
+				if (macro.second.empty()) {
+					arguments.push_back(macroStrs.emplace_back(StrHelper::UTF8ToUTF16(macro.first)).c_str());
+				} else {
+					arguments.push_back(macroStrs.emplace_back(StrHelper::Concat(
+						StrHelper::UTF8ToUTF16(macro.first), L"=", StrHelper::UTF8ToUTF16(macro.second))).c_str());
+				}
+			}
+
+#ifndef _DEBUG
+			arguments.push_back(L"-O3");
+
+			// 剥离反射信息以减小体积
+			arguments.push_back(L"-Qstrip_reflect");
+#endif
+
+			winrt::com_ptr<IDxcResult> dxcResult;
+			hr = dxcCompiler->Compile(
+				&sourceBuffer,
+				arguments.data(),
+				(uint32_t)arguments.size(),
+				nullptr,
+				IID_PPV_ARGS(&dxcResult)
+			);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("IDxcCompiler3::Compile 失败", hr);
+				return;
+			}
+
+			winrt::com_ptr<IDxcBlobUtf8> messages;
+			dxcResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&messages), nullptr);
+			if (messages && messages->GetStringLength() > 0) {
+				Logger::Get().Warn(StrHelper::Concat("编译着色器输出: ", messages->GetStringPointer()));
+				return;
+			}
+
+			HRESULT compileStatus;
+			dxcResult->GetStatus(&compileStatus);
+			if (FAILED(compileStatus)) {
+				Logger::Get().ComError("编译着色器失败", compileStatus);
+				return;
+			}
+
+			hr = dxcResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&effectDrawInfo.passes[id].byteCode), nullptr);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("IDxcResult::GetOutput 失败", hr);
+			}
+		} else {
 			winrt::com_ptr<ID3DBlob> errorMsg;
 
 			UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_ALL_RESOURCES_BOUND;
@@ -396,14 +516,14 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 			);
 			if (FAILED(hr)) {
 				if (errorMsg) {
-					Logger::Get().ComError(StrHelper::Concat("编译计算着色器失败: ", (const char*)errorMsg->GetBufferPointer()), hr);
+					Logger::Get().ComError(StrHelper::Concat("编译着色器失败: ", (const char*)errorMsg->GetBufferPointer()), hr);
 				}
 				return;
 			}
 
 			// 警告消息
 			if (errorMsg) {
-				Logger::Get().Warn(StrHelper::Concat("编译计算着色器时产生警告: ", (const char*)errorMsg->GetBufferPointer()));
+				Logger::Get().Warn(StrHelper::Concat("编译着色器时产生警告: ", (const char*)errorMsg->GetBufferPointer()));
 			}
 		}
 	}, (uint32_t)effectDrawInfo.passes.size());

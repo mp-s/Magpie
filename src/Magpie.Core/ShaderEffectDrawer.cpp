@@ -71,7 +71,8 @@ void ShaderEffectDrawer::Bind(SizeU inputSize, SizeU outputSize, const ColorInfo
 		_effectOption->name,
 		options.IsInlineParams() ? &_effectOption->parameters : nullptr,
 		_d3d12Context->GetShaderModel(),
-		_d3d12Context->IsFP16Supported(),
+		_d3d12Context->IsMinFloat16Supported(),
+		_d3d12Context->IsNative16BitSupported(),
 		colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange,
 		options.IsSaveEffectSources(),
 		options.IsWarningsAreErrors()
@@ -442,16 +443,18 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() {
 			}
 		}
 
-		HRESULT hr = _d3d12Context->GetDescriptorHeap()
-			.Alloc((uint32_t)_textureDescriptorMap.size(), _descriptorBaseOffset);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
-			return hr;
-		}
+		if (!_textureDescriptorMap.empty()) {
+			HRESULT hr = _d3d12Context->GetDescriptorHeap()
+				.Alloc((uint32_t)_textureDescriptorMap.size(), _descriptorBaseOffset);
+			if (FAILED(hr)) {
+				Logger::Get().ComError("DescriptorHeap::Alloc 失败", hr);
+				return hr;
+			}
 
-		for (_PassData& passData : _passDatas) {
-			if (passData.descriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
-				passData.descriptorBaseOffset += _descriptorBaseOffset;
+			for (_PassData& passData : _passDatas) {
+				if (passData.descriptorBaseOffset != std::numeric_limits<uint32_t>::max()) {
+					passData.descriptorBaseOffset += _descriptorBaseOffset;
+				}
 			}
 		}
 	}

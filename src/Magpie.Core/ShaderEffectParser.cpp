@@ -1552,9 +1552,9 @@ static void GenerateShaderSources(
 	SmallVectorImpl<ShaderEffectSource>& effectSources
 ) noexcept {
 	const uint32_t passCount = (uint32_t)drawInfo.passes.size();
-	const bool isFP16Enabled = bool(effectInfo.flags & EffectFlags::SupportFP16) &&
-		bool(options.flags & ShaderEffectParserFlags::EnableFP16);
-	const bool isAdvancedColorEnabled = bool(effectInfo.flags & EffectFlags::SupportAdvancedColor) &&
+	const bool isFP16Enabled = bool(options.flags &
+		(ShaderEffectParserFlags::EnableMinFloat16 | ShaderEffectParserFlags::EnableNative16Bit));
+	const bool isAdvancedColorEnabled =
 		bool(options.flags & ShaderEffectParserFlags::EnableAdvancedColor);
 
 	// 所有通道共用的常量缓冲区
@@ -1671,19 +1671,22 @@ static void GenerateShaderSources(
 		// MF 宏
 		static const char* NUMBER_STRS[] = { "1","2","3","4" };
 		if (isFP16Enabled) {
+			const char* baseType = bool(options.flags & ShaderEffectParserFlags::EnableNative16Bit) ?
+				"float16_t" : "min16float";
+
 			macros.emplace_back("MP_FP16", "");
-			macros.emplace_back("MF", "min16float");
+			macros.emplace_back("MF", baseType);
 
 			for (uint32_t i = 0; i < 4; ++i) {
 				macros.emplace_back(
 					StrHelper::Concat("MF", NUMBER_STRS[i]),
-					StrHelper::Concat("min16float", NUMBER_STRS[i])
+					StrHelper::Concat(baseType, NUMBER_STRS[i])
 				);
 
 				for (uint32_t j = 0; j < 4; ++j) {
 					macros.emplace_back(
 						StrHelper::Concat("MF", NUMBER_STRS[i], "x", NUMBER_STRS[j]),
-						StrHelper::Concat("min16float", NUMBER_STRS[i], "x", NUMBER_STRS[j])
+						StrHelper::Concat(baseType, NUMBER_STRS[i], "x", NUMBER_STRS[j])
 					);
 				}
 			}
@@ -1760,6 +1763,16 @@ float2 GetInputPt() { return __inputPt; }
 uint2 GetOutputSize() { return __outputSize; }
 float2 GetOutputPt() { return __outputPt; }
 float2 GetScale() { return __scale; }
+MF3 EncodeSrgb(MF3 c) {
+	MF3 j = { 0.0031308 * 12.92, 12.92, 1.0 / 2.4 };
+	MF2 k = { 1.055, -0.055 };
+	return clamp(j.x, c * j.y, pow(c, j.z) * k.x + k.y);
+}
+MF3 DecodeSrgb(MF3 c) {
+	MF3 j = { 0.04045, 1.0 / 12.92, 2.4 };
+	MF2 k = { 1.0 / 1.055, 0.055 / 1.055 };
+	return lerp(c * j.y, pow(c * k.x + k.y, j.z), step(j.x, c));
+}
 MF2 MulAdd(MF2 x, MF2x2 y, MF2 a) {
 	MF2 result = a;
 	result = mad(x.x, y._m00_m01, result);
@@ -1940,6 +1953,14 @@ std::string ShaderEffectParser::ParseForDesc(
 	SmallVectorImpl<ShaderEffectSource>& effectSources
 ) noexcept {
 	assert(!source.empty());
+	// 检查标志是否合法
+	assert((options.flags & (ShaderEffectParserFlags::EnableMinFloat16 |
+		ShaderEffectParserFlags::EnableNative16Bit)) !=
+		(ShaderEffectParserFlags::EnableMinFloat16 | ShaderEffectParserFlags::EnableNative16Bit));
+	assert(!(bool(options.flags & (ShaderEffectParserFlags::EnableMinFloat16 |
+		ShaderEffectParserFlags::EnableNative16Bit)) && !bool(effectInfo.flags & EffectFlags::SupportFP16)));
+	assert(!(bool(options.flags & ShaderEffectParserFlags::EnableAdvancedColor) &&
+		!bool(effectInfo.flags & EffectFlags::SupportAdvancedColor)));
 
 	ParserState state = {
 		.lineNumber = 1,
