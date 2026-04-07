@@ -49,8 +49,7 @@ static SizeU CalcOutputSize(
 	{
 		// 窗口模式缩放时将缩放比例为 1 的 Fit 视为 Fill。此时缩放确保是等比例的，但由于舍入
 		// 可能存在一个像素的误差。考虑长 100 高 50 的矩形窗口，长调整到 101 时高将四舍五入到
-		// 51，再将长调整到 102 高仍是 51，Fit 的计算方式会使这两次调整中有一次存在黑边，而且
-		// 也会影响后续计算是否追加 Bicubic。
+		// 51，再将长调整到 102 高仍是 51，Fit 的计算方式会使这两次调整中有一次存在黑边。
 		bool treatFitAsFill = ScalingWindow::Get().Options().IsWindowedMode() &&
 			IsApprox(effectOption.scale.first, 1.0f) &&
 			IsApprox(effectOption.scale.second, 1.0f);
@@ -82,56 +81,29 @@ bool EffectsDrawer::Initialize(
 	SizeU& outputSize
 ) noexcept {
 	_d3d12Context = &d3d12Context;
-	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+	_colorInfo = colorInfo;
 	_inputSize = inputSize;
+	_rendererSize = rendererSize;
 
 	ID3D12Device5* device = d3d12Context.GetDevice();
 	const ScalingOptions& options = ScalingWindow::Get().Options();
 
 	uint32_t effectCount = (uint32_t)options.effects.size();
 	_effectDatas.resize(effectCount);
-	outputSize = inputSize;
 
 	// 效果的初始化可能是异步的，因此尽早进行
 	for (uint32_t i = 0; i < effectCount; ++i) {
-		auto& effectData = _effectDatas[i];
-		const auto& effectOption = options.effects[i];
-
+		_EffectData& effectData = _effectDatas[i];
 		effectData.drawer = std::make_unique<ShaderEffectDrawer>();
 		effectData.effectInfo = effectData.drawer->Initialize(d3d12Context, options.effects[i]);
 		if (!effectData.effectInfo) {
 			Logger::Get().Error("ShaderEffectDrawer::Initialize 失败");
 			return false;
 		}
-
-		// outputSize 是前一个效果的输出尺寸，即当前效果的输入尺寸
-		effectData.outputSize = CalcOutputSize(
-			effectData.effectInfo->scaleFactor, outputSize, rendererSize, effectOption);
-
-		effectData.drawer->Bind(outputSize, effectData.outputSize, colorInfo);
-
-		outputSize = effectData.outputSize;
 	}
 
-	// 如果输出尺寸比渲染区域更大则使用 CatmullRom 等比缩小，窗口模式缩放下可能要放大
-	if (outputSize != rendererSize) {
-		if (options.IsWindowedMode() ||
-			outputSize.width > rendererSize.width ||
-			outputSize.height > rendererSize.height)
-		{
-			float scaleX = float(rendererSize.width) / outputSize.width;
-			float scaleY = float(rendererSize.height) / outputSize.height;
-			if (scaleX <= scaleY) {
-				outputSize.width = rendererSize.width;
-				outputSize.height = std::lround(outputSize.height * scaleX);
-			} else {
-				outputSize.width = std::lround(outputSize.width * scaleY);
-				outputSize.height = rendererSize.height;
-			}
-		}
-	}
-	
-	_outputSize = outputSize;
+	_UpdateEffectBindings();
+	outputSize = _outputSize;
 
 	// 创建效果的输入/输出纹理
 	if (uint32_t descriptorCount = _CalcDescriptorCount()) {
@@ -150,8 +122,9 @@ bool EffectsDrawer::Initialize(
 		D3D12_HEAP_FLAGS heapFlags = _d3d12Context->IsHeapFlagCreateNotZeroedSupported() ?
 			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
 
+		bool isSrgb = colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange;
 		CD3DX12_RESOURCE_DESC texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-			_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R10G10B10A2_UNORM,
+			isSrgb ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT,
 			0, 0, 1, 1, 1, 0,
 			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
 		);
@@ -391,12 +364,14 @@ HRESULT EffectsDrawer::Draw(
 }
 
 void EffectsDrawer::OnResized(SizeU rendererSize, SizeU& outputSize) noexcept {
-	_outputSize = rendererSize;
+	_rendererSize = rendererSize;
+	_UpdateEffectBindings();
 	outputSize = _outputSize;
 }
 
 void EffectsDrawer::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
-	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+	_colorInfo = colorInfo;
+	_UpdateEffectBindings();
 }
 
 uint32_t EffectsDrawer::_CalcDescriptorCount() const noexcept {
@@ -418,6 +393,44 @@ uint32_t EffectsDrawer::_CalcDescriptorCount() const noexcept {
 		return count - 2;
 	} else {
 		return count;
+	}
+}
+
+void EffectsDrawer::_UpdateEffectBindings() noexcept {
+	const ScalingOptions& options = ScalingWindow::Get().Options();
+
+	_outputSize = _inputSize;
+	for (uint32_t i = 0; i < _effectDatas.size(); ++i) {
+		_EffectData& effectData = _effectDatas[i];
+		const EffectOption& effectOption = options.effects[i];
+
+		// outputSize 是前一个效果的输出尺寸，即当前效果的输入尺寸
+		effectData.outputSize = CalcOutputSize(
+			effectData.effectInfo->scaleFactor, _outputSize, _rendererSize, effectOption);
+
+		effectData.drawer->Bind(_outputSize, effectData.outputSize, _colorInfo);
+
+		_outputSize = effectData.outputSize;
+	}
+
+	// 如果输出尺寸比渲染区域更大则使用 CatmullRom 等比缩小，窗口模式缩放下可能要放大
+	if (_outputSize != _rendererSize) {
+		if (options.IsWindowedMode()) {
+			// 窗口模式缩放已确保等比例，这里直接赋值以避免舍入误差
+			_outputSize = _rendererSize;
+		} else if (_outputSize.width > _rendererSize.width ||
+			_outputSize.height > _rendererSize.height)
+		{
+			float scaleX = float(_rendererSize.width) / _outputSize.width;
+			float scaleY = float(_rendererSize.height) / _outputSize.height;
+			if (scaleX <= scaleY) {
+				_outputSize.width = _rendererSize.width;
+				_outputSize.height = std::lround(_outputSize.height * scaleX);
+			} else {
+				_outputSize.width = std::lround(_outputSize.width * scaleY);
+				_outputSize.height = _rendererSize.height;
+			}
+		}
 	}
 }
 

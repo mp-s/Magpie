@@ -44,10 +44,14 @@ public:
 private:
 	uint32_t _CalcDescriptorCount() const noexcept;
 
+	void _UpdateEffectBindings() noexcept;
+
 	D3D12Context* _d3d12Context = nullptr;
 
 	SizeU _inputSize{};
 	SizeU _outputSize{};
+	SizeU _rendererSize{};
+	ColorInfo _colorInfo;
 
 	struct _EffectData {
 		std::unique_ptr<EffectDrawerBase> drawer;
@@ -65,8 +69,6 @@ private:
 	winrt::com_ptr<ID3D12QueryHeap> _queryHeap;
 	winrt::com_ptr<ID3D12Resource> _queryResultBuffer;
 	UINT64 _timestampFrequency = 0;
-
-	bool _isScRGB = false;
 };
 
 }

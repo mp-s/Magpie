@@ -1773,6 +1773,9 @@ MF3 DecodeSrgb(MF3 c) {
 	MF2 k = { 1.0 / 1.055, 0.055 / 1.055 };
 	return lerp(c * j.y, pow(c * k.x + k.y, j.z), step(j.x, c));
 }
+MF GetLuminance(MF3 c) {
+	return dot(MF3(0.2126, 0.7152, 0.0722), c);
+}
 MF2 MulAdd(MF2 x, MF2x2 y, MF2 a) {
 	MF2 result = a;
 	result = mad(x.x, y._m00_m01, result);
