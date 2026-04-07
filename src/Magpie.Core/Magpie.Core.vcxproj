@@ -56,6 +56,7 @@
     <ClInclude Include="CursorDrawer.h" />
     <ClInclude Include="CursorManager.h" />
     <ClInclude Include="DDS.h" />
+    <ClInclude Include="TextureHelper.h" />
     <ClInclude Include="DirtyRectsOptimizer.h" />
     <ClInclude Include="DuplicateFrameChecker.h" />
     <ClInclude Include="DescriptorHeap.h" />
@@ -93,7 +94,7 @@
     <ClCompile Include="CommandContext.cpp" />
     <ClCompile Include="CursorDrawer.cpp" />
     <ClCompile Include="CursorManager.cpp" />
-    <ClCompile Include="DirectXHelper.cpp" />
+    <ClCompile Include="TextureHelper.cpp" />
     <ClCompile Include="DirtyRectsOptimizer.cpp" />
     <ClCompile Include="DuplicateFrameChecker.cpp" />
     <ClCompile Include="DescriptorHeap.cpp" />

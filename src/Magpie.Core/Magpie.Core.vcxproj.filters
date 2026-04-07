@@ -126,13 +126,13 @@
       <Filter>Render</Filter>
     </ClInclude>
     <ClInclude Include="ShaderEffectDrawInfo.h" />
+    <ClInclude Include="TextureHelper.h">
+      <Filter>Helpers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
     <ClCompile Include="pch.cpp" />
-    <ClCompile Include="DirectXHelper.cpp">
-      <Filter>Helpers</Filter>
-    </ClCompile>
     <ClCompile Include="WindowHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
@@ -200,6 +200,9 @@
     </ClCompile>
     <ClCompile Include="Renderer.cpp">
       <Filter>Render</Filter>
+    </ClCompile>
+    <ClCompile Include="TextureHelper.cpp">
+      <Filter>Helpers</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

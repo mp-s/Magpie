@@ -944,6 +944,18 @@ static bool ResolveTextureBlock(
 				state.errorMsg = "SOURCE 和 COLOR_SPACE_ADAPTIVE 格式冲突";
 				return false;
 			}
+
+			// 从图片加载纹理时格式存在限制
+			if (!desc.source.ends_with(".dds") &&
+				desc.format != ShaderEffectTextureFormat::R8G8B8A8_UNORM &&
+				desc.format != ShaderEffectTextureFormat::R10G10B10A2_UNORM &&
+				desc.format != ShaderEffectTextureFormat::R16G16B16A16_UNORM &&
+				desc.format != ShaderEffectTextureFormat::R16G16B16A16_FLOAT &&
+				desc.format != ShaderEffectTextureFormat::R32G32B32A32_FLOAT)
+			{
+				state.errorMsg = "从图片加载纹理时格式只能是 R8G8B8A8_UNORM、R10G10B10A2_UNORM、R16G16B16A16_UNORM、R16G16B16A16_FLOAT 或 R32G32B32A32_FLOAT";
+				return false;
+			}
 		}
 	}
 

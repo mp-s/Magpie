@@ -59,6 +59,12 @@ private:
 
 	SmallVector<winrt::com_ptr<ID3D12Resource>> _textures;
 	SmallVector<D3D12_RESOURCE_STATES> _textureStates;
+	struct _TextureSourceData {
+		winrt::com_ptr<ID3D12Resource> uploadBuffer;
+		SizeU textureSize{};
+		uint32_t targetTextureIdx = 0;
+	};
+	SmallVector<_TextureSourceData, 1> _textureSourceDatas;
 	// 描述符布局: [SRV] | [UAV] | [SRV] | ...
 	// 多个通道的 SRV 和 UAV 可能合并，_textureDescriptorMap 保存了布局。
 	uint32_t _descriptorBaseOffset = std::numeric_limits<uint32_t>::max();
@@ -67,8 +73,8 @@ private:
 	// 的索引都加上 _textures.size() 作为区分。
 	SmallVector<uint32_t> _textureDescriptorMap;
 
-	bool _isTextureOutdated = false;
-	bool _isConstantBufferOutdated = false;
+	bool _shouldCreateTextures = false;
+	bool _shouldUpdateConstantBuffer = false;
 };
 
 }

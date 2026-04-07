@@ -254,8 +254,6 @@ HRESULT EffectsDrawer::Draw(
 		}
 
 		if (catmullRomStartIdx != std::numeric_limits<uint32_t>::max()) {
-			catmullRomStartIdx = std::numeric_limits<uint32_t>::max();
-
 			SizeU inputSize;
 			uint32_t inputSrv;
 			if (catmullRomStartIdx == 0) {
@@ -287,6 +285,8 @@ HRESULT EffectsDrawer::Draw(
 				_descriptorBaseOffset + effectIdx * 2 - 1,
 				false
 			);
+
+			catmullRomStartIdx = std::numeric_limits<uint32_t>::max();
 		}
 
 		bool writeToRingBuffer = effectIdx == effectCount - 1 &&
