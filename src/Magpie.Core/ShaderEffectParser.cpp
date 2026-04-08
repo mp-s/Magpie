@@ -850,7 +850,7 @@ static bool ResolveTextureFormat(
 		// UNKNOWN 不可用
 		constexpr size_t formatCount = std::size(SHADER_TEXTURE_FORMAT_PROPS) - 1;
 		result.reserve(formatCount);
-		for (size_t i = 1; i < formatCount; ++i) {
+		for (size_t i = 1; i < std::size(SHADER_TEXTURE_FORMAT_PROPS); ++i) {
 			result.emplace(SHADER_TEXTURE_FORMAT_PROPS[i].name, (ShaderEffectTextureFormat)i);
 		}
 		return result;
@@ -948,12 +948,10 @@ static bool ResolveTextureBlock(
 			// 从图片加载纹理时格式存在限制
 			if (!desc.source.ends_with(".dds") &&
 				desc.format != ShaderEffectTextureFormat::R8G8B8A8_UNORM &&
-				desc.format != ShaderEffectTextureFormat::R10G10B10A2_UNORM &&
-				desc.format != ShaderEffectTextureFormat::R16G16B16A16_UNORM &&
 				desc.format != ShaderEffectTextureFormat::R16G16B16A16_FLOAT &&
 				desc.format != ShaderEffectTextureFormat::R32G32B32A32_FLOAT)
 			{
-				state.errorMsg = "从图片加载纹理时格式只能是 R8G8B8A8_UNORM、R10G10B10A2_UNORM、R16G16B16A16_UNORM、R16G16B16A16_FLOAT 或 R32G32B32A32_FLOAT";
+				state.errorMsg = "从图片加载纹理时格式只支持 R8G8B8A8_UNORM、R16G16B16A16_FLOAT 和 R32G32B32A32_FLOAT";
 				return false;
 			}
 		}

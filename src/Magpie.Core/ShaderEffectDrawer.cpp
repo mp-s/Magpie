@@ -776,10 +776,11 @@ HRESULT ShaderEffectDrawer::_CreateTextures() noexcept {
 						std::string_view(_effectInfo->name.c_str(), delimPos + 1), effectTexDesc.source);
 
 				_TextureSourceData& sourceData = _textureSourceDatas.emplace_back();
+				// 可能会把 dxgiFormat 修改为 sRGB
 				sourceData.uploadBuffer = TextureHelper::LoadFromFile(
 					StrHelper::UTF8ToUTF16(texPath),
-					dxgiFormat,
 					*_d3d12Context,
+					dxgiFormat,
 					sourceData.textureSize
 				);
 				if (!sourceData.uploadBuffer) {

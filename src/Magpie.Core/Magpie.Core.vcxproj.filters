@@ -129,6 +129,9 @@
     <ClInclude Include="TextureHelper.h">
       <Filter>Helpers</Filter>
     </ClInclude>
+    <ClInclude Include="include\WICImageLoader.h">
+      <Filter>Include</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -204,6 +207,7 @@
     <ClCompile Include="TextureHelper.cpp">
       <Filter>Helpers</Filter>
     </ClCompile>
+    <ClCompile Include="WICImageLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shaders\MaskedCursorPS.hlsl">

@@ -56,6 +56,7 @@
     <ClInclude Include="CursorDrawer.h" />
     <ClInclude Include="CursorManager.h" />
     <ClInclude Include="DDS.h" />
+    <ClInclude Include="include\WICImageLoader.h" />
     <ClInclude Include="TextureHelper.h" />
     <ClInclude Include="DirtyRectsOptimizer.h" />
     <ClInclude Include="DuplicateFrameChecker.h" />
@@ -119,6 +120,7 @@
     <ClCompile Include="SrcTracker.cpp" />
     <ClCompile Include="StepTimer.cpp" />
     <ClCompile Include="SwapChainPresenter.cpp" />
+    <ClCompile Include="WICImageLoader.cpp" />
     <ClCompile Include="Win32Helper.cpp" />
     <ClCompile Include="WindowHelper.cpp" />
   </ItemGroup>
