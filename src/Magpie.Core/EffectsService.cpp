@@ -251,7 +251,7 @@ void EffectsService::_WaitForInitialize() noexcept {
 
 class FXCInclude : public ID3DInclude {
 public:
-	FXCInclude(std::filesystem::path&& localDir) : _localDir(std::move(localDir)) {}
+	FXCInclude(const std::filesystem::path& localDir) : _localDir(localDir) {}
 
 	FXCInclude(const FXCInclude&) = default;
 	FXCInclude(FXCInclude&&) = default;
@@ -339,6 +339,12 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 		if (!Win32Helper::DirExists(sourcesDir.c_str())) {
 			Win32Helper::CreateDir(sourcesDir, true);
 		}
+	}
+
+	std::filesystem::path includeDir = CommonSharedConstants::EFFECTS_DIR;
+	size_t delimPos = effectName.find_last_of('\\');
+	if (delimPos != std::string::npos) {
+		includeDir /= StrHelper::UTF8ToUTF16(std::string_view(effectName.c_str(), delimPos));
 	}
 
 	Win32Helper::RunParallel([&](uint32_t id) {
@@ -443,13 +449,22 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 			// 剥离反射信息以减小体积
 			arguments.push_back(L"-Qstrip_reflect");
 #endif
+			arguments.push_back(L"-I");
+			arguments.push_back(includeDir.c_str());
+
+			winrt::com_ptr<IDxcIncludeHandler> includeHandler;
+			hr = dxcUtils->CreateDefaultIncludeHandler(includeHandler.put());
+			if (FAILED(hr)) {
+				Logger::Get().ComError("IDxcUtils::CreateDefaultIncludeHandler 失败", hr);
+				return;
+			}
 
 			winrt::com_ptr<IDxcResult> dxcResult;
 			hr = dxcCompiler->Compile(
 				&sourceBuffer,
 				arguments.data(),
 				(uint32_t)arguments.size(),
-				nullptr,
+				includeHandler.get(),
 				IID_PPV_ARGS(&dxcResult)
 			);
 			if (FAILED(hr)) {
@@ -494,12 +509,7 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 				shaderMacros[i] = { macros[i].first.c_str(), macros[i].second.c_str() };
 			}
 
-			std::filesystem::path includeDir = CommonSharedConstants::EFFECTS_DIR;
-			size_t delimPos = effectName.find_last_of('\\');
-			if (delimPos != std::string::npos) {
-				includeDir /= StrHelper::UTF8ToUTF16(std::string_view(effectName.c_str(), delimPos));
-			}
-			FXCInclude fxcInclude(std::move(includeDir));
+			FXCInclude fxcInclude(includeDir);
 
 			HRESULT hr = D3DCompile(
 				source.data(),
