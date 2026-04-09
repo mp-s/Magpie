@@ -385,11 +385,11 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 
 			std::vector<const wchar_t*> arguments;
 
-			arguments.push_back(L"-HV");
-			arguments.push_back(L"2018");
-
 			arguments.push_back(L"-E");
 			arguments.push_back(L"__M");
+
+			arguments.push_back(L"-all-resources-bound");
+			arguments.push_back(L"-ffinite-math-only");
 
 			arguments.push_back(L"-T");
 			const wchar_t* profile;
@@ -443,12 +443,17 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 				}
 			}
 
-#ifndef _DEBUG
+#ifdef _DEBUG
+			arguments.push_back(L"-Od");
+			arguments.push_back(L"-Zi");
+			arguments.push_back(L"-Qembed_debug");
+#else
 			arguments.push_back(L"-O3");
 
 			// 剥离反射信息以减小体积
 			arguments.push_back(L"-Qstrip_reflect");
 #endif
+
 			arguments.push_back(L"-I");
 			arguments.push_back(includeDir.c_str());
 

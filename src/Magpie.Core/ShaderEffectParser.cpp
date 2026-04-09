@@ -12,7 +12,7 @@ namespace Magpie {
 // 当前 MagpieFX 版本
 static constexpr uint32_t MAGPIE_FX_VERSION = 5;
 // 向后兼容的最低版本
-static constexpr uint32_t MAGPIE_FX_MIN_SUPPORTED_VERSION = 4;
+static constexpr uint32_t MAGPIE_FX_MIN_SUPPORTED_VERSION = 5;
 
 // 必须出现在一行的开头才视为指令
 static const char* META_INDICATOR = "//!";

@@ -45,8 +45,9 @@
       <VariableName>%(Filename)</VariableName>
       <HeaderFileOutput>$(GeneratedFilesDir)\shaders\%(Filename).h</HeaderFileOutput>
       <ObjectFileOutput />
+	  <AdditionalOptions>-ffinite-math-only %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)' == 'Debug'">-Qembed_debug %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(Configuration)' == 'Release'">-O3 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)' == 'Release'">-O3 -Qstrip_reflect %(AdditionalOptions)</AdditionalOptions>
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
