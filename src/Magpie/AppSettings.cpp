@@ -2,6 +2,7 @@
 #include "AppSettings.h"
 #include "App.h"
 #include "AutoStartHelper.h"
+#include "AppFolderManager.h"
 #include "CommonSharedConstants.h"
 #include "JsonHelper.h"
 #include "LocalizationService.h"
@@ -21,9 +22,6 @@
 using namespace winrt::Magpie;
 
 namespace Magpie {
-
-// 如果配置文件和已发布的正式版本不再兼容，应提高此版本号
-static constexpr uint32_t CONFIG_VERSION = 4;
 
 _AppSettingsData::_AppSettingsData() {}
 
@@ -198,40 +196,74 @@ static void ShowErrorMessage(const wchar_t* mainInstruction, const wchar_t* cont
 
 AppSettings::~AppSettings() {}
 
+static std::wstring FindOldConfig() noexcept {
+	// 旧版本配置文件位置见 https://github.com/Blinue/Magpie/pull/1348#issuecomment-4241246636
+	std::wstring oldConfigPath;
+
+	if (AppFolderManager::Get().IsPortableMode()) {
+		oldConfigPath = AppFolderManager::Get().GetExeDir() / "config\\config.json";
+		if (Win32Helper::FileExists(oldConfigPath.c_str())) {
+			return oldConfigPath;
+		}
+	} else {
+		std::filesystem::path oldConfigDir =
+			AppFolderManager::Get().GetWorkingDir() / L"..\\config";
+
+		constexpr uint32_t MAX_OLD_VERSION = 4;
+		for (uint32_t version = MAX_OLD_VERSION; version >= 2; --version) {
+			oldConfigPath = fmt::format(
+				L"{}\\v{}\\{}",
+				oldConfigDir.native(),
+				version,
+				CommonSharedConstants::CONFIG_FILENAME
+			);
+
+			if (Win32Helper::FileExists(oldConfigPath.c_str())) {
+				return oldConfigPath;
+			}
+		}
+
+		// v1 版本的配置文件不在子目录中
+		oldConfigPath = StrHelper::Concat(
+			oldConfigDir.native(), L"\\", CommonSharedConstants::CONFIG_FILENAME);
+
+		if (Win32Helper::FileExists(oldConfigPath.c_str())) {
+			return oldConfigPath;
+		}
+	}
+	
+	oldConfigPath.clear();
+	return oldConfigPath;
+}
+
 bool AppSettings::Initialize() noexcept {
-	Logger& logger = Logger::Get();
-
-	// 若程序所在目录存在配置文件则为便携模式
-	_isPortableMode = Win32Helper::FileExists(StrHelper::Concat(
-		CommonSharedConstants::CONFIG_DIR, L"\\", CommonSharedConstants::CONFIG_FILENAME).c_str());
-
-	std::filesystem::path existingConfigPath;
-	if (!_UpdateConfigPath(&existingConfigPath)) {
-		logger.Error("_UpdateConfigPath 失败");
-		return false;
+	std::wstring configPath = StrHelper::Concat(
+		AppFolderManager::Get().GetConfigDir(), L"\\", CommonSharedConstants::CONFIG_FILENAME);
+	
+	if (!Win32Helper::FileExists(configPath.c_str())) {
+		// 查找旧版本配置文件
+		configPath = FindOldConfig();
+		
+		if (configPath.empty()) {
+			Logger::Get().Info("不存在配置文件");
+			_SetDefaultScalingModes();
+			_SetDefaultShortcuts();
+			SaveAsync();
+			return true;
+		}
 	}
-
-	logger.Info(StrHelper::Concat("便携模式: ", _isPortableMode ? "是" : "否"));
-
-	if (existingConfigPath.empty()) {
-		logger.Info("不存在配置文件");
-		_SetDefaultScalingModes();
-		_SetDefaultShortcuts();
-		SaveAsync();
-		return true;
-	}
-
+	
 	// 此时 LocalizationService 使用“首选语言”
 	
 	std::string configText;
-	if (!Win32Helper::ReadTextFile(existingConfigPath.c_str(), configText)) {
-		logger.Error("读取配置文件失败");
+	if (!Win32Helper::ReadTextFile(configPath.c_str(), configText)) {
+		Logger::Get().Error("读取配置文件失败");
 
 		LocalizationService& ls = LocalizationService::Get();
 		winrt::hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ReadFailed");
 		winrt::hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
-			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
+			fmt::format(fmt::runtime(std::wstring_view(content)), configPath).c_str());
 
 		return false;
 	}
@@ -253,7 +285,7 @@ bool AppSettings::Initialize() noexcept {
 		winrt::hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_NotValidJson");
 		winrt::hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
-			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
+			fmt::format(fmt::runtime(std::wstring_view(content)), configPath).c_str());
 
 		return false;
 	}
@@ -265,18 +297,15 @@ bool AppSettings::Initialize() noexcept {
 		winrt::hstring title = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ParseFailed");
 		winrt::hstring content = ls.GetLocalizedString(L"AppSettings_ErrorDialog_ConfigLocation");
 		ShowErrorMessage(title.c_str(),
-			fmt::format(fmt::runtime(std::wstring_view(content)), existingConfigPath.native()).c_str());
+			fmt::format(fmt::runtime(std::wstring_view(content)), configPath).c_str());
 
 		return false;
 	}
 
 	_LoadSettings(((const rapidjson::Document&)doc).GetObj());
 
-	// 迁移旧版配置后立刻保存，_SetDefaultShortcuts 用于确保快捷键不为空
-	if (_SetDefaultShortcuts() || !Win32Helper::FileExists(_configPath.c_str())) {
-		SaveAsync();
-	}
-
+	// 确保快捷键不为空
+	_SetDefaultShortcuts();
 	return true;
 }
 
@@ -293,32 +322,6 @@ winrt::fire_and_forget AppSettings::SaveAsync() noexcept {
 	co_await winrt::resume_background();
 
 	_Save(data);
-}
-
-void AppSettings::IsPortableMode(bool value) noexcept {
-	if (_isPortableMode == value) {
-		return;
-	}
-
-	if (!value) {
-		// 关闭便携模式需删除本地配置文件
-		if (!DeleteFile((_configDir / CommonSharedConstants::CONFIG_FILENAME).c_str())) {
-			if (GetLastError() != ERROR_FILE_NOT_FOUND) {
-				Logger::Get().Win32Error("删除本地配置文件失败");
-				return;
-			}
-		}
-	}
-
-	_isPortableMode = value;
-
-	if (_UpdateConfigPath()) {
-		Logger::Get().Info(value ? "已开启便携模式" : "已关闭便携模式");
-		SaveAsync();
-	} else {
-		Logger::Get().Error(value ? "开启便携模式失败" : "关闭便携模式失败");
-		_isPortableMode = !value;
-	}
 }
 
 void AppSettings::Language(int value) {
@@ -543,7 +546,7 @@ void AppSettings::_UpdateWindowPlacement() noexcept {
 }
 
 bool AppSettings::_Save(const _AppSettingsData& data) noexcept {
-	if (!Win32Helper::CreateDir(data._configDir.native(), true)) {
+	if (!Win32Helper::CreateDir(AppFolderManager::Get().GetConfigDir(), true)) {
 		Logger::Get().Win32Error("创建配置文件夹失败");
 		return false;
 	}
@@ -670,13 +673,18 @@ bool AppSettings::_Save(const _AppSettingsData& data) noexcept {
 
 	writer.EndObject();
 
-	// 防止并行写入
-	auto lock = _saveLock.lock_exclusive();
-	if (!Win32Helper::WriteTextFile(data._configPath.c_str(), { json.GetString(), json.GetLength() })) {
-		Logger::Get().Error("保存配置失败");
-		return false;
-	}
+	std::wstring configPath = StrHelper::Concat(
+		AppFolderManager::Get().GetConfigDir(), L"\\", CommonSharedConstants::CONFIG_FILENAME);
 
+	{
+		// 防止并行写入
+		auto lock = _saveLock.lock_exclusive();
+		if (!Win32Helper::WriteTextFile(configPath.c_str(), { json.GetString(), json.GetLength() })) {
+			Logger::Get().Error("保存配置失败");
+			return false;
+		}
+	}
+	
 	return true;
 }
 
@@ -1197,86 +1205,6 @@ void AppSettings::_SetDefaultScalingModes() noexcept {
 
 	// 全局缩放模式默认为 Lanczos
 	_defaultProfile.scalingMode = 0;
-}
-
-static std::wstring FindOldConfig(const wchar_t* localAppDataDir) noexcept {
-	for (uint32_t version = CONFIG_VERSION - 1; version >= 2; --version) {
-		std::wstring oldConfigPath = fmt::format(
-			L"{}\\Magpie\\{}\\v{}\\{}",
-			localAppDataDir,
-			CommonSharedConstants::CONFIG_DIR,
-			version,
-			CommonSharedConstants::CONFIG_FILENAME
-		);
-
-		if (Win32Helper::FileExists(oldConfigPath.c_str())) {
-			return oldConfigPath;
-		}
-	}
-
-	// v1 版本的配置文件不在子目录中
-	std::wstring v1ConfigPath = StrHelper::Concat(
-		localAppDataDir,
-		L"\\Magpie\\",
-		CommonSharedConstants::CONFIG_DIR,
-		L"\\",
-		CommonSharedConstants::CONFIG_FILENAME
-	);
-
-	if (Win32Helper::FileExists(v1ConfigPath.c_str())) {
-		return v1ConfigPath;
-	}
-
-	return {};
-}
-
-bool AppSettings::_UpdateConfigPath(std::filesystem::path* existingConfigPath) noexcept {
-	if (_isPortableMode) {
-		std::wstring value;
-		HRESULT hr = wil::GetFullPathNameW(CommonSharedConstants::CONFIG_DIR, value);
-		if (FAILED(hr)) {
-			Logger::Get().ComError("GetFullPathNameW 失败", hr);
-			return false;
-		}
-		_configDir = std::move(value);
-
-		_configPath = _configDir / CommonSharedConstants::CONFIG_FILENAME;
-
-		if (existingConfigPath) {
-			if (Win32Helper::FileExists(_configPath.c_str())) {
-				*existingConfigPath = _configPath;
-			}
-		}
-	} else {
-		wil::unique_cotaskmem_string localAppDataDir;
-		HRESULT hr = SHGetKnownFolderPath(
-			FOLDERID_LocalAppData, KF_FLAG_DEFAULT, NULL, localAppDataDir.put());
-		if (FAILED(hr)) {
-			Logger::Get().ComError("SHGetKnownFolderPath 失败", hr);
-			return false;
-		}
-
-		_configDir = fmt::format(L"{}\\Magpie\\{}\\v{}\\",
-			localAppDataDir.get(), CommonSharedConstants::CONFIG_DIR, CONFIG_VERSION);
-		_configPath = _configDir / CommonSharedConstants::CONFIG_FILENAME;
-
-		if (existingConfigPath) {
-			if (Win32Helper::FileExists(_configPath.c_str())) {
-				*existingConfigPath = _configPath;
-			} else {
-				// 查找旧版本配置文件
-				*existingConfigPath = FindOldConfig(localAppDataDir.get());
-			}
-		}
-	}
-
-	// 确保配置文件夹存在
-	if (!Win32Helper::CreateDir(_configDir.native(), true)) {
-		Logger::Get().Win32Error("创建配置文件夹失败");
-		return false;
-	}
-
-	return true;
 }
 
 }

@@ -3,6 +3,7 @@
 #if __has_include("HomeViewModel.g.cpp")
 #include "HomeViewModel.g.cpp"
 #endif
+#include "AppFolderManager.h"
 #include "AppSettings.h"
 #include "ScalingService.h"
 #include "Win32Helper.h"
@@ -416,7 +417,8 @@ void HomeViewModel::IsDeveloperMode(bool value) {
 }
 
 void HomeViewModel::LocateMagpieLogs() noexcept {
-	Win32Helper::ShellOpen(StrHelper::Concat(L".\\", CommonSharedConstants::LOGS_DIR).c_str());
+	const auto& appFolderManager = AppFolderManager::Get();
+	Win32Helper::ShellOpen((appFolderManager.GetWorkingDir() / appFolderManager.GetLogsDir()).c_str());
 }
 
 static fire_and_forget LocateTempLogs(const wchar_t* logName) noexcept {

@@ -45,7 +45,7 @@
       <VariableName>%(Filename)</VariableName>
       <HeaderFileOutput>$(GeneratedFilesDir)\shaders\%(Filename).h</HeaderFileOutput>
       <ObjectFileOutput />
-	  <AdditionalOptions>-ffinite-math-only %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-ffinite-math-only %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)' == 'Debug'">-Qembed_debug %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="'$(Configuration)' == 'Release'">-O3 -Qstrip_reflect %(AdditionalOptions)</AdditionalOptions>
     </FxCompile>
@@ -57,6 +57,7 @@
     <ClInclude Include="CursorDrawer.h" />
     <ClInclude Include="CursorManager.h" />
     <ClInclude Include="DDS.h" />
+    <ClInclude Include="include\AppFolderManager.h" />
     <ClInclude Include="include\WICImageLoader.h" />
     <ClInclude Include="TextureHelper.h" />
     <ClInclude Include="DirtyRectsOptimizer.h" />
@@ -92,6 +93,7 @@
     <ClInclude Include="SwapChainPresenter.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="AppFolderManager.cpp" />
     <ClCompile Include="CatmullRomDrawer.cpp" />
     <ClCompile Include="CommandContext.cpp" />
     <ClCompile Include="CursorDrawer.cpp" />

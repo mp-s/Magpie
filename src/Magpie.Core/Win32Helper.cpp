@@ -395,32 +395,41 @@ bool Win32Helper::DirExists(const wchar_t* fileName) noexcept {
 
 bool Win32Helper::CreateDir(const std::wstring& path, bool recursive) noexcept {
 	assert(!path.empty());
-
+	assert(path.find(L'/') == std::wstring::npos);
+	
 	if (DirExists(path.c_str())) {
 		return true;
 	}
 
-	if (!recursive) {
-		return CreateDirectory(path.c_str(), nullptr);
+	if (recursive) {
+		// 创建中间目录
+		size_t searchOffset = 0;
+		std::wstring subDir;
+		while (true) {
+			size_t segPos = path.find(L'\\', searchOffset);
+			if (segPos == std::wstring::npos) {
+				break;
+			}
+
+			searchOffset = segPos + 1;
+			if (searchOffset == path.size()) {
+				break;
+			}
+
+			subDir = path.substr(0, segPos);
+			if (!CreateDirectory(subDir.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
+				Logger::Get().Win32Error("CreateDirectory 失败");
+				return false;
+			}
+		}
 	}
 
-	size_t searchOffset = 0;
-	do {
-		auto segPos = path.find_first_of(L'\\', searchOffset);
-		if (segPos == std::wstring::npos) {
-			// 没有分隔符则将整个路径视为文件夹
-			segPos = path.size();
-		}
-
-		std::wstring subdir = path.substr(0, segPos);
-		if (!subdir.empty() && !DirExists(subdir.c_str()) && !CreateDirectory(subdir.c_str(), nullptr)) {
-			return false;
-		}
-
-		searchOffset = segPos + 1;
-	} while (searchOffset < path.size());
-
-	return true;
+	if (CreateDirectory(path.c_str(), nullptr) || GetLastError() == ERROR_ALREADY_EXISTS) {
+		return true;
+	} else {
+		Logger::Get().Win32Error("CreateDirectory 失败");
+		return false;
+	}
 }
 
 const Win32Helper::OSVersion& Win32Helper::GetOSVersion() noexcept {

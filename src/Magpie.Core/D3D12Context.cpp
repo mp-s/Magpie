@@ -2,6 +2,7 @@
 #include "D3D12Context.h"
 #include "ScalingWindow.h"
 #include "Logger.h"
+#include "AppFolderManager.h"
 #include "DirectXHelper.h"
 #include "StrHelper.h"
 #include "DescriptorHeap.h"
@@ -324,10 +325,10 @@ static void FixD3D10WarpDll(IDXGIAdapter1* warpAdapter) noexcept {
 	// 检查是否加载了随程序部署的 D3D12Core.dll
 	std::wstring d3d12CorePath;
 	wil::GetModuleFileNameW(hD3D12Core, d3d12CorePath);
-	std::filesystem::path exeDir = Win32Helper::GetExePath().parent_path();
-	if (d3d12CorePath.starts_with(exeDir.native())) {
+	if (d3d12CorePath.starts_with(AppFolderManager::Get().GetExeDir().native())) {
 		// 加载随程序部署的 d3d10warp.dll
-		std::filesystem::path warpDllPath = exeDir / L"app\\D3D12\\d3d10warp.dll";
+		std::filesystem::path warpDllPath =
+			AppFolderManager::Get().GetD3D12Dir() / L"d3d10warp.dll";
 		LoadLibrary(warpDllPath.c_str());
 	}
 }

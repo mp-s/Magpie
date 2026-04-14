@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "AppFolderManager.h"
 #include "CommonSharedConstants.h"
 #include "EffectsService.h"
 #include "Logger.h"
@@ -6,17 +7,19 @@
 #include "StrHelper.h"
 #include "Win32Helper.h"
 #include <d3dcompiler.h>
-#include <rapidhash.h>
 #include <dxcapi.h>
+#include <rapidhash.h>
 
 namespace Magpie {
 
 static void ListEffects(std::vector<std::wstring>& result, std::wstring_view prefix = {}) {
 	result.reserve(80);
 
+	std::filesystem::path effectsDir = AppFolderManager::Get().GetBuiltInShaderEffectsDir();
+
 	WIN32_FIND_DATA findData{};
 	wil::unique_hfind hFind(FindFirstFileEx(
-		StrHelper::Concat(CommonSharedConstants::EFFECTS_DIR, L"\\", prefix, L"*").c_str(),
+		StrHelper::Concat(effectsDir.native(), L"\\", prefix, L"*").c_str(),
 		FindExInfoBasic, &findData, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH));
 	if (!hFind) {
 		Logger::Get().Win32Error("FindFirstFileEx 失败");
@@ -29,8 +32,8 @@ static void ListEffects(std::vector<std::wstring>& result, std::wstring_view pre
 			continue;
 		}
 
-		if (Win32Helper::DirExists(StrHelper::Concat(
-			CommonSharedConstants::EFFECTS_DIR, L"\\", prefix, fileName).c_str())) {
+		std::wstring filePath = StrHelper::Concat(effectsDir.native(), L"\\", prefix, fileName);
+		if (Win32Helper::DirExists(filePath.c_str())) {
 			ListEffects(result, StrHelper::Concat(prefix, fileName, L"\\"));
 			continue;
 		}
@@ -53,13 +56,15 @@ winrt::fire_and_forget EffectsService::Initialize() {
 	_effectsMap.reserve(nEffect);
 	_effects.reserve(nEffect);
 
+	std::filesystem::path effectsDir = AppFolderManager::Get().GetBuiltInShaderEffectsDir();
+
 	// 用于同步 _effectsMap 和 _effects 的初始化
 	wil::srwlock srwLock;
 
 	// 并行解析效果
 	Win32Helper::RunParallel([&](uint32_t id) {
 		std::wstring fileName = StrHelper::Concat(
-			CommonSharedConstants::EFFECTS_DIR, L"\\", effectNames[id], L".hlsl");
+			effectsDir.native(), L"\\", effectNames[id], L".hlsl");
 		std::string source;
 		Win32Helper::ReadTextFile(fileName.c_str(), source);
 		EffectInfo effectInfo;
@@ -96,25 +101,21 @@ const EffectInfo* EffectsService::GetEffect(std::string_view name) noexcept {
 	return it != _effectsMap.end() ? &_effects[it->second] : nullptr;
 }
 
-static std::string GetLinearEffectName(std::string_view effectName) {
-	std::string result(effectName);
-	for (char& c : result) {
-		if (c == '\\') {
-			c = '#';
-		}
-	}
-	return result;
-}
-
 static std::string GetCacheFileName(
-	std::string_view linearEffectName,
+	std::string_view effectName,
 	D3D_SHADER_MODEL shaderModel,
 	ShaderEffectParserFlags flags,
 	uint64_t hash
 ) {
+	std::string linearEffectName(effectName);
+	for (char& c : linearEffectName) {
+		if (c == '\\') {
+			c = '#';
+		}
+	}
+
 	// 缓存文件的命名: {效果名}_{shader model(2)}{标志位(4)}{哈希(16)）}
-	return fmt::format("{}\\{}_{:02x}{:04x}{:016x}",
-		StrHelper::UTF16ToUTF8(CommonSharedConstants::CACHE_DIR),
+	return fmt::format("{}_{:02x}{:04x}{:016x}",
 		linearEffectName, (uint16_t)shaderModel, (uint32_t)flags, hash);
 }
 
@@ -141,7 +142,8 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	std::string source;
 	{
 		std::wstring fileName = StrHelper::Concat(
-			CommonSharedConstants::EFFECTS_DIR, L"\\", StrHelper::UTF8ToUTF16(effectName), L".hlsl");
+			AppFolderManager::Get().GetBuiltInShaderEffectsDir().native(),
+			L"\\", StrHelper::UTF8ToUTF16(effectName), L".hlsl");
 		if (!Win32Helper::ReadTextFile(fileName.c_str(), source)) {
 			return cacheKey;
 		}
@@ -180,8 +182,7 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 		}
 	}
 	
-	cacheKey = GetCacheFileName(
-		GetLinearEffectName(effectName), shaderModel, parserFlags, hash);
+	cacheKey = GetCacheFileName(effectName, shaderModel, parserFlags, hash);
 
 	{
 		auto lk = _shaderEffectCacheLock.lock_exclusive();
@@ -332,16 +333,16 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 
 	std::wstring sourcesPath;
 	if (saveSources) {
-		sourcesPath = StrHelper::Concat(
-			CommonSharedConstants::SOURCES_DIR, L"\\", StrHelper::UTF8ToUTF16(effectInfo.name));
+		sourcesPath = StrHelper::Concat(AppFolderManager::Get().GetSourcesDir(),
+			L"\\", StrHelper::UTF8ToUTF16(effectInfo.name));
 
 		std::wstring sourcesDir = sourcesPath.substr(0, sourcesPath.find_last_of(L'\\'));
-		if (!Win32Helper::DirExists(sourcesDir.c_str())) {
-			Win32Helper::CreateDir(sourcesDir, true);
+		if (!Win32Helper::CreateDir(sourcesDir, true)) {
+			Logger::Get().Error("Win32Helper::CreateDir 失败");
 		}
 	}
 
-	std::filesystem::path includeDir = CommonSharedConstants::EFFECTS_DIR;
+	std::filesystem::path includeDir = AppFolderManager::Get().GetBuiltInShaderEffectsDir();
 	size_t delimPos = effectName.find_last_of('\\');
 	if (delimPos != std::string::npos) {
 		includeDir /= StrHelper::UTF8ToUTF16(std::string_view(effectName.c_str(), delimPos));

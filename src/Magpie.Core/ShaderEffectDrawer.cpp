@@ -10,6 +10,7 @@
 #include "ScalingWindow.h"
 #include "ShaderEffectDrawer.h"
 #include "StrHelper.h"
+#include "AppFolderManager.h"
 // Conan 的 muparser 不含 UNICODE 支持
 #pragma push_macro("_UNICODE")
 #undef _UNICODE
@@ -770,15 +771,14 @@ HRESULT ShaderEffectDrawer::_CreateTextures() noexcept {
 				dxgiFormat = SHADER_TEXTURE_FORMAT_PROPS[(uint32_t)effectTexDesc.format].dxgiFormat;
 
 				size_t delimPos = _effectInfo->name.find_last_of('\\');
-				std::string texPath = delimPos == std::string::npos
-					? StrHelper::Concat("app\\effects\\shaders\\", effectTexDesc.source)
-					: StrHelper::Concat("app\\effects\\shaders\\",
-						std::string_view(_effectInfo->name.c_str(), delimPos + 1), effectTexDesc.source);
+				std::wstring texPath = StrHelper::UTF8ToUTF16(delimPos == std::string::npos ?
+					effectTexDesc.source : StrHelper::Concat(
+						std::string_view(_effectInfo->name.c_str(), delimPos + 1), effectTexDesc.source));
 
 				_TextureSourceData& sourceData = _textureSourceDatas.emplace_back();
 				// 可能会把 dxgiFormat 修改为 sRGB
 				sourceData.uploadBuffer = TextureHelper::LoadFromFile(
-					StrHelper::UTF8ToUTF16(texPath),
+					AppFolderManager::Get().GetBuiltInShaderEffectsDir() / texPath,
 					*_d3d12Context,
 					dxgiFormat,
 					sourceData.textureSize

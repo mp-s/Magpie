@@ -16,6 +16,7 @@
 
 #include "pch.h"
 #include "App.h"
+#include "AppFolderManager.h"
 #include "CommonSharedConstants.h"
 #include "DebugInfo.h"
 #include "Logger.h"
@@ -34,11 +35,12 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\app\\D3
 using namespace Magpie;
 using namespace winrt::Magpie::implementation;
 
-static void InitializeLogger(const wchar_t* logFilePath) noexcept {
+static void InitializeLogger(bool touchHelper) noexcept {
 	// 最多两个日志文件，每个最多 500KB
 	Logger::Get().Initialize(
 		spdlog::level::info,
-		logFilePath,
+		StrHelper::Concat(AppFolderManager::Get().GetLogsDir(), L"\\", touchHelper ?
+			CommonSharedConstants::TOUCH_HELPER_LOG_NAME : CommonSharedConstants::LOG_NAME),
 		CommonSharedConstants::MAX_LOG_SIZE,
 		1
 	);
@@ -83,16 +85,7 @@ int APIENTRY wWinMain(
 	// 堆损坏时终止进程
 	HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, nullptr, 0);
 
-	{
-		std::filesystem::path workingDir = Win32Helper::GetExePath().parent_path();
-		// 将当前目录设为程序所在目录
-		FAIL_FAST_IF_WIN32_BOOL_FALSE(SetCurrentDirectory(workingDir.c_str()));
-		
-		// dll 搜索路径中添加 app 文件夹以及排除当前目录
-		FAIL_FAST_IF_WIN32_BOOL_FALSE(SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS));
-		workingDir += L"\\app";
-		FAIL_FAST_IF_NULL(AddDllDirectory(workingDir.c_str()));
-	}
+	FAIL_FAST_IF(!AppFolderManager::Get().Initialize());
 	
 	enum {
 		Normal,
@@ -108,11 +101,9 @@ int APIENTRY wWinMain(
 		}
 	}();
 
-	InitializeLogger(mode == Normal ?
-		CommonSharedConstants::LOG_PATH :
-		CommonSharedConstants::REGISTER_TOUCH_HELPER_LOG_PATH);
+	InitializeLogger(mode != Normal);
 
-	Logger::Get().Info(fmt::format("程序启动\n\t版本: {}\n\tOS 版本: {}\n\t管理员: {}",
+	Logger::Get().Info(fmt::format("程序启动\n\t版本: {}\n\tOS 版本: {}\n\t管理员: {}\n\t便携模式: {}",
 #ifdef MP_VERSION_STRING
 		STRINGIFY(MP_VERSION_STRING),
 #elif defined(MP_COMMIT_ID)
@@ -121,7 +112,8 @@ int APIENTRY wWinMain(
 		"dev",
 #endif
 		Win32Helper::GetOSVersion().ToString<char>(),
-		Win32Helper::IsProcessElevated() ? "是" : "否"
+		Win32Helper::IsProcessElevated() ? "是" : "否",
+		AppFolderManager::Get().IsPortableMode() ? "是" : "否"
 	));
 
 	if (mode == RegisterTouchHelper) {

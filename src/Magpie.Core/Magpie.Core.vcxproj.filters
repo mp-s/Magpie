@@ -132,6 +132,9 @@
     <ClInclude Include="include\WICImageLoader.h">
       <Filter>Include</Filter>
     </ClInclude>
+    <ClInclude Include="include\AppFolderManager.h">
+      <Filter>Include</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />
@@ -208,6 +211,7 @@
       <Filter>Helpers</Filter>
     </ClCompile>
     <ClCompile Include="WICImageLoader.cpp" />
+    <ClCompile Include="AppFolderManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shaders\MaskedCursorPS.hlsl">

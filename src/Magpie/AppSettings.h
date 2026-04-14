@@ -26,9 +26,6 @@ struct _AppSettingsData {
 	Profile _defaultProfile;
 	std::vector<Profile> _profiles;
 
-	std::filesystem::path _configDir;
-	std::filesystem::path _configPath;
-
 	// LocalizationService::SupportedLanguages 索引，-1 表示使用系统设置
 	int _language = -1;
 
@@ -57,7 +54,6 @@ struct _AppSettingsData {
 
 	OverlayOptions _overlayOptions;
 	
-	bool _isPortableMode = false;
 	bool _isAlwaysRunAsAdmin = false;
 	bool _isDeveloperMode = false;
 	bool _isDebugMode = false;
@@ -92,16 +88,6 @@ public:
 	bool Save() noexcept;
 
 	winrt::fire_and_forget SaveAsync() noexcept;
-
-	const std::filesystem::path& ConfigDir() const noexcept {
-		return _configDir;
-	}
-
-	bool IsPortableMode() const noexcept {
-		return _isPortableMode;
-	}
-
-	void IsPortableMode(bool value) noexcept;
 
 	int Language() const noexcept {
 		return _language;
@@ -379,8 +365,6 @@ private:
 	) const noexcept;
 	bool _SetDefaultShortcuts() noexcept;
 	void _SetDefaultScalingModes() noexcept;
-
-	bool _UpdateConfigPath(std::filesystem::path* existingConfigPath = nullptr) noexcept;
 
 	// 用于同步保存
 	wil::srwlock _saveLock;
