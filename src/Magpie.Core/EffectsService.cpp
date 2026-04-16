@@ -1,16 +1,21 @@
 #include "pch.h"
 #include "AppFolderManager.h"
-#include "CommonSharedConstants.h"
 #include "EffectsService.h"
 #include "Logger.h"
 #include "ShaderEffectParser.h"
 #include "StrHelper.h"
 #include "Win32Helper.h"
+#include "YasHelper.h"
 #include <d3dcompiler.h>
 #include <dxcapi.h>
 #include <rapidhash.h>
 
 namespace Magpie {
+
+static constexpr uint32_t MAX_MEM_CACHE_COUNT = 63;
+
+// 缓存版本。当缓存文件结构有更改时更新它，使旧缓存失效
+static constexpr uint32_t EFFECT_CACHE_VERSION = 16;
 
 static void ListEffects(std::vector<std::wstring>& result, std::wstring_view prefix = {}) {
 	result.reserve(80);
@@ -58,28 +63,30 @@ winrt::fire_and_forget EffectsService::Initialize() {
 
 	std::filesystem::path effectsDir = AppFolderManager::Get().GetBuiltInShaderEffectsDir();
 
-	// 用于同步 _effectsMap 和 _effects 的初始化
-	wil::srwlock srwLock;
+	{
+		// 用于同步 _effectsMap 和 _effects 的初始化
+		wil::srwlock srwLock;
 
-	// 并行解析效果
-	Win32Helper::RunParallel([&](uint32_t id) {
-		std::wstring fileName = StrHelper::Concat(
-			effectsDir.native(), L"\\", effectNames[id], L".hlsl");
-		std::string source;
-		Win32Helper::ReadTextFile(fileName.c_str(), source);
-		EffectInfo effectInfo;
-		std::string errorMsg = ShaderEffectParser::ParseForInfo(
-			StrHelper::UTF16ToUTF8(effectNames[id]), std::move(source), effectInfo);
-		if (!errorMsg.empty()) {
-			return;
-		}
-		
-		auto lock = srwLock.lock_exclusive();
-		uint32_t effectIdx = (uint32_t)_effects.size();
-		EffectInfo& movedEffectInfo = _effects.emplace_back(std::move(effectInfo));
-		_effectsMap.emplace(movedEffectInfo.name, effectIdx);
-	}, nEffect);
+		// 并行解析效果
+		Win32Helper::RunParallel([&](uint32_t id) {
+			std::wstring fileName = StrHelper::Concat(
+				effectsDir.native(), L"\\", effectNames[id], L".hlsl");
+			std::string source;
+			Win32Helper::ReadTextFile(fileName.c_str(), source);
+			EffectInfo effectInfo;
+			std::string errorMsg = ShaderEffectParser::ParseForInfo(
+				StrHelper::UTF16ToUTF8(effectNames[id]), std::move(source), effectInfo);
+			if (!errorMsg.empty()) {
+				return;
+			}
 
+			auto lock = srwLock.lock_exclusive();
+			uint32_t effectIdx = (uint32_t)_effects.size();
+			EffectInfo& movedEffectInfo = _effects.emplace_back(std::move(effectInfo));
+			_effectsMap.emplace(movedEffectInfo.name, effectIdx);
+		}, nEffect);
+	}
+	
 	_initialized.store(true, std::memory_order_release);
 	_initialized.notify_one();
 }
@@ -87,6 +94,9 @@ winrt::fire_and_forget EffectsService::Initialize() {
 void EffectsService::Uninitialize() {
 	// 等待解析完成，防止退出时崩溃
 	_WaitForInitialize();
+
+	auto lock = _stopSource->lock.lock_exclusive();
+	_stopSource->isUninitialized = true;
 }
 
 const std::vector<EffectInfo>& EffectsService::GetEffects() noexcept {
@@ -114,9 +124,9 @@ static std::string GetCacheFileName(
 		}
 	}
 
-	// 缓存文件的命名: {效果名}_{shader model(2)}{标志位(4)}{哈希(16)）}
+	// 缓存文件的命名: {效果名}_{shader model|2}{标志位|4}{哈希|16}
 	return fmt::format("{}_{:02x}{:04x}{:016x}",
-		linearEffectName, (uint16_t)shaderModel, (uint32_t)flags, hash);
+		linearEffectName, (uint8_t)shaderModel, (uint16_t)flags, hash);
 }
 
 std::string EffectsService::SubmitCompileShaderEffectTask(
@@ -127,7 +137,8 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	bool isNative16BitSupported,
 	bool isAdvancedColorSupported,
 	bool saveSources,
-	bool warningsAreErrors
+	bool warningsAreErrors,
+	bool disableCache
 ) noexcept {
 	_WaitForInitialize();
 
@@ -187,11 +198,45 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 	{
 		auto lk = _shaderEffectCacheLock.lock_exclusive();
 
-		if (_shaderEffectCache.contains(cacheKey)) {
-			return cacheKey;
+		auto it1 = _shaderEffectCache.find(cacheKey);
+		if (it1 != _shaderEffectCache.end()) {
+			_ShaderEffectMemCacheItem& cacheItem = it1->second;
+
+			// 禁用缓存时总是重新编译，除非有多个相同的效果
+			if (disableCache && cacheItem.refCount == 0) {
+				_shaderEffectCache.erase(it1);
+			} else {
+				cacheItem.lastAccess = _nextLastAccess++;
+				++cacheItem.refCount;
+				return cacheKey;
+			}
 		}
 
-		_shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{});
+		_shaderEffectCache.emplace(cacheKey, _ShaderEffectMemCacheItem{
+			.lastAccess = _nextLastAccess++,
+			.refCount = 1
+		});
+
+		// 超过限制则清理一半较旧的内存缓存
+		if (_shaderEffectCache.size() > MAX_MEM_CACHE_COUNT) {
+			assert(_shaderEffectCache.size() == MAX_MEM_CACHE_COUNT + 1);
+			std::array<uint32_t, MAX_MEM_CACHE_COUNT + 1> allLastAccess{};
+			std::transform(_shaderEffectCache.begin(), _shaderEffectCache.end(), allLastAccess.begin(),
+				[](const auto& pair) { return pair.second.lastAccess; });
+
+			auto midIt = allLastAccess.begin() + allLastAccess.size() / 2;
+			std::nth_element(allLastAccess.begin(), midIt, allLastAccess.end());
+			uint32_t midLastAccess = *midIt;
+
+			for (it1 = _shaderEffectCache.begin(); it1 != _shaderEffectCache.end();) {
+				// 未被使用时才能删除
+				if (it1->second.lastAccess < midLastAccess && it1->second.refCount == 0) {
+					it1 = _shaderEffectCache.erase(it1);
+				} else {
+					++it1;
+				}
+			}
+		}
 	}
 	
 	_CompileShaderEffectAsync(
@@ -202,7 +247,8 @@ std::string EffectsService::SubmitCompileShaderEffectTask(
 		cacheKey,
 		(uint32_t)parserFlags,
 		saveSources,
-		warningsAreErrors
+		warningsAreErrors,
+		disableCache
 	);
 	
 	return cacheKey;
@@ -238,7 +284,8 @@ void EffectsService::ReleaseTask(const std::string& taskKey) noexcept {
 		return;
 	}
 
-	it->second.lastAccess = _nextLastAccess++;
+	assert(it->second.refCount >= 1);
+	--it->second.refCount;
 }
 
 void EffectsService::_WaitForInitialize() noexcept {
@@ -289,6 +336,114 @@ private:
 	std::filesystem::path _localDir;
 };
 
+template <typename Archive>
+void serialize(Archive& ar, ShaderEffectTextureDesc& o) {
+	ar& o.name& o.format& o.widthExpr& o.heightExpr& o.source;
+}
+
+template <typename Archive>
+void serialize(Archive& ar, ShaderEffectSamplerDesc& o) {
+	ar& o.name& o.filterType& o.addressType;
+}
+
+template <typename Archive>
+void serialize(Archive& ar, ShaderEffectPassDesc& o) {
+	ar& o.desc& o.byteCode& o.inputs& o.outputs& o.numThreads & o.blockSize& o.flags;
+}
+
+template <typename Archive>
+void serialize(Archive& ar, ShaderEffectDrawInfo& o) {
+	ar& o.textures& o.samplers& o.passes;
+}
+
+static bool ReadFileCache(const std::string& key, ShaderEffectDrawInfo& drawInfo) noexcept {
+	const wchar_t* cacheDir = AppFolderManager::Get().GetCacheDir();
+	std::wstring cacheFilePath = StrHelper::Concat(cacheDir, L"\\", StrHelper::UTF8ToUTF16(key));
+	if (!Win32Helper::FileExists(cacheFilePath.c_str())) {
+		return false;
+	}
+
+	std::vector<uint8_t> buffer;
+	if (!Win32Helper::ReadFile(cacheFilePath.c_str(), buffer) || buffer.empty()) {
+		return false;
+	}
+
+	try {
+		yas::mem_istream mi(buffer.data(), buffer.size());
+		yas::binary_iarchive<yas::mem_istream, yas::binary> ia(mi);
+
+		uint32_t version;
+		ia.read(version);
+		if (version != EFFECT_CACHE_VERSION) {
+			Logger::Get().Info("缓存版本不匹配");
+			return false;
+		}
+
+		ia& drawInfo;
+		return true;
+	} catch (...) {
+		Logger::Get().Error("反序列化失败");
+		return false;
+	}
+}
+
+static bool WriteFileCache(const std::string& key, const ShaderEffectDrawInfo& drawInfo) noexcept {
+	std::vector<uint8_t> buffer;
+	buffer.reserve(4096);
+
+	// 序列化
+	try {
+		yas::vector_ostream os(buffer);
+		yas::binary_oarchive<yas::vector_ostream<uint8_t>, yas::binary> oa(os);
+
+		oa.write(EFFECT_CACHE_VERSION);
+		oa& drawInfo;
+	} catch (...) {
+		Logger::Get().Error("序列化 ShaderEffectDrawInfo 失败");
+		return false;
+	}
+
+	const wchar_t* cacheDir = AppFolderManager::Get().GetCacheDir();
+	if (!Win32Helper::CreateDir(cacheDir, true)) {
+		Logger::Get().Error("创建缓存文件夹失败");
+		return false;
+	}
+
+	// 清理缓存
+	WIN32_FIND_DATA findData{};
+	wil::unique_hfind hFind(FindFirstFileEx(
+		StrHelper::Concat(cacheDir, L"\\*").c_str(),
+		FindExInfoBasic, &findData, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH));
+	if (hFind) {
+		// 缓存文件的命名: {效果名}_{shader model|2}{标志位|4}{哈希|16}
+		assert(key.size() >= 24);
+		// 只有哈希不同则删除，否则保留。也就是说：
+		// 1. 效果源代码修改后删除旧缓存
+		// 2. 启用内联效果参数时删除参数不同的缓存
+		std::wstring prefix = StrHelper::UTF8ToUTF16(std::string_view(key.c_str(), key.size() - 16));
+
+		do {
+			std::wstring_view fileName(findData.cFileName);
+			if (fileName.size() == key.size() && fileName.starts_with(prefix)) {
+				if (!DeleteFile(StrHelper::Concat(cacheDir, L"\\", findData.cFileName).c_str())) {
+					Logger::Get().Win32Error(StrHelper::Concat("删除缓存文件 ",
+						StrHelper::UTF16ToUTF8(findData.cFileName), " 失败"));
+				}
+			}
+		} while (FindNextFile(hFind.get(), &findData));
+	} else {
+		Logger::Get().Win32Error("查找缓存文件失败");
+	}
+
+	std::wstring cacheFilePath = StrHelper::Concat(cacheDir, L"\\", StrHelper::UTF8ToUTF16(key));
+	if (!Win32Helper::WriteFile(cacheFilePath.c_str(), buffer)) {
+		Logger::Get().Error("保存缓存失败");
+		return false;
+	}
+
+	return true;
+}
+
 winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 	std::string effectName,
 	std::string source,
@@ -297,50 +452,104 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 	std::string cacheKey,
 	uint32_t parserFlags,
 	bool saveSources,
-	bool warningsAreErrors
+	bool warningsAreErrors,
+	bool disableCache
 ) noexcept {
+	// 允许在编译中途退出，因此访问成员甚至全局变量时必须小心，确保加锁后再访问！
+	std::shared_ptr<_StopSource> stopSource(_stopSource);
+
 	co_await winrt::resume_background();
 
-	// 如果以后 _effectsMap 会变，这里应加锁
-	auto it = _effectsMap.find(effectName);
-	if (it == _effectsMap.end()) {
-		auto lk = _shaderEffectCacheLock.lock_exclusive();
-		_shaderEffectCache.erase(cacheKey);
-		co_return;
-	}
-	const EffectInfo& effectInfo = _effects[it->second];
-
-	ShaderEffectParserOptions options = {
-		.inlineParams = inlineParams,
-		.shaderModel = shaderModel,
-		.flags = (ShaderEffectParserFlags)parserFlags
-	};
-	
+	ShaderEffectParserOptions options;
 	ShaderEffectDrawInfo effectDrawInfo;
 	SmallVector<ShaderEffectSource, 0> effectSources;
-	std::string errorMsg = ShaderEffectParser::ParseForDesc(
-		effectInfo,
-		std::move(source),
-		options,
-		effectDrawInfo,
-		effectSources
-	);
-	if (!errorMsg.empty()) {
-		// 解析失败
-		auto lk = _shaderEffectCacheLock.lock_exclusive();
-		_shaderEffectCache.erase(cacheKey);
-	}
-
 	std::wstring sourcesPath;
-	if (saveSources) {
-		sourcesPath = StrHelper::Concat(AppFolderManager::Get().GetSourcesDir(),
-			L"\\", StrHelper::UTF8ToUTF16(effectInfo.name));
 
-		std::wstring sourcesDir = sourcesPath.substr(0, sourcesPath.find_last_of(L'\\'));
-		if (!Win32Helper::CreateDir(sourcesDir, true)) {
-			Logger::Get().Error("Win32Helper::CreateDir 失败");
+	{
+		auto stopSourceLock = stopSource->lock.lock_shared();
+		if (stopSource->isUninitialized) {
+			co_return;
+		}
+
+		if (!disableCache) {
+			// 尝试读取文件缓存
+			if (ReadFileCache(cacheKey, effectDrawInfo)) {
+				auto lk = _shaderEffectCacheLock.lock_exclusive();
+
+				auto it = _shaderEffectCache.find(cacheKey);
+				if (it == _shaderEffectCache.end()) {
+					co_return;
+				}
+
+				it->second.drawInfo = std::move(effectDrawInfo);
+				co_return;
+			}
+		}
+		
+		// 如果以后 _effectsMap 会变，这里应加锁
+		auto it = _effectsMap.find(effectName);
+		if (it == _effectsMap.end()) {
+			auto lk = _shaderEffectCacheLock.lock_exclusive();
+			_shaderEffectCache.erase(cacheKey);
+			co_return;
+		}
+		const EffectInfo& effectInfo = _effects[it->second];
+
+		options = ShaderEffectParserOptions{
+			.inlineParams = inlineParams,
+			.shaderModel = shaderModel,
+			.flags = (ShaderEffectParserFlags)parserFlags
+		};
+
+		std::string errorMsg = ShaderEffectParser::ParseForDesc(
+			effectInfo,
+			std::move(source),
+			options,
+			effectDrawInfo,
+			effectSources
+		);
+		if (!errorMsg.empty()) {
+			// 解析失败
+			auto lk = _shaderEffectCacheLock.lock_exclusive();
+			_shaderEffectCache.erase(cacheKey);
+		}
+
+		if (saveSources) {
+			sourcesPath = StrHelper::Concat(AppFolderManager::Get().GetSourcesDir(),
+				L"\\", StrHelper::UTF8ToUTF16(effectInfo.name));
+
+			std::wstring sourcesDir = sourcesPath.substr(0, sourcesPath.find_last_of(L'\\'));
+			if (!Win32Helper::CreateDir(sourcesDir, true)) {
+				Logger::Get().Error("Win32Helper::CreateDir 失败");
+			}
 		}
 	}
+
+	// 由于允许在编译中途退出，访问 Logger 要加锁！
+	auto logComError = [&](std::string_view msg, HRESULT hr,
+		const SourceLocation& location = SourceLocation::Current())
+	{
+		auto stopSourceLock = stopSource->lock.lock_shared();
+		if (!stopSource->isUninitialized) {
+			Logger::Get().ComError(msg, hr, location);
+		}
+	};
+
+	auto logWarn = [&](std::string_view msg,
+		const SourceLocation& location = SourceLocation::Current()) {
+		auto stopSourceLock = stopSource->lock.lock_shared();
+		if (!stopSource->isUninitialized) {
+			Logger::Get().Warn(msg, location);
+		}
+	};
+
+	auto logError = [&](std::string_view msg,
+		const SourceLocation& location = SourceLocation::Current()) {
+		auto stopSourceLock = stopSource->lock.lock_shared();
+		if (!stopSource->isUninitialized) {
+			Logger::Get().Error(msg, location);
+		}
+	};
 
 	std::filesystem::path includeDir = AppFolderManager::Get().GetBuiltInShaderEffectsDir();
 	size_t delimPos = effectName.find_last_of('\\');
@@ -357,7 +566,7 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 				: fmt::format(L"{}_Pass{}.hlsl", sourcesPath, id + 1);
 
 			if (!Win32Helper::WriteTextFile(fileName.c_str(), source)) {
-				Logger::Get().Error(fmt::format("保存 Pass{} 源码失败", id + 1));
+				logError(fmt::format("保存 Pass{} 源码失败", id + 1));
 			}
 		}
 
@@ -368,13 +577,13 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 
 			HRESULT hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxcUtils));
 			if (FAILED(hr)) {
-				Logger::Get().ComError("DxcCreateInstance 失败", hr);
+				logComError("DxcCreateInstance 失败", hr);
 				return;
 			}
 
 			hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxcCompiler));
 			if (FAILED(hr)) {
-				Logger::Get().ComError("DxcCreateInstance 失败", hr);
+				logComError("DxcCreateInstance 失败", hr);
 				return;
 			}
 
@@ -461,7 +670,7 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 			winrt::com_ptr<IDxcIncludeHandler> includeHandler;
 			hr = dxcUtils->CreateDefaultIncludeHandler(includeHandler.put());
 			if (FAILED(hr)) {
-				Logger::Get().ComError("IDxcUtils::CreateDefaultIncludeHandler 失败", hr);
+				logComError("IDxcUtils::CreateDefaultIncludeHandler 失败", hr);
 				return;
 			}
 
@@ -474,27 +683,27 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 				IID_PPV_ARGS(&dxcResult)
 			);
 			if (FAILED(hr)) {
-				Logger::Get().ComError("IDxcCompiler3::Compile 失败", hr);
+				logComError("IDxcCompiler3::Compile 失败", hr);
 				return;
 			}
 
 			winrt::com_ptr<IDxcBlobUtf8> messages;
 			dxcResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&messages), nullptr);
 			if (messages && messages->GetStringLength() > 0) {
-				Logger::Get().Warn(StrHelper::Concat("编译着色器输出: ", messages->GetStringPointer()));
+				logWarn(StrHelper::Concat("编译着色器输出: ", messages->GetStringPointer()));
 				return;
 			}
 
 			HRESULT compileStatus;
 			dxcResult->GetStatus(&compileStatus);
 			if (FAILED(compileStatus)) {
-				Logger::Get().ComError("编译着色器失败", compileStatus);
+				logComError("编译着色器失败", compileStatus);
 				return;
 			}
 
 			hr = dxcResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&effectDrawInfo.passes[id].byteCode), nullptr);
 			if (FAILED(hr)) {
-				Logger::Get().ComError("IDxcResult::GetOutput 失败", hr);
+				logComError("IDxcResult::GetOutput 失败", hr);
 			}
 		} else {
 			winrt::com_ptr<ID3DBlob> errorMsg;
@@ -532,32 +741,54 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 			);
 			if (FAILED(hr)) {
 				if (errorMsg) {
-					Logger::Get().ComError(StrHelper::Concat("编译着色器失败: ", (const char*)errorMsg->GetBufferPointer()), hr);
+					logComError(StrHelper::Concat("编译着色器失败: ", (const char*)errorMsg->GetBufferPointer()), hr);
 				}
 				return;
 			}
 
 			// 警告消息
 			if (errorMsg) {
-				Logger::Get().Warn(StrHelper::Concat("编译着色器时产生警告: ", (const char*)errorMsg->GetBufferPointer()));
+				logWarn(StrHelper::Concat("编译着色器时产生警告: ", (const char*)errorMsg->GetBufferPointer()));
 			}
 		}
 	}, (uint32_t)effectDrawInfo.passes.size());
 
-	for (const ShaderEffectPassDesc& passDesc : effectDrawInfo.passes) {
-		if (!passDesc.byteCode) {
-			// 编译失败
-			auto lk = _shaderEffectCacheLock.lock_exclusive();
-			_shaderEffectCache.erase(cacheKey);
+	{
+		auto stopSourceLock = stopSource->lock.lock_shared();
+		if (stopSource->isUninitialized) {
 			co_return;
 		}
-	}
 
-	auto lk = _shaderEffectCacheLock.lock_exclusive();
+		for (const ShaderEffectPassDesc& passDesc : effectDrawInfo.passes) {
+			if (!passDesc.byteCode) {
+				// 编译失败
+				auto lk = _shaderEffectCacheLock.lock_exclusive();
+				_shaderEffectCache.erase(cacheKey);
+				co_return;
+			}
+		}
 
-	auto it1 = _shaderEffectCache.find(cacheKey);
-	if (it1 != _shaderEffectCache.end()) {
-		it1->second.drawInfo = std::move(effectDrawInfo);
+		{
+			auto lk = _shaderEffectCacheLock.lock_exclusive();
+
+			auto it = _shaderEffectCache.find(cacheKey);
+			if (it == _shaderEffectCache.end()) {
+				co_return;
+			}
+
+			// 需要写入文件缓存时应复制而不是移动以避免加锁
+			if (disableCache) {
+				it->second.drawInfo = std::move(effectDrawInfo);
+				co_return;
+			} else {
+				it->second.drawInfo = effectDrawInfo;
+			}
+		}
+
+		// 创建文件缓存
+		if (!WriteFileCache(cacheKey, effectDrawInfo)) {
+			Logger::Get().Error("WriteFileCache 失败");
+		}
 	}
 }
 

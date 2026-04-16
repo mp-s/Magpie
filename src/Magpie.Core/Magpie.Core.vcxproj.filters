@@ -135,6 +135,9 @@
     <ClInclude Include="include\AppFolderManager.h">
       <Filter>Include</Filter>
     </ClInclude>
+    <ClInclude Include="YasHelper.h">
+      <Filter>Helpers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ScalingRuntime.cpp" />

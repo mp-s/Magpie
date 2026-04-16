@@ -31,7 +31,8 @@ public:
 		bool isNative16BitSupported,
 		bool isAdvancedColorSupported,
 		bool saveSources,
-		bool warningsAreErrors
+		bool warningsAreErrors,
+		bool disableCache
 	) noexcept;
 
 	bool GetTaskResult(const std::string& taskKey, const ShaderEffectDrawInfo** drawInfo) noexcept;
@@ -51,7 +52,8 @@ private:
 		std::string cacheKey,
 		uint32_t parserFlags,
 		bool saveSources,
-		bool warningsAreErrors
+		bool warningsAreErrors,
+		bool disableCache
 	) noexcept;
 
 	std::vector<EffectInfo> _effects;
@@ -59,13 +61,21 @@ private:
 
 	struct _ShaderEffectMemCacheItem {
 		ShaderEffectDrawInfo drawInfo;
-		// UINT_MAX 表示正在使用中
-		uint32_t lastAccess = std::numeric_limits<uint32_t>::max();
+		uint32_t lastAccess;
+		// 使用计数，归零才能删除
+		uint32_t refCount;
 	};
 	// 需确保 drawInfo 地址稳定
 	phmap::node_hash_map<std::string, _ShaderEffectMemCacheItem> _shaderEffectCache;
 	wil::srwlock _shaderEffectCacheLock;
 	uint32_t _nextLastAccess = 0;
+
+	// 用于后台线程检查 Uninitialize 是否已被调用
+	struct _StopSource {
+		wil::srwlock lock;
+		bool isUninitialized = false;
+	};
+	std::shared_ptr<_StopSource> _stopSource = std::make_shared<_StopSource>();
 	
 	std::atomic<bool> _initialized = false;
 	bool _initializedCache = false;

@@ -96,7 +96,8 @@ void ShaderEffectDrawer::Bind(SizeU inputSize, SizeU outputSize, const ColorInfo
 		_d3d12Context->IsNative16BitSupported(),
 		colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange,
 		options.IsSaveEffectSources(),
-		options.IsWarningsAreErrors()
+		options.IsWarningsAreErrors(),
+		options.IsEffectCacheDisabled()
 	);
 	if (_compilationTaskId.empty()) {
 		_errorMsg = "编译失败";

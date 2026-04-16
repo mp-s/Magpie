@@ -91,6 +91,7 @@
     <ClInclude Include="SrcTracker.h" />
     <ClInclude Include="StepTimer.h" />
     <ClInclude Include="SwapChainPresenter.h" />
+    <ClInclude Include="YasHelper.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AppFolderManager.cpp" />
