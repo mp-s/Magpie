@@ -66,7 +66,7 @@ void ShaderEffectDrawer::Bind(SizeU inputSize, SizeU outputSize, const ColorInfo
 	} else {
 		_inputSize = inputSize;
 		_outputSize = outputSize;
-		_shouldCreateTextures = true;
+		_shouldUpdateSizeDependentResources = true;
 	}
 
 	bool wasSrgb = _colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
@@ -75,11 +75,6 @@ void ShaderEffectDrawer::Bind(SizeU inputSize, SizeU outputSize, const ColorInfo
 
 	if (!_compilationTaskId.empty()) {
 		if (wasSrgb == isSrgb) {
-			// 无需重新编译
-			if (_constantBuffer) {
-				_UpdateConstants();
-			}
-			
 			return;
 		}
 
@@ -113,10 +108,10 @@ HRESULT ShaderEffectDrawer::Update(EffectDrawerState& state, std::string& messag
 	}
 
 	if (_drawInfo) {
-		if (_shouldCreateTextures) {
-			HRESULT hr = _CreateTextures();
+		if (_shouldUpdateSizeDependentResources) {
+			HRESULT hr = _UpdateSizeDependentResources();
 			if (FAILED(hr)) {
-				Logger::Get().ComError("_CreateTextures 失败", hr);
+				Logger::Get().ComError("_UpdateSizeDependentResources 失败", hr);
 				return hr;
 			}
 
@@ -527,12 +522,6 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() noexcept {
 		}
 	}
 
-	HRESULT hr = _CreateTextures();
-	if (FAILED(hr)) {
-		Logger::Get().ComError("_CreateTextures 失败", hr);
-		return hr;
-	}
-
 	// 常量缓冲区可以复用
 	if (!_constantBuffer) {
 		// 10 个内置常量
@@ -557,7 +546,7 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() noexcept {
 
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(UINT64(paramCount * 4));
 
-		hr = device->CreateCommittedResource(
+		HRESULT hr = device->CreateCommittedResource(
 			&heapProperties,
 			heapFlag,
 			&bufferDesc,
@@ -595,8 +584,12 @@ HRESULT ShaderEffectDrawer::_CreateDeviceResources() noexcept {
 		}
 	}
 
-	_UpdateConstants();
-	
+	HRESULT hr = _UpdateSizeDependentResources();
+	if (FAILED(hr)) {
+		Logger::Get().ComError("_UpdateSizeDependentResources 失败", hr);
+		return hr;
+	}
+
 	return S_OK;
 }
 
@@ -687,7 +680,9 @@ void ShaderEffectDrawer::_UpdateConstants() noexcept {
 	_shouldUpdateConstantBuffer = true;
 }
 
-HRESULT ShaderEffectDrawer::_CreateTextures() noexcept {
+HRESULT ShaderEffectDrawer::_UpdateSizeDependentResources() noexcept {
+	_shouldUpdateSizeDependentResources = false;
+
 	const uint32_t textureCount = (uint32_t)_drawInfo->textures.size();
 	if (textureCount != 0) {
 		ID3D12Device5* device = _d3d12Context->GetDevice();
@@ -876,7 +871,7 @@ HRESULT ShaderEffectDrawer::_CreateTextures() noexcept {
 		};
 	}
 
-	_shouldCreateTextures = false;
+	_UpdateConstants();
 	return S_OK;
 }
 

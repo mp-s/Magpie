@@ -64,7 +64,6 @@ float4 weight4(float x) {
 	);
 }
 
-
 float4 Pass1(float2 pos) {
 	const float2 inputPt = GetInputPt();
 	const float2 inputSize = GetInputSize();

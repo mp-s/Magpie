@@ -41,7 +41,7 @@ struct ShaderEffectTextureFormatProps {
 
 static constexpr ShaderEffectTextureFormatProps SHADER_TEXTURE_FORMAT_PROPS[] = {
 	{"UNKNOWN", DXGI_FORMAT_UNKNOWN, 4, nullptr, nullptr},
-	{"COLOR_SPACE_ADAPTIVE", DXGI_FORMAT_UNKNOWN, 4, "MF", "MF"},
+	{"COLOR_SPACE_ADAPTIVE", DXGI_FORMAT_UNKNOWN, 4, "MF4", "MF4"},
 	{"R8_UNORM", DXGI_FORMAT_R8_UNORM, 1, "MF", "unorm float"},
 	{"R8_SNORM", DXGI_FORMAT_R8_SNORM, 1, "MF", "snorm float"},
 	{"R16_UNORM", DXGI_FORMAT_R16_UNORM, 1, "MF", "unorm float"},

@@ -512,6 +512,7 @@ winrt::fire_and_forget EffectsService::_CompileShaderEffectAsync(
 			// 解析失败
 			auto lk = _shaderEffectCacheLock.lock_exclusive();
 			_shaderEffectCache.erase(cacheKey);
+			co_return;
 		}
 
 		if (saveSources) {

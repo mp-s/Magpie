@@ -30,7 +30,7 @@ private:
 
 	void _UpdateConstants() noexcept;
 
-	HRESULT _CreateTextures() noexcept;
+	HRESULT _UpdateSizeDependentResources() noexcept;
 
 	D3D12Context* _d3d12Context = nullptr;
 	const EffectOption* _effectOption = nullptr;
@@ -73,7 +73,7 @@ private:
 	// 的索引都加上 _textures.size() 作为区分。
 	SmallVector<uint32_t> _textureDescriptorMap;
 
-	bool _shouldCreateTextures = false;
+	bool _shouldUpdateSizeDependentResources = false;
 	bool _shouldUpdateConstantBuffer = false;
 };
 
