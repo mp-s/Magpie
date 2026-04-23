@@ -172,7 +172,7 @@ ScalingError ScalingWindow::_StartImpl(HWND hwndSrc) noexcept {
 		int windowWidth = 0;
 		int windowHeight = 0;
 		if (_lastWindowedRendererWidth == 0) {
-			if (_options.initialWindowedScaleFactor < 1.0f) {
+			if (_options.initialWindowedScaleFactor < 0.5f) {
 				// 根据屏幕的工作区尺寸计算
 				MONITORINFO mi{ .cbSize = sizeof(mi) };
 				if (GetMonitorInfo(hMon, &mi)) {
