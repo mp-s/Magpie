@@ -136,8 +136,3 @@ if args.pfx_path != "":
         glob.glob(programFilesX86Path + "\\Windows Kits\\10\\bin\\10.*")
     )
     passwordOption = "" if args.pfx_password == "" else f'/p "{args.pfx_password}"'
-    p = subprocess.run(
-        f'"{windowsSdkDir}\\x64\\signtool.exe" sign /fd SHA256 /a /f "{pfxPath}" {passwordOption} TouchHelper.exe'
-    )
-    if p.returncode != 0:
-        raise Exception("签名失败")
