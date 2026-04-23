@@ -31,7 +31,7 @@ jobs:
         key: Conan-${{ hashFiles('src/**/conanfile.txt') }}-${{ matrix.compiler }}-${{ matrix.platform }}
 
     - name: Build
-      if: github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main'
+      if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
       run: python scripts/publish.py --compiler=${{ matrix.compiler }} --platform=${{ matrix.platform }}
 
     - name: Save hash
