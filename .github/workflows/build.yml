@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         compiler: ["MSVC", "ClangCL"]
-        platform: ["x64", "ARM64"]
+        platform: ["x64"]
 
     steps:
     - uses: actions/checkout@v5
@@ -33,10 +33,6 @@ jobs:
     - name: Build
       if: github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main'
       run: python scripts/publish.py --compiler=${{ matrix.compiler }} --platform=${{ matrix.platform }}
-
-    - name: Build and sign
-      if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
-      run: python scripts/publish.py --compiler=${{ matrix.compiler }} --platform=${{ matrix.platform }} --pfx-path=certs\Magpie.pfx --pfx-password="${{ secrets.MAGPIE_PFX_PASSWORD }}"
 
     - name: Save hash
       id: hash
